@@ -2,7 +2,7 @@ import type { LeaksData, FunnelData } from "@/types/artifacts";
 import { leakPct } from "@/lib/data/chartMath";
 import { ArtifactShell } from "./ArtifactShell";
 
-function LeaksCard({ data }: { data: LeaksData }) {
+export function LeaksCard({ data }: { data: LeaksData }) {
   const maxWasted = Math.max(...data.items.map((l) => l.wasted));
   return (
     <div className="min-w-[260px] flex-[1.25] rounded-card border border-line-3 bg-surface-card p-[16px_18px]">
@@ -55,7 +55,7 @@ function LeaksCard({ data }: { data: LeaksData }) {
   );
 }
 
-function FunnelCard({ data }: { data: FunnelData }) {
+export function FunnelCard({ data }: { data: FunnelData }) {
   return (
     <div className="min-w-[230px] flex-1 rounded-card border border-line-3 bg-surface-card p-[16px_18px]">
       <div className="mb-[14px] font-sans text-[14.5px] font-semibold">Conversion funnel</div>
