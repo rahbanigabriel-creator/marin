@@ -1,4 +1,4 @@
-import type { AnswerData } from "@/types/artifacts";
+import type { Scenario } from "@/types/scenario";
 import { gatesForStep } from "@/lib/streaming/stepModel";
 import { UserBubble } from "@/components/chat/UserBubble";
 import { AssistantBlock } from "@/components/chat/AssistantBlock";
@@ -9,20 +9,13 @@ interface ThreadViewProps {
   step: number;
   typed: string;
   question: string;
-  answer: AnswerData;
+  scenario: Scenario;
   onSend: (text: string) => void;
   onSuggest: (text: string) => void;
 }
 
-export function ThreadView({
-  step,
-  typed,
-  question,
-  answer,
-  onSend,
-  onSuggest,
-}: ThreadViewProps) {
-  const g = gatesForStep(step, typed.length, answer.lead.length);
+export function ThreadView({ step, typed, question, scenario, onSend, onSuggest }: ThreadViewProps) {
+  const g = gatesForStep(step, typed.length, scenario.lead.length);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-surface-page">
@@ -31,9 +24,11 @@ export function ThreadView({
         <AssistantBlock
           step={step}
           typed={typed}
-          answer={answer}
+          lead={scenario.lead}
+          chips={scenario.chips}
+          closing={scenario.closing}
           variant="thread"
-          inlineCanvas={g.canvasReady ? <AnswerCanvas step={step} answer={answer} /> : null}
+          inlineCanvas={g.canvasReady ? <AnswerCanvas step={step} artifacts={scenario.artifacts} /> : null}
         />
       </div>
       <div

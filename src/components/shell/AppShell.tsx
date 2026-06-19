@@ -2,12 +2,10 @@
 
 import { useCallback, useState } from "react";
 import type { Channel, Mode } from "@/types/views";
-import {
-  CANONICAL_ANSWER,
-  DEFAULT_CHANNELS,
-  DEFAULT_QUESTION,
-  RECENT_CHATS,
-} from "@/lib/data/canonical";
+import type { Persona, Scenario } from "@/types/scenario";
+import { DEFAULT_CHANNELS, DEFAULT_QUESTION, RECENT_CHATS } from "@/lib/data/canonical";
+import { SCENARIOS } from "@/lib/scenarios/registry";
+import { resolveScenario } from "@/lib/scenarios/resolve";
 import { useStreamingDemo } from "@/hooks/useStreamingDemo";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
@@ -17,31 +15,49 @@ import { ReportView } from "@/components/views/ReportView";
 import { ConnectionsModal } from "@/components/modals/ConnectionsModal";
 
 /**
- * Top-level orchestrator. Owns view mode, the active question, channel
- * connection state, the modal, and the active recent-chat selection. The
- * streaming surface ({ step, typed }, replay) comes from useStreamingDemo —
- * in the real product this is swapped for an SSE-backed hook without touching
- * any view.
+ * Top-level orchestrator. Owns view mode, the active question + resolved
+ * scenario, channel state, the modal, and the active recent-chat selection. The
+ * streaming surface ({ step, typed }, replay) comes from useStreamingDemo, fed
+ * the active scenario's lead — in the real product this is swapped for an
+ * SSE-backed hook without touching any view.
  */
 export function AppShell() {
-  const { state, replay } = useStreamingDemo();
-  const { step, typed } = state;
-
+  // Persona becomes user-switchable in Slice 2; founder is the default.
+  const [persona] = useState<Persona>("founder");
   const [mode, setMode] = useState<Mode>("split");
   const [question, setQuestion] = useState(DEFAULT_QUESTION);
+  const [scenario, setScenario] = useState<Scenario>(() =>
+    resolveScenario(DEFAULT_QUESTION, "founder", SCENARIOS),
+  );
   const [channels, setChannels] = useState<Channel[]>(DEFAULT_CHANNELS);
   const [modalOpen, setModalOpen] = useState(false);
   const [activeChat, setActiveChat] = useState(0);
 
-  const answer = CANONICAL_ANSWER;
+  const { state, replay } = useStreamingDemo(scenario.lead);
+  const { step, typed } = state;
 
-  const send = useCallback(
+  // Ask a question → resolve to a canned scenario → restream it.
+  const ask = useCallback(
     (text: string) => {
       const trimmed = text.trim();
-      if (trimmed) setQuestion(trimmed);
+      if (!trimmed) return;
+      setQuestion(trimmed);
+      setScenario(resolveScenario(trimmed, persona, SCENARIOS));
       replay();
     },
-    [replay],
+    [persona, replay],
+  );
+
+  // Selecting a recent chat re-asks its question and restreams.
+  const selectChat = useCallback(
+    (index: number) => {
+      setActiveChat(index);
+      const q = RECENT_CHATS[index].question;
+      setQuestion(q);
+      setScenario(resolveScenario(q, persona, SCENARIOS));
+      replay();
+    },
+    [persona, replay],
   );
 
   const toggleChannel = useCallback((index: number) => {
@@ -53,17 +69,6 @@ export function AppShell() {
       ),
     );
   }, []);
-
-  // Selecting a recent chat re-asks its question, restreams the answer, and
-  // (via activeChat) retitles the top bar.
-  const selectChat = useCallback(
-    (index: number) => {
-      setActiveChat(index);
-      setQuestion(RECENT_CHATS[index].question);
-      replay();
-    },
-    [replay],
-  );
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-surface-page">
@@ -80,7 +85,7 @@ export function AppShell() {
           mode={mode}
           onSetMode={setMode}
           onReplay={replay}
-          title={RECENT_CHATS[activeChat].title}
+          title={scenario.title}
           channels={channels}
         />
 
@@ -89,9 +94,9 @@ export function AppShell() {
             step={step}
             typed={typed}
             question={question}
-            answer={answer}
-            onSend={send}
-            onSuggest={send}
+            scenario={scenario}
+            onSend={ask}
+            onSuggest={ask}
           />
         )}
         {mode === "thread" && (
@@ -99,13 +104,13 @@ export function AppShell() {
             step={step}
             typed={typed}
             question={question}
-            answer={answer}
-            onSend={send}
-            onSuggest={send}
+            scenario={scenario}
+            onSend={ask}
+            onSuggest={ask}
           />
         )}
         {mode === "report" && (
-          <ReportView step={step} typed={typed} question={question} answer={answer} />
+          <ReportView step={step} typed={typed} question={question} scenario={scenario} />
         )}
       </main>
 

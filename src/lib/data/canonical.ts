@@ -38,9 +38,10 @@ export const RECENT_CHATS: RecentChat[] = [
 ];
 
 export const SUGGESTIONS = [
-  "Compare TikTok vs Meta prospecting",
-  "Draft a Q3 budget reallocation",
-  "Audit branded search efficiency",
+  "Which platform is performing best?",
+  "Is my marketing working — should I cut or raise budget?",
+  "Why is my CPA going up?",
+  "Do I have a tracking problem?",
 ];
 
 export const DEFAULT_CHANNELS: Channel[] = [

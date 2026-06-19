@@ -7,6 +7,10 @@ import type {
   RecommendationsData,
   CampaignDraftData,
   ResultChip,
+  PlatformComparisonData,
+  HealthVerdictData,
+  RootCauseData,
+  TrackingHealthData,
 } from "@/types/artifacts";
 
 /**
@@ -22,9 +26,13 @@ export type ArtifactKind =
   | "leaks"
   | "funnel"
   | "recommendations"
-  | "campaign";
+  | "campaign"
+  | "platformComparison"
+  | "healthVerdict"
+  | "rootCause"
+  | "trackingHealth";
 
-/** step at which each artifact reveals (from the README timeline). */
+/** Base reveal step per artifact kind (the canvas enforces monotonic order on top). */
 export const STEP_FOR_KIND: Record<ArtifactKind, number> = {
   kpis: 2,
   chart: 3,
@@ -32,6 +40,10 @@ export const STEP_FOR_KIND: Record<ArtifactKind, number> = {
   funnel: 4,
   recommendations: 5,
   campaign: 6,
+  platformComparison: 3,
+  healthVerdict: 3,
+  rootCause: 3,
+  trackingHealth: 3,
 };
 
 export type ArtifactPayload =
@@ -40,7 +52,11 @@ export type ArtifactPayload =
   | { kind: "leaks"; data: LeaksData }
   | { kind: "funnel"; data: FunnelData }
   | { kind: "recommendations"; data: RecommendationsData }
-  | { kind: "campaign"; data: CampaignDraftData };
+  | { kind: "campaign"; data: CampaignDraftData }
+  | { kind: "platformComparison"; data: PlatformComparisonData }
+  | { kind: "healthVerdict"; data: HealthVerdictData }
+  | { kind: "rootCause"; data: RootCauseData }
+  | { kind: "trackingHealth"; data: TrackingHealthData };
 
 export type StreamEvent =
   | { type: "start"; question: string }

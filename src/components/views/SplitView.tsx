@@ -1,4 +1,4 @@
-import type { AnswerData } from "@/types/artifacts";
+import type { Scenario } from "@/types/scenario";
 import { gatesForStep } from "@/lib/streaming/stepModel";
 import { UserBubble } from "@/components/chat/UserBubble";
 import { AssistantBlock } from "@/components/chat/AssistantBlock";
@@ -10,20 +10,13 @@ interface SplitViewProps {
   step: number;
   typed: string;
   question: string;
-  answer: AnswerData;
+  scenario: Scenario;
   onSend: (text: string) => void;
   onSuggest: (text: string) => void;
 }
 
-export function SplitView({
-  step,
-  typed,
-  question,
-  answer,
-  onSend,
-  onSuggest,
-}: SplitViewProps) {
-  const g = gatesForStep(step, typed.length, answer.lead.length);
+export function SplitView({ step, typed, question, scenario, onSend, onSuggest }: SplitViewProps) {
+  const g = gatesForStep(step, typed.length, scenario.lead.length);
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -31,7 +24,14 @@ export function SplitView({
       <div className="flex w-chat flex-none flex-col border-r border-line-2 bg-surface-panel min-h-0">
         <div className="flex min-h-0 flex-1 flex-col gap-[20px] overflow-y-auto p-[24px_22px]">
           <UserBubble text={question} variant="split" />
-          <AssistantBlock step={step} typed={typed} answer={answer} variant="split" />
+          <AssistantBlock
+            step={step}
+            typed={typed}
+            lead={scenario.lead}
+            chips={scenario.chips}
+            closing={scenario.closing}
+            variant="split"
+          />
         </div>
         <Composer variant="split" onSend={onSend} onSuggest={onSuggest} />
       </div>
@@ -47,7 +47,7 @@ export function SplitView({
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-[24px]">
           {g.canvasReady ? (
-            <AnswerCanvas step={step} answer={answer} />
+            <AnswerCanvas step={step} artifacts={scenario.artifacts} />
           ) : (
             <div className="flex h-full min-h-[340px] flex-col items-center justify-center gap-[14px] text-ink-200">
               <ThinkingDots size={8} />

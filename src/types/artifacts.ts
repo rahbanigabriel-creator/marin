@@ -105,3 +105,50 @@ export interface AnswerData {
     thread: string;
   };
 }
+
+/* ── Additional artifact payloads (mockup scenarios) ───────────────────── */
+
+export interface PlatformComparisonData {
+  title: string;
+  sub: string;
+  rows: {
+    platform: string;
+    /** brand swatch */
+    color: string;
+    spend: string;
+    roas: string;
+    /** ROAS as a number, for the relative bar */
+    roasValue: number;
+    cpa: string;
+    verdict: "best" | "watch" | "cut";
+  }[];
+}
+
+export type VerdictStatus = "healthy" | "at-risk" | "declining";
+
+export interface HealthVerdictData {
+  status: VerdictStatus;
+  headline: string;
+  sub: string;
+  metrics: { label: string; value: string; tone: Tone }[];
+  recommendation: string;
+}
+
+export interface RootCauseData {
+  /** the metric that moved, e.g. "CPA" */
+  metric: string;
+  /** the change, e.g. "+18%" */
+  change: string;
+  tone: Tone;
+  summary: string;
+  /** ordered cause cascade */
+  drivers: { label: string; detail: string; impact: string }[];
+}
+
+export type CheckStatus = "pass" | "warn" | "fail";
+
+export interface TrackingHealthData {
+  title: string;
+  summary: string;
+  checks: { label: string; status: CheckStatus; detail: string }[];
+}

@@ -1,4 +1,4 @@
-import type { AnswerData } from "@/types/artifacts";
+import type { ResultChip } from "@/types/artifacts";
 import { gatesForStep, caretOn } from "@/lib/streaming/stepModel";
 import { ThinkingDots } from "@/components/ui/ThinkingDots";
 import { TypewriterText } from "./TypewriterText";
@@ -8,7 +8,9 @@ import { RichLine } from "./RichLine";
 interface AssistantBlockProps {
   step: number;
   typed: string;
-  answer: AnswerData;
+  lead: string;
+  chips: ResultChip[];
+  closing: { split: string; thread: string };
   variant: "split" | "thread";
   /** Thread mode renders the canvas inline between typed text and closing. */
   inlineCanvas?: React.ReactNode;
@@ -17,12 +19,14 @@ interface AssistantBlockProps {
 export function AssistantBlock({
   step,
   typed,
-  answer,
+  lead,
+  chips,
+  closing,
   variant,
   inlineCanvas,
 }: AssistantBlockProps) {
-  const g = gatesForStep(step, typed.length, answer.lead.length);
-  const showCaret = caretOn(step, typed.length, answer.lead.length);
+  const g = gatesForStep(step, typed.length, lead.length);
+  const showCaret = caretOn(step, typed.length, lead.length);
 
   const avatarSize = variant === "thread" ? 30 : 27;
   const avatarRadius = variant === "thread" ? 9 : 8;
@@ -73,13 +77,13 @@ export function AssistantBlock({
           </div>
         )}
 
-        {variant === "split" && g.showChips && <ResultChips chips={answer.chips} />}
+        {variant === "split" && g.showChips && <ResultChips chips={chips} />}
 
         {variant === "thread" && inlineCanvas && <div className="mt-[16px]">{inlineCanvas}</div>}
 
         {g.showClosing && (
           <RichLine
-            text={variant === "thread" ? answer.closing.thread : answer.closing.split}
+            text={variant === "thread" ? closing.thread : closing.split}
             className="animate-fadeUp mt-[14px] font-sans text-ink-800"
           />
         )}
