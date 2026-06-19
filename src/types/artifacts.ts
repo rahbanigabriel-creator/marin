@@ -1,0 +1,107 @@
+/**
+ * Artifact payload types — the response schema the Answer Canvas renders.
+ * These mirror the canonical objects in AnswerCanvas.dc.html exactly and are
+ * shared by both the mock streaming demo and the (future) real /api/chat
+ * streamed responses.
+ */
+
+export type Tone = "good" | "bad" | "neutral";
+export type ChipTone = "good" | "bad" | "neutral" | "clay";
+
+export interface KpiCardData {
+  label: string;
+  value: string;
+  delta: string;
+  tone: Tone;
+  /** spark polyline stroke color */
+  sparkColor: string;
+  /** raw sparkline data; the card normalizes within its own min/max */
+  spark: number[];
+}
+
+export interface ComboChartData {
+  title: string;
+  sub: string;
+  /** 14 daily spend values */
+  spend: number[];
+  /** 14 daily ROAS values */
+  roas: number[];
+}
+
+export interface Leak {
+  channel: string;
+  name: string;
+  /** wasted euros per month */
+  wasted: number;
+  /** ROAS label, e.g. "0.9×" */
+  roas: string;
+}
+
+export interface LeaksData {
+  total: string;
+  items: Leak[];
+}
+
+export interface FunnelStage {
+  label: string;
+  value: string;
+  /** bar width percentage 0–100 */
+  widthPct: number;
+  /** conversion rate label, e.g. "3.6% CTR" or "—" */
+  rate: string;
+  color: string;
+}
+
+export interface FunnelData {
+  stages: FunnelStage[];
+}
+
+export type RecommendationTag = "Quick win" | "Growth" | "Cleanup";
+
+export interface Recommendation {
+  id: string;
+  tag: RecommendationTag;
+  title: string;
+  body: string;
+  impact: string;
+}
+
+export interface RecommendationsData {
+  items: Recommendation[];
+}
+
+export interface CampaignDraftData {
+  title: string;
+  sub: string;
+  spec: {
+    objective: string;
+    budget: string;
+    audience: string;
+    estRoas: string;
+  };
+  /** creative variant labels, e.g. "9:16 · A" */
+  creatives: string[];
+  explainer: string;
+}
+
+export interface ResultChip {
+  label: string;
+  tone: ChipTone;
+}
+
+/** The complete visual answer payload assembled for one question. */
+export interface AnswerData {
+  lead: string;
+  chips: ResultChip[];
+  kpis: KpiCardData[];
+  chart: ComboChartData;
+  leaks: LeaksData;
+  funnel: FunnelData;
+  recommendations: RecommendationsData;
+  campaign: CampaignDraftData;
+  /** closing line variants per view */
+  closing: {
+    split: string;
+    thread: string;
+  };
+}

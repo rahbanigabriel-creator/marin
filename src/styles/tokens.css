@@ -1,0 +1,74 @@
+/**
+ * Marin color tokens — exact hex values from the design handoff README.
+ * Grouped to match the spec's "Design Tokens → Colors" section.
+ */
+:root {
+  /* Brand / accent (plum) */
+  --plum: #9a3d63;
+  --plum-deep: #7e2f50;
+  --plum-muted: #8a3357;
+  --plum-muted-2: #8a4a66;
+  --plum-soft: #f2e2ea;
+  --plum-grad-light: #c57e9c;
+  --plum-border: #e6d2dc;
+  --plum-hairline: #e2c6d2;
+
+  /* Funnel ramp */
+  --funnel-1: #c8a9b8;
+  --funnel-2: #be8da4;
+  --funnel-3: #b06487;
+  --funnel-4: #9a3d63;
+  --funnel-5: #7e2f50;
+
+  /* Ink / text (warm) */
+  --ink-900: #2b2722;
+  --ink-800: #3a352d;
+  --ink-700: #4a443b;
+  --ink-600: #5a544a;
+  --ink-500: #6b6359;
+  --ink-450: #7c7264;
+  --ink-400: #857b6d;
+  --ink-380: #8a8072;
+  --ink-300: #9a9183;
+  --ink-200: #a89d8b;
+
+  /* Surfaces / neutrals (cool greige) */
+  --surface-page: #f2f1ec;
+  --surface-panel: #f4f4ef;
+  --surface-chip: #f9f9f4;
+  --surface-rec: #fafaf6;
+  --surface-card: #ffffff;
+  --surface-sidebar: #e9e8e1;
+
+  /* Borders / hairlines */
+  --border-1: #deddd4;
+  --border-2: #e3e1da;
+  --border-3: #e5e3db;
+  --border-4: #e9e7df;
+  --border-5: #e4e1d7;
+  --border-6: #e3e0d6;
+  --border-seg: #e4e3db;
+
+  /* Tracks / fills */
+  --track-1: #efeee7;
+  --track-2: #f1f0e9;
+  --track-grid: #edece4;
+  --track-base: #e5e3da;
+  --chart-bar: #dbd7cc;
+  --hairline-faux: #eae8e0;
+  --btn-outline: #dddbd2;
+
+  /* Semantic — positive (green) */
+  --pos-700: #4c6b40;
+  --pos-500: #5e7b52;
+  --pos-bg: #e7eee0;
+  --pos-soft: #6b7a5c;
+
+  /* Semantic — negative (crimson) */
+  --neg-700: #b23a4b;
+  --neg-bg: #f5e0e3;
+
+  /* Status */
+  --dot-connected: #5e7b52;
+  --dot-disconnected: #c9a24a;
+}
