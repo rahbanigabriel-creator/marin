@@ -3,21 +3,33 @@
  * hand-rolled SVG charts reproduce the prototype pixel-for-pixel.
  */
 
-/** Sparkline polyline points string for a KPI card (viewBox 0 0 80 28). */
-export function sparkPoints(arr: number[]): string {
+export interface SparkPoint {
+  x: number;
+  y: number;
+  value: number;
+}
+
+export interface SparkGeometry {
+  /** per-datum points (viewBox coords) carrying the raw value for tooltips */
+  points: SparkPoint[];
+  /** polyline `points` string */
+  line: string;
+}
+
+/** Sparkline geometry for a KPI card (viewBox 0 0 80 28). */
+export function sparkGeometry(arr: number[]): SparkGeometry {
   const W = 80;
   const H = 28;
   const p = 3;
   const mn = Math.min(...arr);
   const mx = Math.max(...arr);
   const d = mx - mn || 1;
-  return arr
-    .map((v, i) => {
-      const x = p + ((W - 2 * p) * i) / (arr.length - 1);
-      const y = p + (H - 2 * p) * (1 - (v - mn) / d);
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
+  const points = arr.map((v, i) => {
+    const x = +(p + ((W - 2 * p) * i) / (arr.length - 1)).toFixed(1);
+    const y = +(p + (H - 2 * p) * (1 - (v - mn) / d)).toFixed(1);
+    return { x, y, value: v };
+  });
+  return { points, line: points.map((pt) => `${pt.x},${pt.y}`).join(" ") };
 }
 
 export interface Bar {
@@ -32,6 +44,10 @@ export interface ComboChartGeometry {
   roasLine: string;
   lastX: number;
   lastY: number;
+  /** ROAS vertices (viewBox coords), one per day */
+  points: Array<{ x: number; y: number }>;
+  /** full-height hover/click columns: left x, width, and center x per day */
+  bands: Array<{ x: number; w: number; cx: number }>;
 }
 
 /** Combo chart geometry (viewBox 0 0 360 150). */
@@ -68,7 +84,14 @@ export function comboChartGeometry(spend: number[], roas: number[]): ComboChartG
   const roasLine = pts.map((p) => p.join(",")).join(" ");
   const last = pts[pts.length - 1];
 
-  return { bars, roasLine, lastX: last[0], lastY: last[1] };
+  const points = pts.map(([x, y]) => ({ x, y }));
+  const bands = spend.map((_, i) => ({
+    x: +(padX + (innerW * i) / n).toFixed(1),
+    w: +(innerW / n).toFixed(1),
+    cx: +(padX + (innerW * (i + 0.5)) / n).toFixed(1),
+  }));
+
+  return { bars, roasLine, lastX: last[0], lastY: last[1], points, bands };
 }
 
 /** Leak bar width percentages (relative to the largest leak). */

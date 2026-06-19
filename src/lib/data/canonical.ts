@@ -1,5 +1,5 @@
 import type { AnswerData } from "@/types/artifacts";
-import type { Channel } from "@/types/views";
+import type { Channel, RecentChat } from "@/types/views";
 
 /**
  * Canonical source-of-truth data, transcribed verbatim from the design handoff
@@ -14,12 +14,27 @@ export const LEAD_TEXT =
 export const DEFAULT_QUESTION =
   "Where am I wasting ad spend this month across Google and Meta — and what should I do about it?";
 
-export const RECENT_CHATS = [
-  "Wasted ad spend audit",
-  "TikTok creative test plan",
-  "Branded search efficiency",
-  "GA4 path attribution",
-  "Holiday budget plan",
+export const RECENT_CHATS: RecentChat[] = [
+  { title: "Wasted ad spend audit", question: DEFAULT_QUESTION },
+  {
+    title: "TikTok creative test plan",
+    question:
+      "Design a TikTok creative test plan for next month — hooks, formats, and budget split.",
+  },
+  {
+    title: "Branded search efficiency",
+    question:
+      "Is my branded search spend efficient, or am I paying for clicks I'd win organically?",
+  },
+  {
+    title: "GA4 path attribution",
+    question:
+      "Walk me through the top GA4 conversion paths and where attribution credit is going.",
+  },
+  {
+    title: "Holiday budget plan",
+    question: "Build a holiday-season budget plan across Google, Meta, and TikTok.",
+  },
 ];
 
 export const SUGGESTIONS = [

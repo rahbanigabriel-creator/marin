@@ -1,11 +1,14 @@
 "use client";
 
-import type { Mode } from "@/types/views";
+import type { Channel, Mode } from "@/types/views";
 
 interface TopBarProps {
   mode: Mode;
   onSetMode: (mode: Mode) => void;
   onReplay: () => void;
+  /** active conversation title */
+  title: string;
+  channels: Channel[];
 }
 
 const TABS: Array<{ mode: Mode; label: string }> = [
@@ -14,16 +17,30 @@ const TABS: Array<{ mode: Mode; label: string }> = [
   { mode: "report", label: "Report" },
 ];
 
-export function TopBar({ mode, onSetMode, onReplay }: TopBarProps) {
+export function TopBar({ mode, onSetMode, onReplay, title, channels }: TopBarProps) {
+  const connected = channels.filter((c) => c.status === "connected").map((c) => c.name);
+  const channelSummary =
+    connected.length === 0
+      ? "No channels connected"
+      : connected.slice(0, 3).join(" · ") +
+        (connected.length > 3 ? ` +${connected.length - 3}` : "");
+
   return (
     <header className="flex h-topbar flex-none items-center justify-between gap-[16px] border-b border-line-2 bg-surface-panel px-[20px]">
       <div className="flex min-w-0 items-center gap-[12px]">
         <span className="overflow-hidden text-ellipsis whitespace-nowrap font-sans text-[14.5px] font-semibold text-ink-900">
-          Wasted ad spend audit
+          {title}
         </span>
         <span className="flex flex-none items-center gap-[5px] font-sans text-[11px] font-medium text-ink-300">
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#5E7B52" }} />
-          Google Ads · Meta · GA4
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              background: connected.length ? "#5E7B52" : "#C9A24A",
+            }}
+          />
+          {channelSummary}
         </span>
       </div>
       <div className="flex flex-none items-center gap-[10px]">

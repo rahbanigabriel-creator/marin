@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { Channel } from "@/types/views";
 import { RECENT_CHATS } from "@/lib/data/canonical";
 
@@ -9,7 +10,6 @@ interface SidebarProps {
   channels: Channel[];
   onNewChat: () => void;
   onOpenModal: () => void;
-  onChannelClick: (channel: Channel) => void;
 }
 
 export function Sidebar({
@@ -18,8 +18,9 @@ export function Sidebar({
   channels,
   onNewChat,
   onOpenModal,
-  onChannelClick,
 }: SidebarProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+
   return (
     <aside className="flex w-sidebar flex-none flex-col border-r border-line-1 bg-surface-sidebar p-[16px_12px_12px]">
       {/* brand */}
@@ -56,9 +57,9 @@ export function Sidebar({
         <div className="p-[6px_8px_5px] font-mono text-[10.5px] font-semibold tracking-[0.08em] text-ink-200">
           RECENT
         </div>
-        {RECENT_CHATS.map((title, i) => (
+        {RECENT_CHATS.map((chat, i) => (
           <div
-            key={title}
+            key={chat.title}
             onClick={() => onSelectChat(i)}
             className="cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap rounded-chip p-[8px_10px] font-sans text-[13px]"
             style={
@@ -67,7 +68,7 @@ export function Sidebar({
                 : { color: "#5A544A", fontWeight: 500 }
             }
           >
-            {title}
+            {chat.title}
           </div>
         ))}
 
@@ -79,7 +80,7 @@ export function Sidebar({
           return (
             <div
               key={ch.name}
-              onClick={() => onChannelClick(ch)}
+              onClick={onOpenModal}
               className="flex cursor-pointer items-center gap-[9px] rounded-chip p-[7px_8px]"
             >
               <span
@@ -116,24 +117,80 @@ export function Sidebar({
       </div>
 
       {/* account */}
-      <div className="mt-[8px] flex items-center gap-[10px] border-t border-line-1 p-[10px_8px]">
-        <div
-          className="flex items-center justify-center font-sans text-[12px] font-semibold"
-          style={{
-            width: 30,
-            height: 30,
-            borderRadius: "50%",
-            background: "linear-gradient(135deg,#8A8B6F,#5E7B52)",
-            color: "#FBF6EE",
-          }}
-        >
-          AL
+      <div className="relative mt-[8px] border-t border-line-1">
+        {menuOpen && (
+          <>
+            {/* click-away backdrop */}
+            <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+            <div className="animate-fadeUpFast absolute bottom-full left-0 right-0 z-50 mb-[6px] overflow-hidden rounded-btn border border-line-1 bg-surface-card shadow-modal">
+              <div className="border-b border-line-3 p-[10px_12px]">
+                <div className="font-sans text-[12.5px] font-semibold text-ink-900">
+                  Alex Lemoine
+                </div>
+                <div className="font-sans text-[11px] text-ink-300">alex@northwind.co</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onOpenModal();
+                }}
+                className="block w-full cursor-pointer border-none bg-transparent p-[9px_12px] text-left font-sans text-[12.5px] font-medium text-ink-800 hover:bg-surface-chip"
+              >
+                Manage connections
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onNewChat();
+                }}
+                className="block w-full cursor-pointer border-none bg-transparent p-[9px_12px] text-left font-sans text-[12.5px] font-medium text-ink-800 hover:bg-surface-chip"
+              >
+                New conversation
+              </button>
+              <button
+                type="button"
+                onClick={() => setMenuOpen(false)}
+                className="block w-full cursor-pointer border-t border-line-3 bg-transparent p-[9px_12px] text-left font-sans text-[12.5px] font-medium text-plum-deep hover:bg-surface-chip"
+              >
+                Sign out
+              </button>
+            </div>
+          </>
+        )}
+        <div className="flex items-center gap-[10px] p-[10px_8px]">
+          <div
+            className="flex items-center justify-center font-sans text-[12px] font-semibold"
+            style={{
+              width: 30,
+              height: 30,
+              borderRadius: "50%",
+              background: "linear-gradient(135deg,#8A8B6F,#5E7B52)",
+              color: "#FBF6EE",
+            }}
+          >
+            AL
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="font-sans text-[12.5px] font-semibold text-ink-900">Alex Lemoine</div>
+            <div className="font-sans text-[11px] text-ink-300">Northwind · Growth</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setMenuOpen((o) => !o)}
+            aria-label="Account menu"
+            aria-expanded={menuOpen}
+            className="cursor-pointer border-none text-[15px] leading-none text-ink-200 hover:text-ink-400"
+            style={{
+              background: menuOpen ? "#EFEEE7" : "transparent",
+              borderRadius: 7,
+              padding: "3px 5px",
+            }}
+          >
+            ⚙
+          </button>
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="font-sans text-[12.5px] font-semibold text-ink-900">Alex Lemoine</div>
-          <div className="font-sans text-[11px] text-ink-300">Northwind · Growth</div>
-        </div>
-        <span className="text-[15px] text-ink-200">⚙</span>
       </div>
     </aside>
   );

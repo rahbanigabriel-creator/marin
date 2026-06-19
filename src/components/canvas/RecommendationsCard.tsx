@@ -12,6 +12,8 @@ function tagStyle(tag: RecommendationTag): React.CSSProperties {
 
 export function RecommendationsCard({ data }: { data: RecommendationsData }) {
   const [approved, setApproved] = useState<Record<string, boolean>>({});
+  const [skipped, setSkipped] = useState<Record<string, boolean>>({});
+  const activeCount = data.items.length - Object.values(skipped).filter(Boolean).length;
 
   return (
     <ArtifactShell className="rounded-card border border-line-3 bg-surface-card p-[16px_18px]">
@@ -21,12 +23,44 @@ export function RecommendationsCard({ data }: { data: RecommendationsData }) {
           className="rounded-pill font-mono text-[11px] font-semibold"
           style={{ color: "#6B6359", background: "#EFEEE7", padding: "2px 7px" }}
         >
-          {data.items.length}
+          {activeCount}
         </span>
       </div>
       <div className="flex flex-col gap-[10px]">
         {data.items.map((r) => {
           const isApproved = !!approved[r.id];
+          const isSkipped = !!skipped[r.id];
+
+          if (isSkipped) {
+            return (
+              <div
+                key={r.id}
+                className="animate-fadeUpFast flex items-center justify-between gap-[14px] rounded-[12px] border border-line-4 bg-surface-rec p-[10px_14px]"
+              >
+                <span className="flex min-w-0 items-center gap-[8px]">
+                  <span className="flex-none font-sans text-[13px] text-ink-200">✕</span>
+                  <span className="overflow-hidden text-ellipsis whitespace-nowrap font-sans text-[13px] font-medium text-ink-300 line-through">
+                    {r.title}
+                  </span>
+                  <span className="flex-none font-sans text-[12px] text-ink-200">Skipped</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSkipped((s) => ({ ...s, [r.id]: false }))}
+                  className="flex-none cursor-pointer rounded-chip font-sans text-[12px] font-semibold"
+                  style={{
+                    border: "1px solid #DDDBD2",
+                    background: "transparent",
+                    color: "#8A8072",
+                    padding: "5px 11px",
+                  }}
+                >
+                  Undo
+                </button>
+              </div>
+            );
+          }
+
           return (
             <div
               key={r.id}
@@ -76,6 +110,7 @@ export function RecommendationsCard({ data }: { data: RecommendationsData }) {
                     </button>
                     <button
                       type="button"
+                      onClick={() => setSkipped((s) => ({ ...s, [r.id]: true }))}
                       className="cursor-pointer rounded-chip font-sans text-[12px] font-semibold"
                       style={{
                         border: "1px solid #DDDBD2",

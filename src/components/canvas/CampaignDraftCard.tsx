@@ -18,8 +18,52 @@ function SpecCell({ label, value, mono, color }: { label: string; value: string;
   );
 }
 
+function EditField({
+  label,
+  value,
+  mono,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-[5px]">
+      <span className="font-sans text-[11px] font-medium text-ink-300">{label}</span>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={`rounded-[9px] border border-line-1 bg-surface-card p-[8px_10px] text-[13.5px] font-semibold text-ink-900 outline-none focus:border-plum ${
+          mono ? "font-mono" : "font-sans"
+        }`}
+      />
+    </label>
+  );
+}
+
 export function CampaignDraftCard({ data }: { data: CampaignDraftData }) {
   const [launched, setLaunched] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [spec, setSpec] = useState(data.spec);
+  const [draft, setDraft] = useState(data.spec);
+  const [edited, setEdited] = useState(false);
+
+  function openEditor() {
+    setDraft(spec);
+    setEditing(true);
+  }
+
+  function save() {
+    setSpec(draft);
+    setEdited(
+      draft.objective !== data.spec.objective ||
+        draft.budget !== data.spec.budget ||
+        draft.audience !== data.spec.audience,
+    );
+    setEditing(false);
+  }
 
   return (
     <ArtifactShell
@@ -38,7 +82,17 @@ export function CampaignDraftCard({ data }: { data: CampaignDraftData }) {
             }}
           />
           <div>
-            <div className="font-sans text-[15px] font-semibold text-ink-900">{data.title}</div>
+            <div className="flex items-center gap-[8px]">
+              <div className="font-sans text-[15px] font-semibold text-ink-900">{data.title}</div>
+              {edited && (
+                <span
+                  className="flex-none rounded-pill font-mono text-[10px] font-semibold"
+                  style={{ color: "#8A4A66", background: "#F2E2EA", padding: "2px 7px" }}
+                >
+                  Edited
+                </span>
+              )}
+            </div>
             <div className="mt-[1px] font-sans text-[12px] text-ink-300">{data.sub}</div>
           </div>
         </div>
@@ -52,10 +106,10 @@ export function CampaignDraftCard({ data }: { data: CampaignDraftData }) {
           background: "#EAE8E0",
         }}
       >
-        <SpecCell label="Objective" value={data.spec.objective} />
-        <SpecCell label="Monthly budget" value={data.spec.budget} mono />
-        <SpecCell label="Audience" value={data.spec.audience} />
-        <SpecCell label="Est. ROAS" value={data.spec.estRoas} mono color="#4C6B40" />
+        <SpecCell label="Objective" value={spec.objective} />
+        <SpecCell label="Monthly budget" value={spec.budget} mono />
+        <SpecCell label="Audience" value={spec.audience} />
+        <SpecCell label="Est. ROAS" value={spec.estRoas} mono color="#4C6B40" />
       </div>
 
       <div className="mb-[8px] font-sans text-[11px] font-medium text-ink-300">
@@ -95,6 +149,53 @@ export function CampaignDraftCard({ data }: { data: CampaignDraftData }) {
             Live in TikTok Ads Manager · first results in ~24h
           </span>
         </div>
+      ) : editing ? (
+        <div className="animate-fadeUpFast flex flex-col gap-[12px]">
+          <div
+            className="grid gap-[10px]"
+            style={{ gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))" }}
+          >
+            <EditField
+              label="Objective"
+              value={draft.objective}
+              onChange={(v) => setDraft((d) => ({ ...d, objective: v }))}
+            />
+            <EditField
+              label="Monthly budget"
+              value={draft.budget}
+              mono
+              onChange={(v) => setDraft((d) => ({ ...d, budget: v }))}
+            />
+            <EditField
+              label="Audience"
+              value={draft.audience}
+              onChange={(v) => setDraft((d) => ({ ...d, audience: v }))}
+            />
+          </div>
+          <div className="flex gap-[9px]">
+            <button
+              type="button"
+              onClick={save}
+              className="cursor-pointer rounded-[9px] font-sans text-[13px] font-semibold"
+              style={{ border: "none", background: "#2B2722", color: "#F2F1EC", padding: "9px 18px" }}
+            >
+              Save draft
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditing(false)}
+              className="cursor-pointer rounded-[9px] font-sans text-[13px] font-semibold"
+              style={{
+                border: "1px solid #DDDBD2",
+                background: "#FFFFFF",
+                color: "#6B6359",
+                padding: "9px 16px",
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
       ) : (
         <div className="flex gap-[9px]">
           <button
@@ -107,6 +208,7 @@ export function CampaignDraftCard({ data }: { data: CampaignDraftData }) {
           </button>
           <button
             type="button"
+            onClick={openEditor}
             className="cursor-pointer rounded-[9px] font-sans text-[13px] font-semibold"
             style={{
               border: "1px solid #DDDBD2",

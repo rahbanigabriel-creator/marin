@@ -2,7 +2,12 @@
 
 import { useCallback, useState } from "react";
 import type { Channel, Mode } from "@/types/views";
-import { CANONICAL_ANSWER, DEFAULT_CHANNELS, DEFAULT_QUESTION } from "@/lib/data/canonical";
+import {
+  CANONICAL_ANSWER,
+  DEFAULT_CHANNELS,
+  DEFAULT_QUESTION,
+  RECENT_CHATS,
+} from "@/lib/data/canonical";
 import { useStreamingDemo } from "@/hooks/useStreamingDemo";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
@@ -49,26 +54,35 @@ export function AppShell() {
     );
   }, []);
 
-  const channelClick = useCallback(
-    (channel: Channel) => {
-      if (channel.status !== "connected") setModalOpen(true);
+  // Selecting a recent chat re-asks its question, restreams the answer, and
+  // (via activeChat) retitles the top bar.
+  const selectChat = useCallback(
+    (index: number) => {
+      setActiveChat(index);
+      setQuestion(RECENT_CHATS[index].question);
+      replay();
     },
-    [],
+    [replay],
   );
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-surface-page">
       <Sidebar
         activeChat={activeChat}
-        onSelectChat={setActiveChat}
+        onSelectChat={selectChat}
         channels={channels}
         onNewChat={replay}
         onOpenModal={() => setModalOpen(true)}
-        onChannelClick={channelClick}
       />
 
       <main className="flex min-w-0 flex-1 flex-col">
-        <TopBar mode={mode} onSetMode={setMode} onReplay={replay} />
+        <TopBar
+          mode={mode}
+          onSetMode={setMode}
+          onReplay={replay}
+          title={RECENT_CHATS[activeChat].title}
+          channels={channels}
+        />
 
         {mode === "split" && (
           <SplitView
