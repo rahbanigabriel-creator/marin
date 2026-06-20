@@ -40,9 +40,10 @@ function revenueAt(b: number, c: ForecastConfig): number {
   return (c.revMax * b) / (b + c.half);
 }
 
-/** Confidence widens as budget extrapolates beyond what's been observed. */
-function bandAt(b: number): number {
-  return 0.08 + (0.1 * b) / 100_000;
+/** Confidence widens with how far the budget extrapolates from current spend. */
+function bandAt(b: number, c: ForecastConfig): number {
+  const dist = Math.abs(b - c.current) / (c.current || 1);
+  return Math.min(0.35, 0.06 + 0.18 * dist);
 }
 
 export function project(budget: number, cfg: ForecastConfig = DEFAULT_FORECAST): ForecastResultData {
@@ -50,11 +51,11 @@ export function project(budget: number, cfg: ForecastConfig = DEFAULT_FORECAST):
   const MAX = Math.max(100_000, Math.round(cfg.current * 1.6));
   const N = 24;
   const revenue = revenueAt(budget, cfg);
-  const band = bandAt(budget);
+  const band = bandAt(budget, cfg);
   const curve = Array.from({ length: N + 1 }, (_, i) => {
     const b = MIN + ((MAX - MIN) * i) / N;
     const r = revenueAt(b, cfg);
-    const bd = bandAt(b);
+    const bd = bandAt(b, cfg);
     return { budget: b, revenue: r, low: r * (1 - bd), high: r * (1 + bd) };
   });
   return {

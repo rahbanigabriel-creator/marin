@@ -104,7 +104,7 @@ export const SCENARIOS: Scenario[] = [
             { label: "Blended MER", value: "4.1×", tone: "good" },
           ],
           recommendation:
-            "Raise budget ~15% (€150k→€172.5k) for ~+€21k revenue/mo — the new spend converts at ~3.7× MER, still above your 3× floor. Hold Meta until CPA recovers.",
+            "Raise budget ~15% (€150k→€172.5k) for ~+€82k revenue/mo — the new spend converts at ~3.7× MER, still above your 3× floor. Hold Meta until CPA recovers.",
         },
       },
       { kind: "kpis", data: CEO_KPIS },

@@ -1,5 +1,5 @@
 import type { Scenario } from "@/types/scenario";
-import { project } from "@/lib/forecast/project";
+import { project, DEFAULT_FORECAST } from "@/lib/forecast/project";
 import { PLATFORM_ICON_COLORS } from "@/lib/data/canonical";
 
 export interface OnboardingIntake {
@@ -40,7 +40,7 @@ export function buildStarterPlan(intake: OnboardingIntake): Scenario {
     };
   });
 
-  const f = project(intake.budget);
+  const f = project(intake.budget, { ...DEFAULT_FORECAST, current: intake.budget });
   const business = intake.business.toLowerCase();
   const goal = intake.goal.toLowerCase();
 
