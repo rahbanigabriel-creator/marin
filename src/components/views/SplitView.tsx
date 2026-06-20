@@ -13,9 +13,18 @@ interface SplitViewProps {
   scenario: Scenario;
   onSend: (text: string) => void;
   onSuggest: (text: string) => void;
+  suggestions: string[];
 }
 
-export function SplitView({ step, typed, question, scenario, onSend, onSuggest }: SplitViewProps) {
+export function SplitView({
+  step,
+  typed,
+  question,
+  scenario,
+  onSend,
+  onSuggest,
+  suggestions,
+}: SplitViewProps) {
   const g = gatesForStep(step, typed.length, scenario.lead.length);
 
   return (
@@ -33,7 +42,7 @@ export function SplitView({ step, typed, question, scenario, onSend, onSuggest }
             variant="split"
           />
         </div>
-        <Composer variant="split" onSend={onSend} onSuggest={onSuggest} />
+        <Composer variant="split" onSend={onSend} onSuggest={onSuggest} suggestions={suggestions} />
       </div>
 
       {/* workspace pane */}

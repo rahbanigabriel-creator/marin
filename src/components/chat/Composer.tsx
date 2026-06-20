@@ -1,15 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { SUGGESTIONS } from "@/lib/data/canonical";
 
 interface ComposerProps {
   onSend: (text: string) => void;
   onSuggest: (text: string) => void;
   variant: "split" | "thread";
+  suggestions: string[];
 }
 
-export function Composer({ onSend, onSuggest, variant }: ComposerProps) {
+export function Composer({ onSend, onSuggest, variant, suggestions }: ComposerProps) {
   const [input, setInput] = useState("");
 
   function send() {
@@ -28,7 +28,7 @@ export function Composer({ onSend, onSuggest, variant }: ComposerProps) {
 
   const chips = (
     <div className="mb-[10px] flex flex-wrap gap-[7px]">
-      {SUGGESTIONS.map((s) => (
+      {suggestions.map((s) => (
         <button
           key={s}
           type="button"

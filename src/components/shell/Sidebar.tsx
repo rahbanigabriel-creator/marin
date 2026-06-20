@@ -1,13 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import type { Channel } from "@/types/views";
-import { RECENT_CHATS } from "@/lib/data/canonical";
+import type { Channel, RecentChat } from "@/types/views";
+import type { Account } from "@/lib/data/personas";
 
 interface SidebarProps {
   activeChat: number;
   onSelectChat: (i: number) => void;
+  recentChats: RecentChat[];
   channels: Channel[];
+  account: Account;
   onNewChat: () => void;
   onOpenModal: () => void;
 }
@@ -15,7 +17,9 @@ interface SidebarProps {
 export function Sidebar({
   activeChat,
   onSelectChat,
+  recentChats,
   channels,
+  account,
   onNewChat,
   onOpenModal,
 }: SidebarProps) {
@@ -57,7 +61,7 @@ export function Sidebar({
         <div className="p-[6px_8px_5px] font-mono text-[10.5px] font-semibold tracking-[0.08em] text-ink-200">
           RECENT
         </div>
-        {RECENT_CHATS.map((chat, i) => (
+        {recentChats.map((chat, i) => (
           <div
             key={chat.title}
             onClick={() => onSelectChat(i)}
@@ -85,16 +89,9 @@ export function Sidebar({
             >
               <span
                 className="flex-none"
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: "50%",
-                  background: on ? "#5E7B52" : "#C9A24A",
-                }}
+                style={{ width: 8, height: 8, borderRadius: "50%", background: on ? "#5E7B52" : "#C9A24A" }}
               />
-              <span className="flex-1 font-sans text-[13px] font-medium text-ink-800">
-                {ch.name}
-              </span>
+              <span className="flex-1 font-sans text-[13px] font-medium text-ink-800">{ch.name}</span>
               {!on && (
                 <span
                   className="rounded-pill font-sans text-[10.5px] font-semibold"
@@ -120,14 +117,11 @@ export function Sidebar({
       <div className="relative mt-[8px] border-t border-line-1">
         {menuOpen && (
           <>
-            {/* click-away backdrop */}
             <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
             <div className="animate-fadeUpFast absolute bottom-full left-0 right-0 z-50 mb-[6px] overflow-hidden rounded-btn border border-line-1 bg-surface-card shadow-modal">
               <div className="border-b border-line-3 p-[10px_12px]">
-                <div className="font-sans text-[12.5px] font-semibold text-ink-900">
-                  Alex Lemoine
-                </div>
-                <div className="font-sans text-[11px] text-ink-300">alex@northwind.co</div>
+                <div className="font-sans text-[12.5px] font-semibold text-ink-900">{account.name}</div>
+                <div className="font-sans text-[11px] text-ink-300">{account.sub}</div>
               </div>
               <button
                 type="button"
@@ -170,11 +164,11 @@ export function Sidebar({
               color: "#FBF6EE",
             }}
           >
-            AL
+            {account.initials}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="font-sans text-[12.5px] font-semibold text-ink-900">Alex Lemoine</div>
-            <div className="font-sans text-[11px] text-ink-300">Northwind · Growth</div>
+            <div className="font-sans text-[12.5px] font-semibold text-ink-900">{account.name}</div>
+            <div className="font-sans text-[11px] text-ink-300">{account.sub}</div>
           </div>
           <button
             type="button"
@@ -182,11 +176,7 @@ export function Sidebar({
             aria-label="Account menu"
             aria-expanded={menuOpen}
             className="cursor-pointer border-none text-[15px] leading-none text-ink-200 hover:text-ink-400"
-            style={{
-              background: menuOpen ? "#EFEEE7" : "transparent",
-              borderRadius: 7,
-              padding: "3px 5px",
-            }}
+            style={{ background: menuOpen ? "#EFEEE7" : "transparent", borderRadius: 7, padding: "3px 5px" }}
           >
             ⚙
           </button>

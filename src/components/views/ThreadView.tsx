@@ -12,9 +12,18 @@ interface ThreadViewProps {
   scenario: Scenario;
   onSend: (text: string) => void;
   onSuggest: (text: string) => void;
+  suggestions: string[];
 }
 
-export function ThreadView({ step, typed, question, scenario, onSend, onSuggest }: ThreadViewProps) {
+export function ThreadView({
+  step,
+  typed,
+  question,
+  scenario,
+  onSend,
+  onSuggest,
+  suggestions,
+}: ThreadViewProps) {
   const g = gatesForStep(step, typed.length, scenario.lead.length);
 
   return (
@@ -38,7 +47,7 @@ export function ThreadView({ step, typed, question, scenario, onSend, onSuggest 
         }}
       >
         <div className="mx-auto w-full max-w-thread">
-          <Composer variant="thread" onSend={onSend} onSuggest={onSuggest} />
+          <Composer variant="thread" onSend={onSend} onSuggest={onSuggest} suggestions={suggestions} />
         </div>
       </div>
     </div>

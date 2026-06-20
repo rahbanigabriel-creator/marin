@@ -1,6 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import type { Channel, Mode } from "@/types/views";
+import type { Persona } from "@/types/scenario";
+import { PERSONAS, PERSONA_ORDER } from "@/lib/data/personas";
 
 interface TopBarProps {
   mode: Mode;
@@ -9,6 +12,8 @@ interface TopBarProps {
   /** active conversation title */
   title: string;
   channels: Channel[];
+  persona: Persona;
+  onSwitchPersona: (p: Persona) => void;
 }
 
 const TABS: Array<{ mode: Mode; label: string }> = [
@@ -17,7 +22,16 @@ const TABS: Array<{ mode: Mode; label: string }> = [
   { mode: "report", label: "Report" },
 ];
 
-export function TopBar({ mode, onSetMode, onReplay, title, channels }: TopBarProps) {
+export function TopBar({
+  mode,
+  onSetMode,
+  onReplay,
+  title,
+  channels,
+  persona,
+  onSwitchPersona,
+}: TopBarProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
   const connected = channels.filter((c) => c.status === "connected").map((c) => c.name);
   const channelSummary =
     connected.length === 0
@@ -28,6 +42,58 @@ export function TopBar({ mode, onSetMode, onReplay, title, channels }: TopBarPro
   return (
     <header className="flex h-topbar flex-none items-center justify-between gap-[16px] border-b border-line-2 bg-surface-panel px-[20px]">
       <div className="flex min-w-0 items-center gap-[12px]">
+        {/* persona / demo switcher */}
+        <div className="relative flex-none">
+          <button
+            type="button"
+            onClick={() => setMenuOpen((o) => !o)}
+            aria-label="Switch demo persona"
+            aria-expanded={menuOpen}
+            className="flex cursor-pointer items-center gap-[6px] rounded-pill border border-line-1 bg-surface-chip font-sans text-[12px] font-semibold text-ink-700"
+            style={{ padding: "5px 10px" }}
+          >
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#9A3D63" }} />
+            {PERSONAS[persona].label}
+            <span className="text-ink-300">▾</span>
+          </button>
+          {menuOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+              <div className="animate-fadeUpFast absolute left-0 top-full z-50 mt-[6px] w-[230px] overflow-hidden rounded-btn border border-line-1 bg-surface-card shadow-modal">
+                <div className="border-b border-line-3 p-[8px_12px] font-mono text-[10px] font-semibold tracking-[0.06em] text-ink-300">
+                  DEMO PERSONA
+                </div>
+                {PERSONA_ORDER.map((p) => {
+                  const cfg = PERSONAS[p];
+                  const active = p === persona;
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onSwitchPersona(p);
+                      }}
+                      className="flex w-full cursor-pointer items-center justify-between border-none bg-transparent p-[9px_12px] text-left hover:bg-surface-chip"
+                      style={active ? { background: "#F9F9F4" } : undefined}
+                    >
+                      <span className="min-w-0">
+                        <span className="block font-sans text-[12.5px] font-semibold text-ink-900">
+                          {cfg.label}
+                        </span>
+                        <span className="block font-sans text-[11px] text-ink-300">
+                          {cfg.account.name} · {cfg.workspace}
+                        </span>
+                      </span>
+                      {active && <span className="flex-none font-sans text-[12px] text-plum">✓</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+
         <span className="overflow-hidden text-ellipsis whitespace-nowrap font-sans text-[14.5px] font-semibold text-ink-900">
           {title}
         </span>

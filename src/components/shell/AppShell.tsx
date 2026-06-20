@@ -3,9 +3,9 @@
 import { useCallback, useState } from "react";
 import type { Channel, Mode } from "@/types/views";
 import type { Persona, Scenario } from "@/types/scenario";
-import { DEFAULT_CHANNELS, DEFAULT_QUESTION, RECENT_CHATS } from "@/lib/data/canonical";
+import { PERSONAS } from "@/lib/data/personas";
 import { SCENARIOS } from "@/lib/scenarios/registry";
-import { resolveScenario } from "@/lib/scenarios/resolve";
+import { resolveScenario, defaultScenarioFor } from "@/lib/scenarios/resolve";
 import { useStreamingDemo } from "@/hooks/useStreamingDemo";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
@@ -15,24 +15,22 @@ import { ReportView } from "@/components/views/ReportView";
 import { ConnectionsModal } from "@/components/modals/ConnectionsModal";
 
 /**
- * Top-level orchestrator. Owns view mode, the active question + resolved
- * scenario, channel state, the modal, and the active recent-chat selection. The
- * streaming surface ({ step, typed }, replay) comes from useStreamingDemo, fed
- * the active scenario's lead — in the real product this is swapped for an
- * SSE-backed hook without touching any view.
+ * Top-level orchestrator. Owns the active persona (which dataset is loaded),
+ * view mode, the active question + resolved scenario, channel state, the modal,
+ * and the recent-chat selection. The streaming surface ({ step, typed }, replay)
+ * comes from useStreamingDemo, fed the active scenario's lead — in the real
+ * product this is swapped for an SSE-backed hook without touching any view.
  */
 export function AppShell() {
-  // Persona becomes user-switchable in Slice 2; founder is the default.
-  const [persona] = useState<Persona>("founder");
+  const [persona, setPersona] = useState<Persona>("founder");
   const [mode, setMode] = useState<Mode>("split");
-  const [question, setQuestion] = useState(DEFAULT_QUESTION);
-  const [scenario, setScenario] = useState<Scenario>(() =>
-    resolveScenario(DEFAULT_QUESTION, "founder", SCENARIOS),
-  );
-  const [channels, setChannels] = useState<Channel[]>(DEFAULT_CHANNELS);
+  const [scenario, setScenario] = useState<Scenario>(() => defaultScenarioFor("founder", SCENARIOS));
+  const [question, setQuestion] = useState(scenario.question);
+  const [channels, setChannels] = useState<Channel[]>(PERSONAS.founder.channels);
   const [modalOpen, setModalOpen] = useState(false);
   const [activeChat, setActiveChat] = useState(0);
 
+  const dataset = PERSONAS[persona];
   const { state, replay } = useStreamingDemo(scenario.lead);
   const { step, typed } = state;
 
@@ -52,12 +50,26 @@ export function AppShell() {
   const selectChat = useCallback(
     (index: number) => {
       setActiveChat(index);
-      const q = RECENT_CHATS[index].question;
+      const q = PERSONAS[persona].recentChats[index].question;
       setQuestion(q);
       setScenario(resolveScenario(q, persona, SCENARIOS));
       replay();
     },
     [persona, replay],
+  );
+
+  // Switching persona swaps the whole dataset and restreams that persona's default.
+  const switchPersona = useCallback(
+    (p: Persona) => {
+      setPersona(p);
+      setActiveChat(0);
+      setChannels(PERSONAS[p].channels);
+      const sc = defaultScenarioFor(p, SCENARIOS);
+      setScenario(sc);
+      setQuestion(sc.question);
+      replay();
+    },
+    [replay],
   );
 
   const toggleChannel = useCallback((index: number) => {
@@ -75,7 +87,9 @@ export function AppShell() {
       <Sidebar
         activeChat={activeChat}
         onSelectChat={selectChat}
+        recentChats={dataset.recentChats}
         channels={channels}
+        account={dataset.account}
         onNewChat={replay}
         onOpenModal={() => setModalOpen(true)}
       />
@@ -87,6 +101,8 @@ export function AppShell() {
           onReplay={replay}
           title={scenario.title}
           channels={channels}
+          persona={persona}
+          onSwitchPersona={switchPersona}
         />
 
         {mode === "split" && (
@@ -97,6 +113,7 @@ export function AppShell() {
             scenario={scenario}
             onSend={ask}
             onSuggest={ask}
+            suggestions={dataset.suggestions}
           />
         )}
         {mode === "thread" && (
@@ -107,6 +124,7 @@ export function AppShell() {
             scenario={scenario}
             onSend={ask}
             onSuggest={ask}
+            suggestions={dataset.suggestions}
           />
         )}
         {mode === "report" && (
