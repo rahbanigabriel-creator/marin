@@ -12,6 +12,7 @@ import type {
   RootCauseData,
   TrackingHealthData,
   ForecastResultData,
+  PlanAllocationData,
 } from "@/types/artifacts";
 
 /**
@@ -32,7 +33,8 @@ export type ArtifactKind =
   | "healthVerdict"
   | "rootCause"
   | "trackingHealth"
-  | "forecastResult";
+  | "forecastResult"
+  | "planAllocation";
 
 /** Base reveal step per artifact kind (the canvas enforces monotonic order on top). */
 export const STEP_FOR_KIND: Record<ArtifactKind, number> = {
@@ -47,6 +49,7 @@ export const STEP_FOR_KIND: Record<ArtifactKind, number> = {
   rootCause: 3,
   trackingHealth: 3,
   forecastResult: 4,
+  planAllocation: 2,
 };
 
 export type ArtifactPayload =
@@ -60,7 +63,8 @@ export type ArtifactPayload =
   | { kind: "healthVerdict"; data: HealthVerdictData }
   | { kind: "rootCause"; data: RootCauseData }
   | { kind: "trackingHealth"; data: TrackingHealthData }
-  | { kind: "forecastResult"; data: ForecastResultData };
+  | { kind: "forecastResult"; data: ForecastResultData }
+  | { kind: "planAllocation"; data: PlanAllocationData };
 
 export type StreamEvent =
   | { type: "start"; question: string }

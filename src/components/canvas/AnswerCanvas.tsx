@@ -12,6 +12,7 @@ import { HealthVerdict } from "./HealthVerdict";
 import { RootCause } from "./RootCause";
 import { TrackingHealth } from "./TrackingHealth";
 import { ForecastResult } from "./ForecastResult";
+import { PlanAllocation } from "./PlanAllocation";
 
 /**
  * The visual answer — a vertical stack of artifacts revealed in sequence as
@@ -39,6 +40,8 @@ function renderArtifact(a: ArtifactPayload) {
       return <TrackingHealth data={a.data} />;
     case "forecastResult":
       return <ForecastResult data={a.data} />;
+    case "planAllocation":
+      return <PlanAllocation data={a.data} />;
     case "leaks":
       return (
         <ArtifactShell>

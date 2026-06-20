@@ -6,6 +6,8 @@ import type { Persona, Scenario } from "@/types/scenario";
 import { PERSONAS } from "@/lib/data/personas";
 import { SCENARIOS } from "@/lib/scenarios/registry";
 import { resolveScenario, defaultScenarioFor } from "@/lib/scenarios/resolve";
+import { buildStarterPlan, type OnboardingIntake } from "@/lib/scenarios/buildStarterPlan";
+import { CEO_FORECAST, DEFAULT_FORECAST } from "@/lib/forecast/project";
 import { useStreamingDemo } from "@/hooks/useStreamingDemo";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
@@ -78,14 +80,15 @@ export function AppShell() {
     [replay],
   );
 
-  // Onboarding completes → land in the founder workspace with a streamed plan.
+  // Onboarding completes → build a plan from the intake and stream it.
   const completeOnboarding = useCallback(
-    (summary: string) => {
+    (intake: OnboardingIntake) => {
+      const sc = buildStarterPlan(intake);
       setPersona("founder");
       setChannels(PERSONAS.founder.channels);
       setActiveChat(0);
-      setQuestion(summary);
-      setScenario(defaultScenarioFor("founder", SCENARIOS));
+      setQuestion(sc.question);
+      setScenario(sc);
       setScreen("chat");
       replay();
     },
@@ -119,7 +122,10 @@ export function AppShell() {
         {screen === "onboarding" ? (
           <OnboardingScreen onComplete={completeOnboarding} onCancel={() => setScreen("chat")} />
         ) : screen === "forecast" ? (
-          <ForecastScreen onClose={() => setScreen("chat")} />
+          <ForecastScreen
+            onClose={() => setScreen("chat")}
+            config={persona === "ceo" ? CEO_FORECAST : DEFAULT_FORECAST}
+          />
         ) : (
           <>
             <TopBar
@@ -156,7 +162,13 @@ export function AppShell() {
               />
             )}
             {mode === "report" && (
-              <ReportView step={step} typed={typed} question={question} scenario={scenario} />
+              <ReportView
+                step={step}
+                typed={typed}
+                question={question}
+                scenario={scenario}
+                workspace={dataset.workspace}
+              />
             )}
           </>
         )}

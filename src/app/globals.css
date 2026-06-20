@@ -37,3 +37,24 @@ body {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* Export-to-PDF: print only the report document */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #report-root,
+  #report-root * {
+    visibility: visible;
+  }
+  #report-root {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 0 !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}

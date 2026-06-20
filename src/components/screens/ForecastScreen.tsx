@@ -2,13 +2,20 @@
 
 import { useState } from "react";
 import { RangeSlider } from "@/components/ui/RangeSlider";
-import { project, CURRENT_SPEND } from "@/lib/forecast/project";
+import { project, DEFAULT_FORECAST, type ForecastConfig } from "@/lib/forecast/project";
 import { ForecastResult } from "@/components/canvas/ForecastResult";
 
-export function ForecastScreen({ onClose }: { onClose: () => void }) {
-  const [budget, setBudget] = useState(60000);
-  const data = project(budget);
-  const delta = budget - CURRENT_SPEND;
+export function ForecastScreen({
+  onClose,
+  config = DEFAULT_FORECAST,
+}: {
+  onClose: () => void;
+  config?: ForecastConfig;
+}) {
+  const sliderMax = Math.max(100000, Math.round(config.current * 1.6));
+  const [budget, setBudget] = useState(Math.round(config.current));
+  const data = project(budget, config);
+  const delta = budget - config.current;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-surface-page p-[24px]">
@@ -39,15 +46,15 @@ export function ForecastScreen({ onClose }: { onClose: () => void }) {
               €{budget.toLocaleString("en-US")}
             </span>
           </div>
-          <RangeSlider value={budget} min={5000} max={100000} step={1000} onChange={setBudget} />
+          <RangeSlider value={budget} min={1000} max={sliderMax} step={1000} onChange={setBudget} />
           <div className="mt-[8px] flex justify-between font-mono text-[10.5px] text-ink-300">
-            <span>€5k</span>
+            <span>€1k</span>
             <span style={{ color: delta === 0 ? undefined : delta > 0 ? "#4C6B40" : "#B23A4B" }}>
               {delta === 0
                 ? "at current spend"
                 : `${delta > 0 ? "+" : "−"}€${Math.abs(delta).toLocaleString("en-US")} vs current`}
             </span>
-            <span>€100k</span>
+            <span>€{Math.round(sliderMax / 1000)}k</span>
           </div>
         </div>
 

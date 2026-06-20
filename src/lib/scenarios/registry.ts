@@ -1,7 +1,16 @@
 import type { Scenario } from "@/types/scenario";
 import type { ArtifactPayload } from "@/lib/streaming/events";
+import type { KpiCardData } from "@/types/artifacts";
 import { CANONICAL_ANSWER, DEFAULT_QUESTION } from "@/lib/data/canonical";
-import { project } from "@/lib/forecast/project";
+import { project, CEO_FORECAST } from "@/lib/forecast/project";
+
+/** CEO (Vertex) KPIs — kept consistent with the verdict + forecast: €150k spend × 4.1× = €612k. */
+const CEO_KPIS: KpiCardData[] = [
+  { label: "Spend", value: "€150k", delta: "+8%", tone: "neutral", sparkColor: "#A8997C", spark: [128, 132, 135, 138, 142, 145, 148, 150] },
+  { label: "Blended MER", value: "4.1×", delta: "+3%", tone: "good", sparkColor: "#5E7B52", spark: [3.7, 3.8, 3.8, 3.9, 4.0, 4.0, 4.05, 4.1] },
+  { label: "Revenue", value: "€612k", delta: "+11%", tone: "good", sparkColor: "#5E7B52", spark: [520, 540, 555, 560, 580, 595, 605, 612] },
+  { label: "CAC payback", value: "2.3 mo", delta: "−4%", tone: "good", sparkColor: "#5E7B52", spark: [2.7, 2.6, 2.6, 2.5, 2.5, 2.4, 2.35, 2.3] },
+];
 
 /** The canonical founder audit, expressed as an ordered artifact list. */
 function founderArtifacts(): ArtifactPayload[] {
@@ -92,11 +101,12 @@ export const SCENARIOS: Scenario[] = [
             { label: "Blended MER", value: "4.1×", tone: "good" },
             { label: "CAC payback", value: "2.3 mo", tone: "good" },
           ],
-          recommendation: "Raise budget ~15% on Google; hold Meta until CPA recovers.",
+          recommendation:
+            "Raise budget ~15% (€150k→€172.5k) for ~+€21k revenue/mo — the new spend converts at ~3.7× MER, still above your 3× floor. Hold Meta until CPA recovers.",
         },
       },
-      { kind: "kpis", data: CANONICAL_ANSWER.kpis },
-      { kind: "forecastResult", data: project(60000) },
+      { kind: "kpis", data: CEO_KPIS },
+      { kind: "forecastResult", data: project(172500, CEO_FORECAST) },
     ],
     closing: {
       split: "I can model a 15% budget increase — want the forecast?",

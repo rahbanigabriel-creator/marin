@@ -170,3 +170,13 @@ export interface ForecastResultData {
   /** revenue-vs-budget curve with confidence band, for the chart */
   curve: ForecastPoint[];
 }
+
+export interface PlanAllocationData {
+  goal: string;
+  business: string;
+  /** monthly budget in € */
+  budget: number;
+  allocations: { channel: string; color: string; amount: number; pct: number; rationale: string }[];
+  projected: { conversions: number; revenue: number; roas: string };
+  steps: string[];
+}

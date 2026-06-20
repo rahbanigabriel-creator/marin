@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { RangeSlider } from "@/components/ui/RangeSlider";
+import type { OnboardingIntake } from "@/lib/scenarios/buildStarterPlan";
 
 interface OnboardingScreenProps {
-  onComplete: (summary: string) => void;
+  onComplete: (intake: OnboardingIntake) => void;
   onCancel: () => void;
 }
 
@@ -51,9 +52,12 @@ export function OnboardingScreen({ onComplete, onCancel }: OnboardingScreenProps
   const isLast = step === 3;
 
   const finish = () => {
-    onComplete(
-      `Build a ${(goal ?? "growth").toLowerCase()} plan for my ${(business ?? "business").toLowerCase()} on a €${budget.toLocaleString("en-US")}/mo budget`,
-    );
+    onComplete({
+      business: business ?? "business",
+      goal: goal ?? "growth",
+      budget,
+      channels,
+    });
   };
 
   return (
