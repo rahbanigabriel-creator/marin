@@ -13,16 +13,20 @@ import { SplitView } from "@/components/views/SplitView";
 import { ThreadView } from "@/components/views/ThreadView";
 import { ReportView } from "@/components/views/ReportView";
 import { ConnectionsModal } from "@/components/modals/ConnectionsModal";
+import { OnboardingScreen } from "@/components/screens/OnboardingScreen";
+
+type Screen = "chat" | "onboarding" | "forecast";
 
 /**
- * Top-level orchestrator. Owns the active persona (which dataset is loaded),
- * view mode, the active question + resolved scenario, channel state, the modal,
- * and the recent-chat selection. The streaming surface ({ step, typed }, replay)
- * comes from useStreamingDemo, fed the active scenario's lead — in the real
- * product this is swapped for an SSE-backed hook without touching any view.
+ * Top-level orchestrator. Owns the active persona (which dataset is loaded), the
+ * top-level screen, view mode, the active question + resolved scenario, channel
+ * state, the modal, and the recent-chat selection. The streaming surface
+ * ({ step, typed }, replay) comes from useStreamingDemo, fed the active
+ * scenario's lead — swapped for an SSE-backed hook later without touching views.
  */
 export function AppShell() {
   const [persona, setPersona] = useState<Persona>("founder");
+  const [screen, setScreen] = useState<Screen>("chat");
   const [mode, setMode] = useState<Mode>("split");
   const [scenario, setScenario] = useState<Scenario>(() => defaultScenarioFor("founder", SCENARIOS));
   const [question, setQuestion] = useState(scenario.question);
@@ -62,11 +66,26 @@ export function AppShell() {
   const switchPersona = useCallback(
     (p: Persona) => {
       setPersona(p);
+      setScreen("chat");
       setActiveChat(0);
       setChannels(PERSONAS[p].channels);
       const sc = defaultScenarioFor(p, SCENARIOS);
       setScenario(sc);
       setQuestion(sc.question);
+      replay();
+    },
+    [replay],
+  );
+
+  // Onboarding completes → land in the founder workspace with a streamed plan.
+  const completeOnboarding = useCallback(
+    (summary: string) => {
+      setPersona("founder");
+      setChannels(PERSONAS.founder.channels);
+      setActiveChat(0);
+      setQuestion(summary);
+      setScenario(defaultScenarioFor("founder", SCENARIOS));
+      setScreen("chat");
       replay();
     },
     [replay],
@@ -91,44 +110,51 @@ export function AppShell() {
         channels={channels}
         account={dataset.account}
         onNewChat={replay}
+        onStartPlan={() => setScreen("onboarding")}
         onOpenModal={() => setModalOpen(true)}
       />
 
       <main className="flex min-w-0 flex-1 flex-col">
-        <TopBar
-          mode={mode}
-          onSetMode={setMode}
-          onReplay={replay}
-          title={scenario.title}
-          channels={channels}
-          persona={persona}
-          onSwitchPersona={switchPersona}
-        />
+        {screen === "onboarding" ? (
+          <OnboardingScreen onComplete={completeOnboarding} onCancel={() => setScreen("chat")} />
+        ) : (
+          <>
+            <TopBar
+              mode={mode}
+              onSetMode={setMode}
+              onReplay={replay}
+              title={scenario.title}
+              channels={channels}
+              persona={persona}
+              onSwitchPersona={switchPersona}
+            />
 
-        {mode === "split" && (
-          <SplitView
-            step={step}
-            typed={typed}
-            question={question}
-            scenario={scenario}
-            onSend={ask}
-            onSuggest={ask}
-            suggestions={dataset.suggestions}
-          />
-        )}
-        {mode === "thread" && (
-          <ThreadView
-            step={step}
-            typed={typed}
-            question={question}
-            scenario={scenario}
-            onSend={ask}
-            onSuggest={ask}
-            suggestions={dataset.suggestions}
-          />
-        )}
-        {mode === "report" && (
-          <ReportView step={step} typed={typed} question={question} scenario={scenario} />
+            {mode === "split" && (
+              <SplitView
+                step={step}
+                typed={typed}
+                question={question}
+                scenario={scenario}
+                onSend={ask}
+                onSuggest={ask}
+                suggestions={dataset.suggestions}
+              />
+            )}
+            {mode === "thread" && (
+              <ThreadView
+                step={step}
+                typed={typed}
+                question={question}
+                scenario={scenario}
+                onSend={ask}
+                onSuggest={ask}
+                suggestions={dataset.suggestions}
+              />
+            )}
+            {mode === "report" && (
+              <ReportView step={step} typed={typed} question={question} scenario={scenario} />
+            )}
+          </>
         )}
       </main>
 

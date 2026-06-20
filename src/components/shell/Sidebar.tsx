@@ -11,6 +11,7 @@ interface SidebarProps {
   channels: Channel[];
   account: Account;
   onNewChat: () => void;
+  onStartPlan: () => void;
   onOpenModal: () => void;
 }
 
@@ -21,6 +22,7 @@ export function Sidebar({
   channels,
   account,
   onNewChat,
+  onStartPlan,
   onOpenModal,
 }: SidebarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -46,14 +48,22 @@ export function Sidebar({
         </span>
       </div>
 
-      {/* new conversation */}
+      {/* new conversation + plan */}
       <button
         type="button"
         onClick={onNewChat}
-        className="mb-[18px] flex w-full items-center gap-[9px] rounded-btn border border-line-1 bg-surface-chip font-sans text-[13px] font-semibold text-ink-900"
+        className="mb-[8px] flex w-full items-center gap-[9px] rounded-btn border border-line-1 bg-surface-chip font-sans text-[13px] font-semibold text-ink-900"
         style={{ padding: "10px 12px", cursor: "pointer" }}
       >
         <span className="text-[16px] leading-none text-plum">＋</span> New conversation
+      </button>
+      <button
+        type="button"
+        onClick={onStartPlan}
+        className="mb-[18px] flex w-full items-center gap-[9px] rounded-btn font-sans text-[13px] font-semibold text-white"
+        style={{ padding: "10px 12px", cursor: "pointer", border: "none", background: "#9A3D63" }}
+      >
+        <span className="text-[15px] leading-none">✨</span> New plan
       </button>
 
       {/* scroll area */}
