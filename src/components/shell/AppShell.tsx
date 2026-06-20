@@ -14,6 +14,7 @@ import { ThreadView } from "@/components/views/ThreadView";
 import { ReportView } from "@/components/views/ReportView";
 import { ConnectionsModal } from "@/components/modals/ConnectionsModal";
 import { OnboardingScreen } from "@/components/screens/OnboardingScreen";
+import { ForecastScreen } from "@/components/screens/ForecastScreen";
 
 type Screen = "chat" | "onboarding" | "forecast";
 
@@ -117,6 +118,8 @@ export function AppShell() {
       <main className="flex min-w-0 flex-1 flex-col">
         {screen === "onboarding" ? (
           <OnboardingScreen onComplete={completeOnboarding} onCancel={() => setScreen("chat")} />
+        ) : screen === "forecast" ? (
+          <ForecastScreen onClose={() => setScreen("chat")} />
         ) : (
           <>
             <TopBar
@@ -127,6 +130,7 @@ export function AppShell() {
               channels={channels}
               persona={persona}
               onSwitchPersona={switchPersona}
+              onForecast={() => setScreen("forecast")}
             />
 
             {mode === "split" && (

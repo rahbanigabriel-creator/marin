@@ -152,3 +152,21 @@ export interface TrackingHealthData {
   summary: string;
   checks: { label: string; status: CheckStatus; detail: string }[];
 }
+
+export interface ForecastPoint {
+  budget: number;
+  revenue: number;
+  low: number;
+  high: number;
+}
+
+export interface ForecastResultData {
+  budget: number;
+  roas: number;
+  revenue: number;
+  conversions: number;
+  revenueLow: number;
+  revenueHigh: number;
+  /** revenue-vs-budget curve with confidence band, for the chart */
+  curve: ForecastPoint[];
+}

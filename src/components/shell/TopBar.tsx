@@ -14,6 +14,7 @@ interface TopBarProps {
   channels: Channel[];
   persona: Persona;
   onSwitchPersona: (p: Persona) => void;
+  onForecast: () => void;
 }
 
 const TABS: Array<{ mode: Mode; label: string }> = [
@@ -30,6 +31,7 @@ export function TopBar({
   channels,
   persona,
   onSwitchPersona,
+  onForecast,
 }: TopBarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const connected = channels.filter((c) => c.status === "connected").map((c) => c.name);
@@ -131,6 +133,14 @@ export function TopBar({
             );
           })}
         </div>
+        <button
+          type="button"
+          onClick={onForecast}
+          className="flex cursor-pointer items-center gap-[6px] rounded-[9px] border border-line-1 bg-surface-chip font-sans text-[12px] font-semibold text-ink-700"
+          style={{ padding: "7px 12px" }}
+        >
+          ↗ Forecast
+        </button>
         <button
           type="button"
           onClick={onReplay}

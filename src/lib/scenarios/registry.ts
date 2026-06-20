@@ -1,6 +1,7 @@
 import type { Scenario } from "@/types/scenario";
 import type { ArtifactPayload } from "@/lib/streaming/events";
 import { CANONICAL_ANSWER, DEFAULT_QUESTION } from "@/lib/data/canonical";
+import { project } from "@/lib/forecast/project";
 
 /** The canonical founder audit, expressed as an ordered artifact list. */
 function founderArtifacts(): ArtifactPayload[] {
@@ -95,6 +96,7 @@ export const SCENARIOS: Scenario[] = [
         },
       },
       { kind: "kpis", data: CANONICAL_ANSWER.kpis },
+      { kind: "forecastResult", data: project(60000) },
     ],
     closing: {
       split: "I can model a 15% budget increase — want the forecast?",

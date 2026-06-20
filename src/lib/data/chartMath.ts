@@ -98,3 +98,52 @@ export function comboChartGeometry(spend: number[], roas: number[]): ComboChartG
 export function leakPct(wasted: number, maxWasted: number): number {
   return Math.round((wasted / maxWasted) * 100);
 }
+
+export interface ForecastGeometry {
+  /** revenue polyline path */
+  line: string;
+  /** filled confidence-band area path */
+  band: string;
+  /** projected-point marker */
+  projX: number;
+  projY: number;
+}
+
+/** Forecast curve geometry (viewBox 0 0 360 150). */
+export function forecastGeometry(
+  curve: { budget: number; revenue: number; low: number; high: number }[],
+  projBudget: number,
+): ForecastGeometry {
+  const W = 360;
+  const H = 150;
+  const padX = 16;
+  const padTop = 14;
+  const padBot = 18;
+  const minB = curve[0].budget;
+  const maxB = curve[curve.length - 1].budget;
+  const maxY = Math.max(...curve.map((p) => p.high)) || 1;
+  const X = (b: number) => padX + ((W - 2 * padX) * (b - minB)) / (maxB - minB || 1);
+  const Y = (v: number) => padTop + (H - padTop - padBot) * (1 - v / maxY);
+
+  const line = curve
+    .map((p, i) => `${i ? "L" : "M"}${X(p.budget).toFixed(1)},${Y(p.revenue).toFixed(1)}`)
+    .join(" ");
+  const top = curve
+    .map((p, i) => `${i ? "L" : "M"}${X(p.budget).toFixed(1)},${Y(p.high).toFixed(1)}`)
+    .join(" ");
+  const bottom = [...curve]
+    .reverse()
+    .map((p) => `L${X(p.budget).toFixed(1)},${Y(p.low).toFixed(1)}`)
+    .join(" ");
+
+  const closest = curve.reduce((a, b) =>
+    Math.abs(b.budget - projBudget) < Math.abs(a.budget - projBudget) ? b : a,
+  );
+
+  return {
+    line,
+    band: `${top} ${bottom} Z`,
+    projX: +X(projBudget).toFixed(1),
+    projY: +Y(closest.revenue).toFixed(1),
+  };
+}
