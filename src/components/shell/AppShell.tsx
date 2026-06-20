@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import type { Channel, Mode } from "@/types/views";
 import type { Persona, Scenario } from "@/types/scenario";
 import { PERSONAS } from "@/lib/data/personas";
+import { AGENCY_CLIENTS, type ClientAccount } from "@/lib/data/clients";
 import { SCENARIOS } from "@/lib/scenarios/registry";
 import { resolveScenario, defaultScenarioFor } from "@/lib/scenarios/resolve";
 import { buildStarterPlan, type OnboardingIntake } from "@/lib/scenarios/buildStarterPlan";
@@ -17,15 +18,14 @@ import { ReportView } from "@/components/views/ReportView";
 import { ConnectionsModal } from "@/components/modals/ConnectionsModal";
 import { OnboardingScreen } from "@/components/screens/OnboardingScreen";
 import { ForecastScreen } from "@/components/screens/ForecastScreen";
+import { ClientsScreen } from "@/components/screens/ClientsScreen";
 
-type Screen = "chat" | "onboarding" | "forecast";
+type Screen = "chat" | "onboarding" | "forecast" | "clients";
 
 /**
- * Top-level orchestrator. Owns the active persona (which dataset is loaded), the
- * top-level screen, view mode, the active question + resolved scenario, channel
- * state, the modal, and the recent-chat selection. The streaming surface
- * ({ step, typed }, replay) comes from useStreamingDemo, fed the active
- * scenario's lead — swapped for an SSE-backed hook later without touching views.
+ * Top-level orchestrator. Owns the active persona + dataset, the top-level
+ * screen, view mode, the active question + resolved scenario, the agency's
+ * active client, channels, the modal, and recent-chat selection.
  */
 export function AppShell() {
   const [persona, setPersona] = useState<Persona>("founder");
@@ -36,12 +36,12 @@ export function AppShell() {
   const [channels, setChannels] = useState<Channel[]>(PERSONAS.founder.channels);
   const [modalOpen, setModalOpen] = useState(false);
   const [activeChat, setActiveChat] = useState(0);
+  const [activeClient, setActiveClient] = useState<string | null>(null);
 
   const dataset = PERSONAS[persona];
   const { state, replay } = useStreamingDemo(scenario.lead);
   const { step, typed } = state;
 
-  // Ask a question → resolve to a canned scenario → restream it.
   const ask = useCallback(
     (text: string) => {
       const trimmed = text.trim();
@@ -53,7 +53,6 @@ export function AppShell() {
     [persona, replay],
   );
 
-  // Selecting a recent chat re-asks its question and restreams.
   const selectChat = useCallback(
     (index: number) => {
       setActiveChat(index);
@@ -65,28 +64,42 @@ export function AppShell() {
     [persona, replay],
   );
 
-  // Switching persona swaps the whole dataset and restreams that persona's default.
+  // Switching persona swaps the dataset; the agency lands on its client roster.
   const switchPersona = useCallback(
     (p: Persona) => {
       setPersona(p);
-      setScreen("chat");
       setActiveChat(0);
+      setActiveClient(null);
       setChannels(PERSONAS[p].channels);
       const sc = defaultScenarioFor(p, SCENARIOS);
       setScenario(sc);
       setQuestion(sc.question);
+      setScreen(p === "agency" ? "clients" : "chat");
       replay();
     },
     [replay],
   );
 
-  // Onboarding completes → build a plan from the intake and stream it.
+  // Opening a client scopes the workspace to it and streams its headline answer.
+  const openClient = useCallback(
+    (c: ClientAccount) => {
+      setActiveClient(c.name);
+      setQuestion(c.question);
+      setScenario(resolveScenario(c.question, "agency", SCENARIOS));
+      setMode("split");
+      setScreen("chat");
+      replay();
+    },
+    [replay],
+  );
+
   const completeOnboarding = useCallback(
     (intake: OnboardingIntake) => {
       const sc = buildStarterPlan(intake);
       setPersona("founder");
       setChannels(PERSONAS.founder.channels);
       setActiveChat(0);
+      setActiveClient(null);
       setQuestion(sc.question);
       setScenario(sc);
       setScreen("chat");
@@ -113,6 +126,8 @@ export function AppShell() {
         recentChats={dataset.recentChats}
         channels={channels}
         account={dataset.account}
+        showClients={persona === "agency"}
+        onViewClients={() => setScreen("clients")}
         onNewChat={replay}
         onStartPlan={() => setScreen("onboarding")}
         onOpenModal={() => setModalOpen(true)}
@@ -132,14 +147,22 @@ export function AppShell() {
               mode={mode}
               onSetMode={setMode}
               onReplay={replay}
-              title={scenario.title}
+              title={screen === "clients" ? "Clients" : scenario.title}
               channels={channels}
               persona={persona}
               onSwitchPersona={switchPersona}
               onForecast={() => setScreen("forecast")}
+              chatControls={screen === "chat"}
+              activeClient={screen === "chat" ? activeClient : null}
             />
 
-            {mode === "split" && (
+            {screen === "clients" ? (
+              <ClientsScreen
+                clients={AGENCY_CLIENTS}
+                workspace={dataset.workspace}
+                onOpenClient={openClient}
+              />
+            ) : mode === "split" ? (
               <SplitView
                 step={step}
                 typed={typed}
@@ -149,8 +172,7 @@ export function AppShell() {
                 onSuggest={ask}
                 suggestions={dataset.suggestions}
               />
-            )}
-            {mode === "thread" && (
+            ) : mode === "thread" ? (
               <ThreadView
                 step={step}
                 typed={typed}
@@ -160,8 +182,7 @@ export function AppShell() {
                 onSuggest={ask}
                 suggestions={dataset.suggestions}
               />
-            )}
-            {mode === "report" && (
+            ) : (
               <ReportView
                 step={step}
                 typed={typed}

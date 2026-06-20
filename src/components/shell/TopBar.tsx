@@ -15,6 +15,10 @@ interface TopBarProps {
   persona: Persona;
   onSwitchPersona: (p: Persona) => void;
   onForecast: () => void;
+  /** chat-specific controls (mode tabs, forecast, replay, channel summary) */
+  chatControls?: boolean;
+  /** agency: the client the workspace is currently scoped to */
+  activeClient?: string | null;
 }
 
 const TABS: Array<{ mode: Mode; label: string }> = [
@@ -32,6 +36,8 @@ export function TopBar({
   persona,
   onSwitchPersona,
   onForecast,
+  chatControls = true,
+  activeClient = null,
 }: TopBarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const connected = channels.filter((c) => c.status === "connected").map((c) => c.name);
@@ -96,21 +102,30 @@ export function TopBar({
           )}
         </div>
 
+        {activeClient && (
+          <span className="flex flex-none items-center gap-[7px] font-sans text-[13px] font-medium text-ink-400">
+            <span className="text-ink-200">▸</span>
+            {activeClient}
+          </span>
+        )}
         <span className="overflow-hidden text-ellipsis whitespace-nowrap font-sans text-[14.5px] font-semibold text-ink-900">
           {title}
         </span>
-        <span className="flex flex-none items-center gap-[5px] font-sans text-[11px] font-medium text-ink-300">
-          <span
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: "50%",
-              background: connected.length ? "#5E7B52" : "#C9A24A",
-            }}
-          />
-          {channelSummary}
-        </span>
+        {chatControls && (
+          <span className="flex flex-none items-center gap-[5px] font-sans text-[11px] font-medium text-ink-300">
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: "50%",
+                background: connected.length ? "#5E7B52" : "#C9A24A",
+              }}
+            />
+            {channelSummary}
+          </span>
+        )}
       </div>
+      {chatControls && (
       <div className="flex flex-none items-center gap-[10px]">
         <div className="flex gap-[2px] rounded-btn bg-line-seg p-[3px]">
           {TABS.map((t) => {
@@ -150,6 +165,7 @@ export function TopBar({
           ↻ Replay
         </button>
       </div>
+      )}
     </header>
   );
 }

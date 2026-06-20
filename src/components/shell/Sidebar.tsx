@@ -13,6 +13,8 @@ interface SidebarProps {
   onNewChat: () => void;
   onStartPlan: () => void;
   onOpenModal: () => void;
+  showClients: boolean;
+  onViewClients: () => void;
 }
 
 export function Sidebar({
@@ -24,6 +26,8 @@ export function Sidebar({
   onNewChat,
   onStartPlan,
   onOpenModal,
+  showClients,
+  onViewClients,
 }: SidebarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -57,14 +61,25 @@ export function Sidebar({
       >
         <span className="text-[16px] leading-none text-plum">＋</span> New conversation
       </button>
-      <button
-        type="button"
-        onClick={onStartPlan}
-        className="mb-[18px] flex w-full items-center gap-[9px] rounded-btn font-sans text-[13px] font-semibold text-white"
-        style={{ padding: "10px 12px", cursor: "pointer", border: "none", background: "#9A3D63" }}
-      >
-        <span className="text-[15px] leading-none">✨</span> New plan
-      </button>
+      {showClients ? (
+        <button
+          type="button"
+          onClick={onViewClients}
+          className="mb-[18px] flex w-full items-center gap-[9px] rounded-btn font-sans text-[13px] font-semibold text-white"
+          style={{ padding: "10px 12px", cursor: "pointer", border: "none", background: "#9A3D63" }}
+        >
+          <span className="text-[14px] leading-none">⊞</span> Clients
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={onStartPlan}
+          className="mb-[18px] flex w-full items-center gap-[9px] rounded-btn font-sans text-[13px] font-semibold text-white"
+          style={{ padding: "10px 12px", cursor: "pointer", border: "none", background: "#9A3D63" }}
+        >
+          <span className="text-[15px] leading-none">✨</span> New plan
+        </button>
+      )}
 
       {/* scroll area */}
       <div className="flex min-h-0 flex-1 flex-col gap-[2px] overflow-y-auto">
