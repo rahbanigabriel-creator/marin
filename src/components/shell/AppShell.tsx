@@ -48,6 +48,7 @@ export function AppShell() {
     (text: string) => {
       const trimmed = text.trim();
       if (!trimmed) return;
+      setActiveClient(null);
       setQuestion(trimmed);
       setScenario(resolveScenario(trimmed, persona, SCENARIOS));
       replay();
@@ -58,6 +59,7 @@ export function AppShell() {
   const selectChat = useCallback(
     (index: number) => {
       setActiveChat(index);
+      setActiveClient(null);
       const q = PERSONAS[persona].recentChats[index].question;
       setQuestion(q);
       setScenario(resolveScenario(q, persona, SCENARIOS));
