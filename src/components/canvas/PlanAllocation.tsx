@@ -58,6 +58,16 @@ export function PlanAllocation({ data }: { data: PlanAllocationData }) {
         <Cell label="Est. ROAS" value={data.projected.roas} color="#4C6B40" />
       </div>
 
+      <div
+        className="mb-[16px] flex items-start gap-[8px] rounded-[9px] p-[10px_12px]"
+        style={{ background: "#F3ECDD" }}
+      >
+        <span className="flex-none font-sans text-[12px] font-semibold" style={{ color: "#8A6D2A" }}>
+          Realistic floor
+        </span>
+        <span className="font-sans text-[12.5px] leading-[1.45] text-ink-700">{data.riskNote}</span>
+      </div>
+
       <div className="mb-[8px] font-sans text-[11px] font-medium text-ink-300">First steps</div>
       <div className="flex flex-col gap-[8px]">
         {data.steps.map((s, i) => (

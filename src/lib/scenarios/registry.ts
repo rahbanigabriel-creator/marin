@@ -98,8 +98,10 @@ export const SCENARIOS: Scenario[] = [
           sub: "Profitable on a blended basis with headroom to scale.",
           metrics: [
             { label: "Revenue (30d)", value: "€612k", tone: "good" },
-            { label: "Blended MER", value: "4.1×", tone: "good" },
+            { label: "Contribution margin", value: "62%", tone: "good" },
+            { label: "LTV:CAC", value: "3.4:1", tone: "good" },
             { label: "CAC payback", value: "2.3 mo", tone: "good" },
+            { label: "Blended MER", value: "4.1×", tone: "good" },
           ],
           recommendation:
             "Raise budget ~15% (€150k→€172.5k) for ~+€21k revenue/mo — the new spend converts at ~3.7× MER, still above your 3× floor. Hold Meta until CPA recovers.",

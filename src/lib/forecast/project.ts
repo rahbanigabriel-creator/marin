@@ -24,10 +24,14 @@ export const DEFAULT_FORECAST: ForecastConfig = {
   current: 48_200,
 };
 
-/** Vertex / CEO baseline: €150k spend → €612k revenue, 4.1× blended MER. */
+/**
+ * Vertex / CEO baseline: €150k spend → €612k revenue, 4.1× blended MER, and a
+ * gentle saturation so the *marginal* return on a 15% raise stays ~3.7× MER
+ * (matching the recommendation), not a steep drop.
+ */
 export const CEO_FORECAST: ForecastConfig = {
-  revMax: 816_000,
-  half: 50_000,
+  revMax: 6_570_000,
+  half: 1_460_000,
   aov: 140,
   current: 150_000,
 };
@@ -60,6 +64,8 @@ export function project(budget: number, cfg: ForecastConfig = DEFAULT_FORECAST):
     conversions: Math.round(revenue / cfg.aov),
     revenueLow: revenue * (1 - band),
     revenueHigh: revenue * (1 + band),
+    baselineRevenue: revenueAt(cfg.current, cfg),
+    basis: `Based on your last 6 months · AOV €${cfg.aov} · saturating-returns model`,
     curve,
   };
 }

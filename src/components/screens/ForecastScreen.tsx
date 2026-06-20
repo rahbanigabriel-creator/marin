@@ -19,7 +19,7 @@ export function ForecastScreen({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-surface-page p-[24px]">
-      <div className="mx-auto w-full max-w-[720px]">
+      <div id="report-root" className="mx-auto w-full max-w-[720px]">
         <div className="mb-[16px] flex items-center justify-between">
           <div>
             <div className="font-serif text-[22px] font-medium tracking-[-0.01em] text-ink-900">
@@ -29,14 +29,24 @@ export function ForecastScreen({
               Drag to model monthly spend — projections update live.
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="cursor-pointer rounded-btn border border-line-1 bg-surface-chip font-sans text-[13px] font-semibold text-ink-700"
-            style={{ padding: "8px 14px" }}
-          >
-            ← Back
-          </button>
+          <div className="no-print flex gap-[8px]">
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="cursor-pointer rounded-btn font-sans text-[13px] font-semibold text-white"
+              style={{ border: "none", background: "#2B2722", padding: "8px 14px" }}
+            >
+              ↧ Export PDF
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="cursor-pointer rounded-btn border border-line-1 bg-surface-chip font-sans text-[13px] font-semibold text-ink-700"
+              style={{ padding: "8px 14px" }}
+            >
+              ← Back
+            </button>
+          </div>
         </div>
 
         <div className="mb-[16px] rounded-card border border-line-2 bg-surface-card p-[18px]">

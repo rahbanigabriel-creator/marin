@@ -17,6 +17,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 export function ForecastResult({ data }: { data: ForecastResultData }) {
   const g = forecastGeometry(data.curve, data.budget);
+  const delta = data.revenue - data.baselineRevenue;
 
   return (
     <ArtifactShell className="rounded-card border border-line-3 bg-surface-card p-[16px_18px_14px]">
@@ -33,6 +34,13 @@ export function ForecastResult({ data }: { data: ForecastResultData }) {
           </div>
           <div className="mt-[3px] font-mono text-[11px] text-ink-300">
             {fmtEur(data.revenueLow)}–{fmtEur(data.revenueHigh)}
+          </div>
+          <div
+            className="mt-[2px] font-mono text-[11px] font-semibold"
+            style={{ color: delta >= 0 ? "#4C6B40" : "#B23A4B" }}
+          >
+            {delta >= 0 ? "+" : "−"}
+            {fmtEur(Math.abs(delta))} vs {fmtEur(data.baselineRevenue)} today
           </div>
         </div>
       </div>
@@ -57,6 +65,7 @@ export function ForecastResult({ data }: { data: ForecastResultData }) {
         <Stat label="Conversions" value={data.conversions.toLocaleString("en-US")} />
         <Stat label="Revenue" value={fmtEur(data.revenue)} />
       </div>
+      <div className="mt-[10px] font-sans text-[10.5px] text-ink-300">{data.basis}</div>
     </ArtifactShell>
   );
 }

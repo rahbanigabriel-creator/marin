@@ -25,6 +25,16 @@ interface ClientsScreenProps {
 
 export function ClientsScreen({ clients, workspace, onOpenClient }: ClientsScreenProps) {
   const attention = clients.filter((c) => c.status !== "healthy");
+  const parseNum = (s: string) => {
+    const m = s.replace(/[€,\s×]/g, "");
+    return m.endsWith("k") ? parseFloat(m) * 1000 : parseFloat(m) || 0;
+  };
+  const totalSpend = clients.reduce((t, c) => t + parseNum(c.spend), 0);
+  const blendedRoas =
+    clients.reduce((t, c) => t + parseNum(c.roas) * parseNum(c.spend), 0) / (totalSpend || 1);
+  const healthyCount = clients.filter((c) => c.status === "healthy").length;
+  const fmtSpend = (n: number) =>
+    n >= 1e6 ? `€${(n / 1e6).toFixed(1)}m` : `€${Math.round(n / 1000)}k`;
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto bg-surface-page p-[28px_32px_40px]">
@@ -38,6 +48,36 @@ export function ClientsScreen({ clients, workspace, onOpenClient }: ClientsScree
             <span style={{ color: attention.length ? "#B23A4B" : "#4C6B40", fontWeight: 600 }}>
               {attention.length} need attention
             </span>
+          </div>
+        </div>
+
+        <div
+          className="mb-[22px] grid gap-[1px] overflow-hidden rounded-card border border-fauxhair"
+          style={{ gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", background: "#EAE8E0" }}
+        >
+          <div className="bg-surface-card p-[12px_14px]">
+            <div className="font-sans text-[10.5px] font-medium text-ink-300">Managed spend</div>
+            <div className="mt-[2px] font-mono text-[16px] font-semibold text-ink-900">
+              {fmtSpend(totalSpend)}/mo
+            </div>
+          </div>
+          <div className="bg-surface-card p-[12px_14px]">
+            <div className="font-sans text-[10.5px] font-medium text-ink-300">Blended ROAS</div>
+            <div className="mt-[2px] font-mono text-[16px] font-semibold text-ink-900">
+              {blendedRoas.toFixed(1)}×
+            </div>
+          </div>
+          <div className="bg-surface-card p-[12px_14px]">
+            <div className="font-sans text-[10.5px] font-medium text-ink-300">Healthy</div>
+            <div className="mt-[2px] font-mono text-[16px] font-semibold text-ink-900">
+              {healthyCount}/{clients.length}
+            </div>
+          </div>
+          <div className="bg-surface-card p-[12px_14px]">
+            <div className="font-sans text-[10.5px] font-medium text-ink-300">Need attention</div>
+            <div className="mt-[2px] font-mono text-[16px] font-semibold" style={{ color: "#B23A4B" }}>
+              {attention.length}
+            </div>
           </div>
         </div>
 

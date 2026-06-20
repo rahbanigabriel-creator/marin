@@ -167,6 +167,10 @@ export interface ForecastResultData {
   conversions: number;
   revenueLow: number;
   revenueHigh: number;
+  /** revenue at the current/baseline spend, for the "vs today" delta */
+  baselineRevenue: number;
+  /** one-line methodology basis */
+  basis: string;
   /** revenue-vs-budget curve with confidence band, for the chart */
   curve: ForecastPoint[];
 }
@@ -178,5 +182,7 @@ export interface PlanAllocationData {
   budget: number;
   allocations: { channel: string; color: string; amount: number; pct: number; rationale: string }[];
   projected: { conversions: number; revenue: number; roas: string };
+  /** plain-language downside / floor for a non-expert */
+  riskNote: string;
   steps: string[];
 }

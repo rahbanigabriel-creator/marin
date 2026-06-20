@@ -45,6 +45,7 @@ function EditField({
 
 export function CampaignDraftCard({ data }: { data: CampaignDraftData }) {
   const [launched, setLaunched] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [editing, setEditing] = useState(false);
   const [spec, setSpec] = useState(data.spec);
   const [draft, setDraft] = useState(data.spec);
@@ -146,7 +147,7 @@ export function CampaignDraftCard({ data }: { data: CampaignDraftData }) {
             ✓ Campaign launched
           </span>
           <span className="font-sans text-[12.5px] text-pos-soft">
-            Live in TikTok Ads Manager · first results in ~24h
+            Live in your connected ad account · first results in ~24h
           </span>
         </div>
       ) : editing ? (
@@ -196,11 +197,39 @@ export function CampaignDraftCard({ data }: { data: CampaignDraftData }) {
             </button>
           </div>
         </div>
+      ) : confirming ? (
+        <div className="flex flex-col gap-[10px] rounded-[10px] border border-line-3 bg-surface-chip p-[12px_14px]">
+          <span className="font-sans text-[12.5px] leading-[1.5] text-ink-700">
+            This will publish to your connected ad account and start spending your budget. You can
+            pause anytime.
+          </span>
+          <div className="flex gap-[9px]">
+            <button
+              type="button"
+              onClick={() => {
+                setConfirming(false);
+                setLaunched(true);
+              }}
+              className="cursor-pointer rounded-[9px] font-sans text-[13px] font-semibold"
+              style={{ border: "none", background: "#9A3D63", color: "#FFFFFF", padding: "9px 18px" }}
+            >
+              Confirm &amp; launch
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              className="cursor-pointer rounded-[9px] font-sans text-[13px] font-semibold"
+              style={{ border: "1px solid #DDDBD2", background: "#FFFFFF", color: "#6B6359", padding: "9px 16px" }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
       ) : (
         <div className="flex gap-[9px]">
           <button
             type="button"
-            onClick={() => setLaunched(true)}
+            onClick={() => setConfirming(true)}
             className="cursor-pointer rounded-[9px] font-sans text-[13px] font-semibold"
             style={{ border: "none", background: "#9A3D63", color: "#FFFFFF", padding: "9px 18px" }}
           >

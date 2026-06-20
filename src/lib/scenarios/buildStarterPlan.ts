@@ -69,6 +69,7 @@ export function buildStarterPlan(intake: OnboardingIntake): Scenario {
             revenue: f.revenue,
             roas: f.roas.toFixed(1) + "×",
           },
+          riskNote: `If it underperforms, expect about €${Math.round(f.revenueLow).toLocaleString("en-US")}/mo — Marin flags to pause and rebalance before you overspend.`,
           steps: [
             `Connect your ${chosen[0]} account so Marin can launch and track results`,
             `Approve the ${goal}-focused starter campaigns below`,

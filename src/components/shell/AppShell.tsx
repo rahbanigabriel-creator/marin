@@ -8,7 +8,8 @@ import { AGENCY_CLIENTS, type ClientAccount } from "@/lib/data/clients";
 import { SCENARIOS } from "@/lib/scenarios/registry";
 import { resolveScenario, defaultScenarioFor } from "@/lib/scenarios/resolve";
 import { buildStarterPlan, type OnboardingIntake } from "@/lib/scenarios/buildStarterPlan";
-import { CEO_FORECAST, DEFAULT_FORECAST } from "@/lib/forecast/project";
+import { buildClientScenario } from "@/lib/scenarios/buildClientScenario";
+import { CEO_FORECAST, DEFAULT_FORECAST, type ForecastConfig } from "@/lib/forecast/project";
 import { useStreamingDemo } from "@/hooks/useStreamingDemo";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
@@ -37,6 +38,7 @@ export function AppShell() {
   const [modalOpen, setModalOpen] = useState(false);
   const [activeChat, setActiveChat] = useState(0);
   const [activeClient, setActiveClient] = useState<string | null>(null);
+  const [founderConfig, setFounderConfig] = useState<ForecastConfig>(DEFAULT_FORECAST);
 
   const dataset = PERSONAS[persona];
   const { state, replay } = useStreamingDemo(scenario.lead);
@@ -85,7 +87,7 @@ export function AppShell() {
     (c: ClientAccount) => {
       setActiveClient(c.name);
       setQuestion(c.question);
-      setScenario(resolveScenario(c.question, "agency", SCENARIOS));
+      setScenario(buildClientScenario(c));
       setMode("split");
       setScreen("chat");
       replay();
@@ -96,8 +98,16 @@ export function AppShell() {
   const completeOnboarding = useCallback(
     (intake: OnboardingIntake) => {
       const sc = buildStarterPlan(intake);
+      const names = ["Google Ads", "Meta Ads", "GA4", "Search Console", "TikTok Ads", "LinkedIn Ads"];
       setPersona("founder");
-      setChannels(PERSONAS.founder.channels);
+      // A freshly-onboarded founder only has the channels they actually picked.
+      setChannels(
+        names.map((name): Channel => ({
+          name,
+          status: intake.channels.includes(name) ? "connected" : "disconnected",
+        })),
+      );
+      setFounderConfig({ ...DEFAULT_FORECAST, current: intake.budget });
       setActiveChat(0);
       setActiveClient(null);
       setQuestion(sc.question);
@@ -139,7 +149,9 @@ export function AppShell() {
         ) : screen === "forecast" ? (
           <ForecastScreen
             onClose={() => setScreen("chat")}
-            config={persona === "ceo" ? CEO_FORECAST : DEFAULT_FORECAST}
+            config={
+              persona === "ceo" ? CEO_FORECAST : persona === "founder" ? founderConfig : DEFAULT_FORECAST
+            }
           />
         ) : (
           <>
@@ -188,7 +200,7 @@ export function AppShell() {
                 typed={typed}
                 question={question}
                 scenario={scenario}
-                workspace={dataset.workspace}
+                workspace={persona === "agency" && activeClient ? activeClient : dataset.workspace}
               />
             )}
           </>
