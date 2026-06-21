@@ -10,7 +10,7 @@ import { resolveScenario, defaultScenarioFor } from "@/lib/scenarios/resolve";
 import { buildStarterPlan, type OnboardingIntake } from "@/lib/scenarios/buildStarterPlan";
 import { buildClientScenario } from "@/lib/scenarios/buildClientScenario";
 import { CEO_FORECAST, DEFAULT_FORECAST, type ForecastConfig } from "@/lib/forecast/project";
-import { useStreamingDemo } from "@/hooks/useStreamingDemo";
+import { useStreamingChat } from "@/hooks/useStreamingChat";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { SplitView } from "@/components/views/SplitView";
@@ -41,7 +41,9 @@ export function AppShell() {
   const [founderConfig, setFounderConfig] = useState<ForecastConfig>(DEFAULT_FORECAST);
 
   const dataset = PERSONAS[persona];
-  const { state, replay } = useStreamingDemo(scenario.lead);
+  // M0a: the staged-reveal surface is now fed by a real SSE stream (/api/chat)
+  // through the shared StreamEvent reducer, instead of in-component timers.
+  const { state, replay } = useStreamingChat(scenario);
   const { step, typed } = state;
 
   const ask = useCallback(
