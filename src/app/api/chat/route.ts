@@ -1,26 +1,33 @@
 import { STEP_FOR_KIND, type ArtifactPayload, type StreamEvent } from "@/lib/streaming/events";
 import type { AnswerData, ResultChip } from "@/types/artifacts";
+import type { Persona } from "@/types/scenario";
+import { routeModel } from "@/lib/agent/router";
+import { buildAgentPrompt } from "@/lib/agent/prompt";
+import { isLiveAgentEnabled, streamAgentText } from "@/lib/agent/provider";
 
 /**
- * Canned SSE chat endpoint (M0a). It re-emits a fully-formed answer as a real
- * StreamEvent sequence over Server-Sent Events, on the prototype's staged-reveal
- * pacing. The "canned source" here is the scenario the client already holds; in
- * the real backend the agent service produces these same events from live data.
- * The point of M0a is to exercise the transport + reducer + front-end swap so
- * that swap is a no-op when the agent replaces this route's body.
+ * SSE chat endpoint.
+ *
+ * M0a established the StreamEvent transport + reducer on canned data. M0b makes
+ * the LEAD prose real: a pre-call router picks the model tier, the prompt is
+ * grounded in the connected-account data (internal-first), and Claude streams
+ * the lead back as text deltas. Artifacts/chips/closing remain canned until the
+ * data layer (M1). With no API key the lead falls back to the canned text, so
+ * the app behaves identically offline — the live path is one env var away.
  */
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 interface ChatRequest {
   question: string;
+  persona: Persona;
   lead: string;
   chips: ResultChip[];
   artifacts: ArtifactPayload[];
   closing: AnswerData["closing"];
 }
 
-/** Phase reveal beats (step, inter-phase delay ms) after the lead finishes typing. */
+/** Phase reveal beats (step, delay-after-previous ms) once the lead is done. */
 const PHASES: Array<[number, number]> = [
   [2, 260],
   [3, 320],
@@ -44,6 +51,7 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   const encoder = new TextEncoder();
+  const ac = new AbortController();
   let closed = false;
 
   const stream = new ReadableStream<Uint8Array>({
@@ -56,20 +64,57 @@ export async function POST(req: Request): Promise<Response> {
       try {
         send({ type: "start", question: body.question });
 
-        // Phase 1 + typewriter: stream the lead in word-sized deltas so `typed`
-        // grows the same way the prototype's typewriter did. The chunker keeps
-        // every character (incl. interior whitespace) so the joined text is exact.
         await sleep(LEAD_START_MS);
         send({ type: "phase", step: 1 });
-        const chunks = body.lead.match(/\s*\S+/g) ?? [body.lead];
-        for (const c of chunks) {
-          if (closed) return;
-          send({ type: "text-delta", text: c });
-          await sleep(WORD_MS);
+
+        // ── Lead prose: live model (routed + grounded) with canned fallback ──
+        const decision = routeModel({
+          question: body.question,
+          persona: body.persona,
+          artifactKinds: body.artifacts.map((a) => a.kind),
+        });
+        console.log(`[agent] route ${decision.tier} (${decision.model}) — ${decision.reason}`);
+
+        let streamed = false;
+        if (isLiveAgentEnabled()) {
+          try {
+            const { system, userContent } = buildAgentPrompt({
+              question: body.question,
+              persona: body.persona,
+              artifacts: body.artifacts,
+            });
+            for await (const piece of streamAgentText({
+              model: decision.model,
+              effort: decision.effort,
+              system,
+              userContent,
+              signal: ac.signal,
+            })) {
+              if (closed) return;
+              send({ type: "text-delta", text: piece });
+              streamed = true;
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.warn(
+              streamed
+                ? `[agent] live generation interrupted after partial output: ${msg}`
+                : `[agent] live generation failed, using canned lead: ${msg}`,
+            );
+          }
+        }
+        if (!streamed) {
+          // Deterministic fallback: chunk the canned lead so `typed` grows the
+          // same way the prototype's typewriter did (every character preserved).
+          const chunks = body.lead.match(/\s*\S+/g) ?? [body.lead];
+          for (const c of chunks) {
+            if (closed) return;
+            send({ type: "text-delta", text: c });
+            await sleep(WORD_MS);
+          }
         }
 
-        // Remaining phases. Artifacts ride out as their base reveal step arrives
-        // (the reducer accumulates them); chips at step 2, closing at step 6.
+        // ── Remaining phases: canned artifacts/chips/closing on staged reveal ──
         const emitted = new Set<number>();
         let chipsSent = false;
         let closingSent = false;
@@ -94,8 +139,7 @@ export async function POST(req: Request): Promise<Response> {
           }
         }
 
-        // Flush anything not yet emitted (defensive — e.g. an artifact whose
-        // base step exceeds 7, or empty chips/closing).
+        // Flush anything not yet emitted (defensive).
         body.artifacts.forEach((a, i) => {
           if (!emitted.has(i)) send({ type: "artifact", payload: a });
         });
@@ -116,6 +160,7 @@ export async function POST(req: Request): Promise<Response> {
     },
     cancel() {
       closed = true;
+      ac.abort();
     },
   });
 

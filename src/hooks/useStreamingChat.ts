@@ -43,6 +43,7 @@ export function useStreamingChat(scenario: Scenario) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             question: scenario.question,
+            persona: scenario.persona,
             lead: scenario.lead,
             chips: scenario.chips,
             artifacts: scenario.artifacts,
