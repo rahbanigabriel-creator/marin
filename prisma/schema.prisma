@@ -1,0 +1,144 @@
+// Marin — Prisma schema (Stack B foundation).
+//
+// Multi-tenant by Workspace. Connected-account OAuth tokens are stored ONLY as
+// AES-256-GCM ciphertext in the Connection token vault (encrypted at rest with
+// the key from TOKEN_ENC_KEY); plaintext tokens never touch the database. The
+// metrics warehouse (MetricFact) holds canonical, normalized metrics keyed by
+// (workspace, platform, date, metric). Billing/usage live in Subscription +
+// UsageEvent. EU-first: no region is hardcoded here — residency is a property
+// of the Neon/Postgres deployment (DATABASE_URL), not the schema.
+//
+// The client is generated into node_modules/@prisma/client; src/lib/db.ts
+// re-exports a hot-reload-safe singleton imported from "@prisma/client".
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// A tenant. All app data hangs off a Workspace (org-level multi-tenancy).
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  memberships  Membership[]
+  connections  Connection[]
+  metricFacts  MetricFact[]
+  subscription Subscription?
+  usageEvents  UsageEvent[]
+
+  @@map("workspaces")
+}
+
+/// Maps a Clerk user into a Workspace with a role. Role is a String
+/// (owner | admin | member) rather than an enum so seeding/migrations stay
+/// flexible and we avoid enum-migration friction.
+model Membership {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  clerkUserId String   @map("clerk_user_id")
+  role        String   @default("member") // owner | admin | member
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, clerkUserId])
+  @@index([clerkUserId])
+  @@map("memberships")
+}
+
+/// A connected ad/analytics account. The encAccessToken / encRefreshToken
+/// columns hold AES-256-GCM ciphertext ONLY (see src/lib/crypto token vault);
+/// plaintext OAuth tokens are never persisted. status drives the
+/// broken-connection UX (connected | error | revoked).
+model Connection {
+  id                String    @id @default(cuid())
+  workspaceId       String    @map("workspace_id")
+  platform          String // google_ads | ga4 | meta_ads
+  externalAccountId String    @map("external_account_id")
+  displayName       String?   @map("display_name")
+  status            String    @default("connected") // connected | error | revoked
+  scopes            String? // space- or comma-separated granted scopes
+  encAccessToken    String    @map("enc_access_token") // AES-256-GCM ciphertext
+  encRefreshToken   String?   @map("enc_refresh_token") // AES-256-GCM ciphertext
+  expiresAt         DateTime? @map("expires_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, platform, externalAccountId])
+  @@index([workspaceId, platform])
+  @@map("connections")
+}
+
+/// Canonical metrics warehouse. One row per (workspace, platform, date,
+/// campaign, metric). `metric` is a canonical name (spend | roas | cpa |
+/// conversions | impressions | clicks | revenue | ...); `value` is the number.
+///
+/// Restatement = upsert on the natural key (workspaceId, platform, date,
+/// campaign, metric). Platforms restate recent conversions for days/weeks, so
+/// rows are revisable, not append-only (docs/backend-architecture.md §6).
+///
+/// `campaign` is NOT NULL with a "" sentinel for account-level (campaign-less)
+/// facts: Postgres treats NULLs as DISTINCT in a unique index, which would let
+/// duplicate account-level rows slip past the natural key and break upsert. The
+/// "" sentinel keeps the compound @@unique enforceable for every grain.
+model MetricFact {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  platform    String // google_ads | ga4 | meta_ads
+  date        DateTime
+  campaign    String   @default("") // "" = account-level (no campaign); see note above
+  metric      String // spend | roas | cpa | conversions | impressions | clicks | revenue | ...
+  value       Float
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, platform, date, campaign, metric])
+  @@index([workspaceId, platform, date])
+  @@index([workspaceId, metric])
+  @@map("metric_facts")
+}
+
+/// Stripe-backed billing state for a workspace (one per tenant).
+model Subscription {
+  id               String    @id @default(cuid())
+  workspaceId      String    @unique @map("workspace_id")
+  stripeCustomerId String?   @map("stripe_customer_id")
+  stripeSubId      String?   @map("stripe_sub_id")
+  plan             String    @default("free") // free | solo | business | max
+  status           String    @default("active")
+  currentPeriodEnd DateTime? @map("current_period_end")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("subscriptions")
+}
+
+/// Per-answer usage + credit metering (drives plan limits / overage billing).
+model UsageEvent {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  kind        String // answer | credit
+  credits     Float    @default(0)
+  model       String? // e.g. claude-haiku / sonnet / opus tier used
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@map("usage_events")
+}

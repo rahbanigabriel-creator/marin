@@ -92,5 +92,6 @@ export function useStreamingChat(scenario: Scenario) {
     closing: chat.closing,
     done: chat.done,
     error: chat.error,
+    dataMode: chat.dataMode,
   };
 }

@@ -1,5 +1,5 @@
 import type { AnswerData, ResultChip } from "@/types/artifacts";
-import type { AgentStatusKey, ArtifactPayload, StreamEvent } from "./events";
+import type { AgentStatusKey, ArtifactPayload, DataMode, StreamEvent } from "./events";
 
 /**
  * The single source of truth for turning a StreamEvent sequence into render
@@ -26,6 +26,12 @@ export interface ChatStreamState {
   done: boolean;
   /** terminal error message, if the stream failed */
   error: string | null;
+  /**
+   * Whether this answer is grounded in live (DB-backed) data or the canned
+   * sample dataset. Defaults to "sample" so the offline / no-DB path is
+   * labelled honestly; the route emits a "data-mode" event to upgrade to "live".
+   */
+  dataMode: DataMode;
 }
 
 export const initialChatState: ChatStreamState = {
@@ -38,6 +44,7 @@ export const initialChatState: ChatStreamState = {
   closing: null,
   done: false,
   error: null,
+  dataMode: "sample",
 };
 
 export function streamReducer(state: ChatStreamState, event: StreamEvent): ChatStreamState {
@@ -50,6 +57,8 @@ export function streamReducer(state: ChatStreamState, event: StreamEvent): ChatS
       return { ...state, step: Math.max(state.step, event.step) };
     case "status":
       return { ...state, status: { key: event.key, label: event.label } };
+    case "data-mode":
+      return { ...state, dataMode: event.mode };
     case "thinking-delta":
       return { ...state, thinking: state.thinking + event.text };
     case "text-delta":

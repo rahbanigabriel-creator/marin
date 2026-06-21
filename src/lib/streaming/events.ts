@@ -87,10 +87,23 @@ export const AGENT_STATUS_LABEL: Record<AgentStatusKey, string> = {
   done: "",
 };
 
+/**
+ * Where the grounding data for this answer came from:
+ *   • "live"   — real metrics read from the database (a workspace has MetricFact
+ *                rows behind the MetricsSource interface).
+ *   • "sample" — no connected data yet, so the answer is grounded in the canned
+ *                demo dataset. The UI labels this clearly so a sample answer is
+ *                never mistaken for the user's real numbers.
+ * Defaults to "sample" everywhere (the offline / no-DB path), so the existing
+ * mockup behaviour is preserved unless the route explicitly signals "live".
+ */
+export type DataMode = "live" | "sample";
+
 export type StreamEvent =
   | { type: "start"; question: string }
   | { type: "phase"; step: number }
   | { type: "status"; key: AgentStatusKey; label: string }
+  | { type: "data-mode"; mode: DataMode }
   | { type: "thinking-delta"; text: string }
   | { type: "text-delta"; text: string }
   | { type: "result-chips"; chips: ResultChip[] }

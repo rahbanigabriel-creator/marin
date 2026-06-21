@@ -1,10 +1,13 @@
-import { AGENT_STATUS_LABEL, STEP_FOR_KIND, type ArtifactPayload, type StreamEvent } from "@/lib/streaming/events";
+import { AGENT_STATUS_LABEL, STEP_FOR_KIND, type ArtifactPayload, type DataMode, type StreamEvent } from "@/lib/streaming/events";
 import type { AnswerData, ResultChip } from "@/types/artifacts";
 import type { Persona } from "@/types/scenario";
 import { routeModel } from "@/lib/agent/router";
 import { buildAgentPrompt, serializeArtifacts } from "@/lib/agent/prompt";
 import { isLiveAgentEnabled } from "@/lib/agent/provider";
 import { runAgentWithTools } from "@/lib/agent/loop";
+import type { MetricsSource } from "@/lib/agent/tools";
+import { getCurrentWorkspace } from "@/lib/auth";
+import { createDbMetricsSource, hasLiveData } from "@/lib/metrics/source";
 
 /**
  * SSE chat endpoint.
@@ -43,6 +46,37 @@ const WORD_MS = 26;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+/**
+ * Resolve the internal-read data source for this turn, preferring real
+ * DB-backed metrics over the canned sample dataset — without ever breaking the
+ * offline path. Internal-first is preserved: the agent still calls
+ * get_account_metrics; ONLY the source behind that tool changes.
+ *
+ *   • Workspace has live MetricFact data → DB source, mode "live".
+ *   • Otherwise (no DB, no rows, or any resolution error) → the existing canned
+ *     source built from the request artifacts, mode "sample".
+ *
+ * Never throws: any failure resolving the workspace or reading the DB degrades
+ * gracefully to the labelled sample path, so behaviour is byte-compatible with
+ * today aside from the honest "Sample data" label.
+ */
+async function resolveMetricsSource(
+  artifacts: ArtifactPayload[],
+): Promise<{ source: MetricsSource; mode: DataMode }> {
+  const canned: MetricsSource = { getAccountMetrics: () => serializeArtifacts(artifacts) };
+  try {
+    const workspace = await getCurrentWorkspace();
+    if (workspace && (await hasLiveData(workspace.id))) {
+      const source = await createDbMetricsSource(workspace.id);
+      return { source, mode: "live" };
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[agent] live data unavailable, using sample data: ${msg}`);
+  }
+  return { source: canned, mode: "sample" };
+}
+
 export async function POST(req: Request): Promise<Response> {
   let body: ChatRequest;
   try {
@@ -65,6 +99,13 @@ export async function POST(req: Request): Promise<Response> {
       try {
         send({ type: "start", question: body.question });
 
+        // ── Data source: real DB-backed metrics when the workspace has them,
+        // else the canned sample dataset. Internal-first is preserved — the
+        // agent still reads through get_account_metrics; only the source varies.
+        // The mode drives an honest "Sample data" label in the UI.
+        const { source, mode } = await resolveMetricsSource(body.artifacts);
+        send({ type: "data-mode", mode });
+
         await sleep(LEAD_START_MS);
         send({ type: "phase", step: 1 });
 
@@ -83,10 +124,6 @@ export async function POST(req: Request): Promise<Response> {
               question: body.question,
               persona: body.persona,
             });
-            // M1a: the agent fetches data via an internal tool (internal-first),
-            // instead of having it stuffed into the prompt. Source is canned for
-            // now; M1c swaps in the database behind this same interface.
-            const source = { getAccountMetrics: () => serializeArtifacts(body.artifacts) };
             for await (const ev of runAgentWithTools({
               model: decision.model,
               effort: decision.effort,

@@ -43,7 +43,7 @@ export function AppShell() {
   const dataset = PERSONAS[persona];
   // The staged-reveal surface is fed by a real SSE stream (/api/chat) through the
   // shared StreamEvent reducer. `status`/`thinking` carry the live agent activity.
-  const { state, replay, status, thinking } = useStreamingChat(scenario);
+  const { state, replay, status, thinking, dataMode } = useStreamingChat(scenario);
   const { step, typed } = state;
 
   const ask = useCallback(
@@ -189,6 +189,7 @@ export function AppShell() {
                 onSend={ask}
                 onSuggest={ask}
                 suggestions={dataset.suggestions}
+                dataMode={dataMode}
               />
             ) : mode === "thread" ? (
               <ThreadView

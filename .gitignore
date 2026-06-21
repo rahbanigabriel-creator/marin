@@ -32,6 +32,9 @@ next-env.d.ts
 
 # prisma
 /prisma/migrations/dev.db*
+# generated Prisma client / any code-generated output (never commit; regenerate
+# with `npm run db:generate`). Guards against stale generators or native binaries.
+/src/generated
 
 # vercel / render
 .vercel

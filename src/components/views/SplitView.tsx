@@ -1,5 +1,5 @@
 import type { Scenario } from "@/types/scenario";
-import type { AgentStatusKey } from "@/lib/streaming/events";
+import type { AgentStatusKey, DataMode } from "@/lib/streaming/events";
 import { gatesForStep } from "@/lib/streaming/stepModel";
 import { UserBubble } from "@/components/chat/UserBubble";
 import { AssistantBlock } from "@/components/chat/AssistantBlock";
@@ -17,6 +17,8 @@ interface SplitViewProps {
   onSend: (text: string) => void;
   onSuggest: (text: string) => void;
   suggestions: string[];
+  /** whether the workspace pane reflects live (DB-backed) or sample data */
+  dataMode: DataMode;
 }
 
 export function SplitView({
@@ -29,6 +31,7 @@ export function SplitView({
   onSend,
   onSuggest,
   suggestions,
+  dataMode,
 }: SplitViewProps) {
   const g = gatesForStep(step, typed.length, scenario.lead.length);
 
@@ -56,10 +59,20 @@ export function SplitView({
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface-page">
         <div className="flex flex-none items-center justify-between border-b border-line-4 p-[13px_24px]">
           <span className="font-sans text-[13px] font-semibold text-ink-500">Workspace</span>
-          <span className="flex items-center gap-[6px] font-mono text-[11px] font-medium text-ink-300">
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#9A3D63" }} />
-            live from your data
-          </span>
+          {dataMode === "live" ? (
+            <span className="flex items-center gap-[6px] font-mono text-[11px] font-medium text-ink-300">
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#9A3D63" }} />
+              live from your data
+            </span>
+          ) : (
+            <span
+              className="flex items-center gap-[6px] rounded-full border border-line-4 px-[8px] py-[2px] font-mono text-[11px] font-medium text-ink-300"
+              title="No connected-account data yet — this answer uses a sample dataset."
+            >
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#A8997C" }} />
+              Sample data
+            </span>
+          )}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-[24px]">
           {g.canvasReady ? (
