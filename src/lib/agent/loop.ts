@@ -1,27 +1,35 @@
 import type Anthropic from "@anthropic-ai/sdk";
+import { AGENT_STATUS_LABEL, type AgentStatusKey } from "@/lib/streaming/events";
 import { getClient } from "./provider";
 import { TIER_MODEL } from "./router";
+import { checkGroundedness } from "./oracle";
 import { dispatchTool, TOOLS, type DispatchCtx, type MetricsSource } from "./tools";
 
 /**
- * The agent loop (architecture §1, §4). A streaming manual tool-use loop:
+ * The agent loop (architecture §1, §4) — now surfacing what it's actually doing.
  *
- *  - Turn 0 FORCES get_account_metrics (tool_choice) so the very first action is
- *    always an internal data read — internal-first enforced structurally, not by
- *    asking the model nicely. (Thinking is disabled on the forced-tool turn to
- *    avoid the thinking+forced-tool-choice incompatibility, then enabled for the
- *    reasoning/answer turns.)
- *  - Text deltas are only yielded once an internal read has happened, so any
- *    preamble before the data read is suppressed — the caller sees just the
- *    grounded lead.
- *  - Each tool call goes through dispatchTool, which enforces the internal-first
- *    rule for (future) external tools.
+ *  - Turn 0 FORCES get_account_metrics (internal-first, enforced structurally).
+ *  - The answer turn streams SUMMARIZED THINKING live (yielded as it arrives, so
+ *    the UI can show the real reasoning like the Claude app) while the lead text
+ *    is buffered.
+ *  - The buffered lead runs through the deterministic groundedness oracle; on a
+ *    flag it regenerates once with the unsupported figures fed back.
+ *  - The verified lead is then streamed word-by-word.
  *
- * Yields the lead text incrementally. Throws on SDK errors (the route catches
- * and falls back to the canned lead).
+ * Yields a typed activity stream (status | thinking | text) the route maps to
+ * StreamEvents. Throws on SDK errors (the route falls back to the canned lead).
  */
+export type AgentEvent =
+  | { kind: "status"; key: AgentStatusKey; label: string }
+  | { kind: "thinking"; text: string }
+  | { kind: "text"; text: string };
+
 const MAX_ITERATIONS = 4;
 const MAX_TOKENS = 1024;
+const WORD_MS = 22;
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const status = (key: AgentStatusKey): AgentEvent => ({ kind: "status", key, label: AGENT_STATUS_LABEL[key] });
 
 export async function* runAgentWithTools(opts: {
   model: string;
@@ -30,14 +38,19 @@ export async function* runAgentWithTools(opts: {
   userContent: string;
   source: MetricsSource;
   signal?: AbortSignal;
-}): AsyncGenerator<string> {
+}): AsyncGenerator<AgentEvent> {
   const client = getClient();
   const ctx: DispatchCtx = { internalReadDone: false };
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: opts.userContent }];
+  let internalData = "";
+  let finalText = "";
+
+  yield status("reading");
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     const forceInternalRead = i === 0;
     const useThinking = !forceInternalRead && opts.model !== TIER_MODEL.low;
+    if (i === 1) yield status("analyzing");
 
     const params = {
       model: opts.model,
@@ -51,7 +64,7 @@ export async function* runAgentWithTools(opts: {
         ? { tool_choice: { type: "tool" as const, name: "get_account_metrics" } }
         : {}),
       ...(useThinking
-        ? { thinking: { type: "adaptive" as const }, output_config: { effort: opts.effort } }
+        ? { thinking: { type: "adaptive" as const, display: "summarized" as const }, output_config: { effort: opts.effort } }
         : {}),
     };
 
@@ -60,36 +73,101 @@ export async function* runAgentWithTools(opts: {
       opts.signal ? ({ signal: opts.signal } as Parameters<typeof client.messages.stream>[1]) : undefined,
     );
 
+    let turnText = "";
     for await (const event of stream) {
-      if (
-        event.type === "content_block_delta" &&
-        event.delta.type === "text_delta" &&
-        ctx.internalReadDone
-      ) {
-        yield event.delta.text;
+      if (event.type === "content_block_delta") {
+        if (event.delta.type === "thinking_delta") yield { kind: "thinking", text: event.delta.thinking };
+        else if (event.delta.type === "text_delta") turnText += event.delta.text;
       }
     }
-
     const message = await stream.finalMessage();
-    if (message.stop_reason !== "tool_use") return; // end_turn / max_tokens / etc. → done
 
-    const toolUses = message.content.filter(
-      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
-    );
-    if (toolUses.length === 0) return;
-
-    messages.push({ role: "assistant", content: message.content });
-
-    const results: Anthropic.ToolResultBlockParam[] = [];
-    for (const tu of toolUses) {
-      const outcome = await dispatchTool(tu.name, tu.input, opts.source, ctx);
-      results.push({
-        type: "tool_result",
-        tool_use_id: tu.id,
-        content: outcome.content,
-        is_error: outcome.isError,
-      });
+    if (message.stop_reason === "tool_use") {
+      const toolUses = message.content.filter(
+        (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
+      );
+      messages.push({ role: "assistant", content: message.content });
+      const results: Anthropic.ToolResultBlockParam[] = [];
+      for (const tu of toolUses) {
+        const outcome = await dispatchTool(tu.name, tu.input, opts.source, ctx);
+        if (tu.name === "get_account_metrics" && !outcome.isError) internalData = outcome.content;
+        results.push({
+          type: "tool_result",
+          tool_use_id: tu.id,
+          content: outcome.content,
+          is_error: outcome.isError,
+        });
+      }
+      messages.push({ role: "user", content: results });
+      continue;
     }
-    messages.push({ role: "user", content: results });
+
+    finalText = turnText.trim(); // non-tool stop → this turn produced the answer
+    break;
   }
+
+  if (!finalText) return; // nothing produced → route falls back to canned lead
+
+  // ── Groundedness oracle (deterministic, outside the model trust boundary) ──
+  yield status("verifying");
+  let check = checkGroundedness(finalText, internalData);
+  if (!check.ok) {
+    yield status("refining");
+    const corrected = await regenerateGrounded(client, opts, internalData, check.unverified);
+    if (corrected) {
+      finalText = corrected;
+      check = checkGroundedness(finalText, internalData);
+    }
+    if (!check.ok) {
+      console.warn(`[agent] groundedness: unverified after refine: ${check.unverified.join(", ")}`);
+    }
+  }
+
+  // ── Stream the verified lead (typewriter) ──
+  yield status("writing");
+  for (const chunk of finalText.match(/\s*\S+/g) ?? [finalText]) {
+    yield { kind: "text", text: chunk };
+    await sleep(WORD_MS);
+  }
+}
+
+/** One corrective pass: rewrite using only supported figures. Data is already
+ *  read (internal-first satisfied), so this is a plain grounded generation. */
+async function regenerateGrounded(
+  client: Anthropic,
+  opts: { model: string; effort: "low" | "medium" | "high"; system: string; userContent: string; signal?: AbortSignal },
+  data: string,
+  unverified: string[],
+): Promise<string> {
+  const userContent = `${opts.userContent}
+
+INTERNAL DATA:
+${data}
+
+Your previous draft stated figures NOT supported by the data: ${unverified.join(", ")}. Rewrite the lead (2–3 sentences) using ONLY figures present in, or directly derivable from, the data above. Do not invent numbers.`;
+
+  const params = {
+    model: opts.model,
+    max_tokens: MAX_TOKENS,
+    system: [
+      { type: "text" as const, text: opts.system, cache_control: { type: "ephemeral" as const } },
+    ],
+    messages: [{ role: "user" as const, content: userContent }],
+    ...(opts.model !== TIER_MODEL.low
+      ? { thinking: { type: "adaptive" as const }, output_config: { effort: opts.effort } }
+      : {}),
+  };
+
+  const stream = client.messages.stream(
+    params as Parameters<typeof client.messages.stream>[0],
+    opts.signal ? ({ signal: opts.signal } as Parameters<typeof client.messages.stream>[1]) : undefined,
+  );
+  let text = "";
+  for await (const event of stream) {
+    if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+      text += event.delta.text;
+    }
+  }
+  await stream.finalMessage();
+  return text.trim();
 }

@@ -41,9 +41,9 @@ export function AppShell() {
   const [founderConfig, setFounderConfig] = useState<ForecastConfig>(DEFAULT_FORECAST);
 
   const dataset = PERSONAS[persona];
-  // M0a: the staged-reveal surface is now fed by a real SSE stream (/api/chat)
-  // through the shared StreamEvent reducer, instead of in-component timers.
-  const { state, replay } = useStreamingChat(scenario);
+  // The staged-reveal surface is fed by a real SSE stream (/api/chat) through the
+  // shared StreamEvent reducer. `status`/`thinking` carry the live agent activity.
+  const { state, replay, status, thinking } = useStreamingChat(scenario);
   const { step, typed } = state;
 
   const ask = useCallback(
@@ -182,6 +182,8 @@ export function AppShell() {
               <SplitView
                 step={step}
                 typed={typed}
+                status={status}
+                thinking={thinking}
                 question={question}
                 scenario={scenario}
                 onSend={ask}
@@ -192,6 +194,8 @@ export function AppShell() {
               <ThreadView
                 step={step}
                 typed={typed}
+                status={status}
+                thinking={thinking}
                 question={question}
                 scenario={scenario}
                 onSend={ask}

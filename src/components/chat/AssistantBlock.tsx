@@ -1,6 +1,7 @@
 import type { ResultChip } from "@/types/artifacts";
-import { gatesForStep, caretOn } from "@/lib/streaming/stepModel";
-import { ThinkingDots } from "@/components/ui/ThinkingDots";
+import type { AgentStatusKey } from "@/lib/streaming/events";
+import { gatesForStep } from "@/lib/streaming/stepModel";
+import { AgentActivity } from "./AgentActivity";
 import { TypewriterText } from "./TypewriterText";
 import { ResultChips } from "./ResultChips";
 import { RichLine } from "./RichLine";
@@ -8,6 +9,10 @@ import { RichLine } from "./RichLine";
 interface AssistantBlockProps {
   step: number;
   typed: string;
+  /** live agent activity (dynamic "what it's doing") */
+  status: { key: AgentStatusKey; label: string } | null;
+  /** accumulated summarized reasoning */
+  thinking: string;
   lead: string;
   chips: ResultChip[];
   closing: { split: string; thread: string };
@@ -19,6 +24,8 @@ interface AssistantBlockProps {
 export function AssistantBlock({
   step,
   typed,
+  status,
+  thinking,
   lead,
   chips,
   closing,
@@ -26,7 +33,10 @@ export function AssistantBlock({
   inlineCanvas,
 }: AssistantBlockProps) {
   const g = gatesForStep(step, typed.length, lead.length);
-  const showCaret = caretOn(step, typed.length, lead.length);
+  const answering = typed.length > 0;
+  // Caret runs while the lead is still streaming. Keyed off step (not text
+  // length) because the live lead's length differs from the canned lead.
+  const showCaret = answering && step < 2;
 
   const avatarSize = variant === "thread" ? 30 : 27;
   const avatarRadius = variant === "thread" ? 9 : 8;
@@ -55,20 +65,12 @@ export function AssistantBlock({
           <span className="font-sans font-semibold text-ink-900" style={{ fontSize: nameSize }}>
             Marin
           </span>
-          {variant === "split" && g.analyzing && (
-            <span className="font-mono text-[11px] font-medium text-plum-muted2">
-              reading your accounts…
-            </span>
-          )}
         </div>
 
-        {g.showThinking && <ThinkingDots />}
+        <AgentActivity status={status} thinking={thinking} answering={answering} />
 
-        {g.showTyped && (
-          <div
-            className="font-sans text-ink-800"
-            style={{ fontSize: bodySize, lineHeight }}
-          >
+        {answering && (
+          <div className="font-sans text-ink-800" style={{ fontSize: bodySize, lineHeight }}>
             <TypewriterText
               typed={typed}
               caretOn={showCaret}

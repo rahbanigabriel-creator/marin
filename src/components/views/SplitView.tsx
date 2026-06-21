@@ -1,4 +1,5 @@
 import type { Scenario } from "@/types/scenario";
+import type { AgentStatusKey } from "@/lib/streaming/events";
 import { gatesForStep } from "@/lib/streaming/stepModel";
 import { UserBubble } from "@/components/chat/UserBubble";
 import { AssistantBlock } from "@/components/chat/AssistantBlock";
@@ -9,6 +10,8 @@ import { ThinkingDots } from "@/components/ui/ThinkingDots";
 interface SplitViewProps {
   step: number;
   typed: string;
+  status: { key: AgentStatusKey; label: string } | null;
+  thinking: string;
   question: string;
   scenario: Scenario;
   onSend: (text: string) => void;
@@ -19,6 +22,8 @@ interface SplitViewProps {
 export function SplitView({
   step,
   typed,
+  status,
+  thinking,
   question,
   scenario,
   onSend,
@@ -36,6 +41,8 @@ export function SplitView({
           <AssistantBlock
             step={step}
             typed={typed}
+            status={status}
+            thinking={thinking}
             lead={scenario.lead}
             chips={scenario.chips}
             closing={scenario.closing}

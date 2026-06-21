@@ -1,4 +1,4 @@
-import { STEP_FOR_KIND, type ArtifactPayload, type StreamEvent } from "@/lib/streaming/events";
+import { AGENT_STATUS_LABEL, STEP_FOR_KIND, type ArtifactPayload, type StreamEvent } from "@/lib/streaming/events";
 import type { AnswerData, ResultChip } from "@/types/artifacts";
 import type { Persona } from "@/types/scenario";
 import { routeModel } from "@/lib/agent/router";
@@ -87,7 +87,7 @@ export async function POST(req: Request): Promise<Response> {
             // instead of having it stuffed into the prompt. Source is canned for
             // now; M1c swaps in the database behind this same interface.
             const source = { getAccountMetrics: () => serializeArtifacts(body.artifacts) };
-            for await (const piece of runAgentWithTools({
+            for await (const ev of runAgentWithTools({
               model: decision.model,
               effort: decision.effort,
               system,
@@ -96,8 +96,12 @@ export async function POST(req: Request): Promise<Response> {
               signal: ac.signal,
             })) {
               if (closed) return;
-              send({ type: "text-delta", text: piece });
-              streamed = true;
+              if (ev.kind === "status") send({ type: "status", key: ev.key, label: ev.label });
+              else if (ev.kind === "thinking") send({ type: "thinking-delta", text: ev.text });
+              else {
+                send({ type: "text-delta", text: ev.text });
+                streamed = true;
+              }
             }
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -109,8 +113,14 @@ export async function POST(req: Request): Promise<Response> {
           }
         }
         if (!streamed) {
-          // Deterministic fallback: chunk the canned lead so `typed` grows the
-          // same way the prototype's typewriter did (every character preserved).
+          // Deterministic fallback (no key / error): synthetic activity statuses
+          // so the UI still feels dynamic, then the canned lead, chunked the same
+          // way the prototype's typewriter did (every character preserved).
+          send({ type: "status", key: "reading", label: AGENT_STATUS_LABEL.reading });
+          await sleep(420);
+          send({ type: "status", key: "analyzing", label: AGENT_STATUS_LABEL.analyzing });
+          await sleep(520);
+          send({ type: "status", key: "writing", label: AGENT_STATUS_LABEL.writing });
           const chunks = body.lead.match(/\s*\S+/g) ?? [body.lead];
           for (const c of chunks) {
             if (closed) return;

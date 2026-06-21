@@ -85,6 +85,8 @@ export function useStreamingChat(scenario: Scenario) {
   return {
     state: { step: chat.step, typed: chat.typed } as StreamingState,
     replay,
+    status: chat.status,
+    thinking: chat.thinking,
     artifacts: chat.artifacts,
     chips: chat.chips,
     closing: chat.closing,

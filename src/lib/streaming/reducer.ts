@@ -1,5 +1,5 @@
 import type { AnswerData, ResultChip } from "@/types/artifacts";
-import type { ArtifactPayload, StreamEvent } from "./events";
+import type { AgentStatusKey, ArtifactPayload, StreamEvent } from "./events";
 
 /**
  * The single source of truth for turning a StreamEvent sequence into render
@@ -12,6 +12,10 @@ export interface ChatStreamState {
   step: number;
   /** accumulated assistant lead text (typewriter source) */
   typed: string;
+  /** live agent-activity status — the dynamic "what it's doing now" line */
+  status: { key: AgentStatusKey; label: string } | null;
+  /** accumulated summarized reasoning (Claude-app-style thinking) */
+  thinking: string;
   /** artifacts received so far, in arrival order */
   artifacts: ArtifactPayload[];
   /** result chips for the chat column */
@@ -27,6 +31,8 @@ export interface ChatStreamState {
 export const initialChatState: ChatStreamState = {
   step: 0,
   typed: "",
+  status: null,
+  thinking: "",
   artifacts: [],
   chips: [],
   closing: null,
@@ -42,6 +48,10 @@ export function streamReducer(state: ChatStreamState, event: StreamEvent): ChatS
     case "phase":
       // never go backwards — guards against out-of-order frames
       return { ...state, step: Math.max(state.step, event.step) };
+    case "status":
+      return { ...state, status: { key: event.key, label: event.label } };
+    case "thinking-delta":
+      return { ...state, thinking: state.thinking + event.text };
     case "text-delta":
       return { ...state, typed: state.typed + event.text };
     case "result-chips":

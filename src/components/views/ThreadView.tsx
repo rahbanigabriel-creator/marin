@@ -1,4 +1,5 @@
 import type { Scenario } from "@/types/scenario";
+import type { AgentStatusKey } from "@/lib/streaming/events";
 import { gatesForStep } from "@/lib/streaming/stepModel";
 import { UserBubble } from "@/components/chat/UserBubble";
 import { AssistantBlock } from "@/components/chat/AssistantBlock";
@@ -8,6 +9,8 @@ import { AnswerCanvas } from "@/components/canvas/AnswerCanvas";
 interface ThreadViewProps {
   step: number;
   typed: string;
+  status: { key: AgentStatusKey; label: string } | null;
+  thinking: string;
   question: string;
   scenario: Scenario;
   onSend: (text: string) => void;
@@ -18,6 +21,8 @@ interface ThreadViewProps {
 export function ThreadView({
   step,
   typed,
+  status,
+  thinking,
   question,
   scenario,
   onSend,
@@ -33,6 +38,8 @@ export function ThreadView({
         <AssistantBlock
           step={step}
           typed={typed}
+          status={status}
+          thinking={thinking}
           lead={scenario.lead}
           chips={scenario.chips}
           closing={scenario.closing}

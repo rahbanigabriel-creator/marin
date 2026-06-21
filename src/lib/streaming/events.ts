@@ -66,9 +66,32 @@ export type ArtifactPayload =
   | { kind: "forecastResult"; data: ForecastResultData }
   | { kind: "planAllocation"; data: PlanAllocationData };
 
+/**
+ * Live agent-activity states, surfaced in the UI so "thinking" is dynamic and
+ * truthful (what the agent is actually doing) rather than a canned timeline.
+ */
+export type AgentStatusKey =
+  | "reading"
+  | "analyzing"
+  | "verifying"
+  | "refining"
+  | "writing"
+  | "done";
+
+export const AGENT_STATUS_LABEL: Record<AgentStatusKey, string> = {
+  reading: "Reading your account data",
+  analyzing: "Analyzing performance",
+  verifying: "Checking every figure",
+  refining: "Double-checking the numbers",
+  writing: "Writing your answer",
+  done: "",
+};
+
 export type StreamEvent =
   | { type: "start"; question: string }
   | { type: "phase"; step: number }
+  | { type: "status"; key: AgentStatusKey; label: string }
+  | { type: "thinking-delta"; text: string }
   | { type: "text-delta"; text: string }
   | { type: "result-chips"; chips: ResultChip[] }
   | { type: "artifact"; payload: ArtifactPayload }
