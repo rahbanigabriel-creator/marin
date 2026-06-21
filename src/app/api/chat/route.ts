@@ -2,8 +2,9 @@ import { STEP_FOR_KIND, type ArtifactPayload, type StreamEvent } from "@/lib/str
 import type { AnswerData, ResultChip } from "@/types/artifacts";
 import type { Persona } from "@/types/scenario";
 import { routeModel } from "@/lib/agent/router";
-import { buildAgentPrompt } from "@/lib/agent/prompt";
-import { isLiveAgentEnabled, streamAgentText } from "@/lib/agent/provider";
+import { buildAgentPrompt, serializeArtifacts } from "@/lib/agent/prompt";
+import { isLiveAgentEnabled } from "@/lib/agent/provider";
+import { runAgentWithTools } from "@/lib/agent/loop";
 
 /**
  * SSE chat endpoint.
@@ -81,13 +82,17 @@ export async function POST(req: Request): Promise<Response> {
             const { system, userContent } = buildAgentPrompt({
               question: body.question,
               persona: body.persona,
-              artifacts: body.artifacts,
             });
-            for await (const piece of streamAgentText({
+            // M1a: the agent fetches data via an internal tool (internal-first),
+            // instead of having it stuffed into the prompt. Source is canned for
+            // now; M1c swaps in the database behind this same interface.
+            const source = { getAccountMetrics: () => serializeArtifacts(body.artifacts) };
+            for await (const piece of runAgentWithTools({
               model: decision.model,
               effort: decision.effort,
               system,
               userContent,
+              source,
               signal: ac.signal,
             })) {
               if (closed) return;

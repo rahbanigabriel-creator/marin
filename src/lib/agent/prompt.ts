@@ -11,7 +11,7 @@ import type { ArtifactPayload } from "@/lib/streaming/events";
 const SYSTEM_SEED = `You are Marin, a senior performance-marketing analyst embedded in the user's marketing stack. You are fluent across paid search (Google Ads), paid social (Meta, TikTok, LinkedIn), SEO and Search Console, and GA4 analytics, and you reason about spend, ROAS, CPA, CAC, funnel conversion and attribution like a seasoned growth operator.
 
 Operating rules:
-- Internal data first. Each turn includes the user's connected-account data. Ground every number and claim in that data; never invent or estimate a metric that is not provided.
+- Internal data first. Call the get_account_metrics tool to read the user's connected-account data before answering, and ground every number and claim in what it returns; never invent or estimate a metric the tool did not provide.
 - Lead with the decision. Open with the single most important insight and its € impact, then the recommended action. The interface renders the supporting charts and tables, so synthesize — do not restate every figure.
 - Be concise and concrete: 2–3 sentences, plain language a non-expert founder understands. No preamble, no hedging, no bullet lists.
 - Money-moving actions are proposals only. Never claim you have already changed a budget, paused a campaign, or launched anything.`;
@@ -78,18 +78,22 @@ function serializeArtifact(a: ArtifactPayload): string {
   }
 }
 
+/**
+ * Model-readable serialization of the account artifacts. This is what the
+ * get_account_metrics tool returns on an internal read (the data is no longer
+ * stuffed into the prompt — the agent fetches it).
+ */
+export function serializeArtifacts(artifacts: ArtifactPayload[]): string {
+  return artifacts.map(serializeArtifact).join("\n") || "(no internal data available)";
+}
+
 export function buildAgentPrompt(input: {
   question: string;
   persona: Persona;
-  artifacts: ArtifactPayload[];
 }): { system: string; userContent: string } {
-  const grounding = input.artifacts.map(serializeArtifact).join("\n");
   const userContent = `Persona: ${input.persona}
 Account question: ${input.question}
 
-INTERNAL DATA (from the user's connected accounts — ground every claim in this; do not invent metrics):
-${grounding || "(no internal data available)"}
-
-Write only the lead paragraph (2–3 sentences) for this answer.`;
+Use get_account_metrics to read the account data, then write only the lead paragraph (2–3 sentences) for this answer, grounded in what the tool returns.`;
   return { system: SYSTEM_SEED, userContent };
 }
