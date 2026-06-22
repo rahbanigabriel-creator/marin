@@ -28,13 +28,21 @@ Stacks committed on `backend`:
 ## DEFINITION OF DONE (verify each — this is "nothing dormant")
 1. App deployed on Vercel (EU region) and reachable at `https://www.marpin.ai`.
 2. Agent answers a real question in production (ANTHROPIC key set; SSE streams; thinking + grounded answer).
-3. At least one **real** ad account from the human's test project is connected and its **real** numbers are in `MetricFact`; the workspace shows **"live"** data-mode (not "Sample"), and the agent's answer cites those real figures.
+3. At least one **real** ad account from the human's test project is connected and its **real** numbers are in `MetricFact`; the workspace shows **"live"** data-mode (not "Sample"), the agent's answer cites those real figures, AND the on-screen **canvas (KPI cards, charts, leaks, funnel) renders those real numbers** — NO canned/demo graphs anywhere a real user sees.
 4. Connectors implemented for real (not stubs): **Google Ads, GA4, Meta Ads, and a NEW Apple Search Ads connector** — each `fetchMetrics` returns real `CanonicalMetric[]`.
 5. Inngest cron + on-connect sync actually run in prod and ingest data.
 6. *(DEFERRED — billing is out of scope this pass; do not set up Stripe. `UsageEvent` metering may stay as-is.)*
 7. GA4 fires on marpin.ai; Sentry, PostHog, Langfuse all receiving events in prod.
 8. Clerk sign-in/sign-up work in prod; a real user gets their own workspace (no shared dev workspace).
 9. `tsc` + `build` green; no secrets in git.
+
+## PHASE 0.0 — turn the demo mockup into a real product (DO THIS FIRST — it is the core gap)
+The front-end is still the validated DEMO mockup. The agent's lead TEXT is real, but most of what a user SEES is canned. For the founder's goal ("open it, connect my Google Ads, see MY real numbers AND graphs"), convert demo→real:
+1. **Real canvas artifacts — the #1 requirement: NO fake graphs.** Today `src/components/canvas/AnswerCanvas.tsx` renders the canned `scenario.artifacts` the client posts, NOT the user's data, and `src/app/api/chat/route.ts` emits those canned artifacts. Build real `ArtifactPayload`s (KPI cards, spend/ROAS chart, leaks, funnel) from the connected data in `MetricFact` for the current workspace, and have the route emit THOSE when the workspace has live data. The agent already reads real data for its TEXT via `get_account_metrics` — do the same for the VISUALS. When nothing is connected, show an empty/connect state — never canned graphs.
+2. **Wire the "Connect" UI to the real OAuth.** The Channels sidebar / `ConnectionsModal` "Connect" buttons are demo/static — wire each to start the real flow at `/api/connect/<platform>` (`google_ads`, `ga4`, `meta_ads`, `apple_search_ads`) and reflect real `Connection` status (connected / error / not connected).
+3. **Real first-run, not the demo.** For an authenticated user with zero connections, show a "Connect your accounts to see your real data" onboarding; remove/hide the demo persona switcher and the canned recent-chats/sample scenarios for real users (those were for the PMF mockup). The app reflects the user's own single workspace.
+4. **Account selection after OAuth.** After connecting, capture WHICH account the data comes from (Google Ads customer id, GA4 property id, Meta ad account id) and store it on the `Connection` (today it is a `"default"` placeholder) so fetch + display target the right account.
+Verify locally with the founder's real test accounts: connect → real rows in `MetricFact` → the CANVAS shows those real numbers/graphs (not the demo) → the agent answers on them.
 
 ## PHASE 0 — fix the known gaps in code (do locally first, verify, commit)
 Close these BEFORE deploying. After each: `npx tsc --noEmit` + `npm run build`.
@@ -75,7 +83,7 @@ Create or reuse, choosing EU regions, and collect the env values (full list belo
 2. Create the Vercel project from the repo (Framework: Next.js; EU region, e.g. `fra1`). Set the **Build Command** to `prisma generate && next build` (or rely on the postinstall from Phase 0.1).
 3. Add ALL env vars (table below) in Vercel Project Settings → Environment Variables (Production). `NEXT_PUBLIC_*` must be set at build time.
 4. Run prod migrations: `npx prisma migrate deploy` against the prod `DATABASE_URL`/`DIRECT_URL` (do this once; or as a deploy step).
-5. Deploy. Then add the custom domain `www.marpin.ai` (and apex `marpin.ai` → redirect) in Vercel → Domains; update DNS at the registrar per Vercel's instructions (CNAME/A). **Ask the human before changing DNS.**
+5. Deploy. Then add the custom domain `www.marpin.ai` (and apex `marpin.ai` → redirect) in Vercel → Domains. The registrar is **Epik** (the human just bought `marpin.ai` there; DNS is not pointed yet): in Epik → Domains → `marpin.ai` → DNS / nameservers, add the exact records Vercel shows (typically apex A/ALIAS + a `www` CNAME to `cname.vercel-dns.com`, or switch to Vercel's nameservers). **Ask the human before changing DNS.**
 6. After the domain resolves, set `APP_URL` / `NEXT_PUBLIC_APP_URL` to `https://www.marpin.ai`, and update every OAuth app's redirect URIs + the Inngest serve URL to the prod domain (Stripe webhook is DEFERRED — skip). Redeploy.
 
 ## PHASE 4 — turn everything on + verify nothing dormant
