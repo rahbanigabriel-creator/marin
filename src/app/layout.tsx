@@ -3,6 +3,8 @@ import { Hanken_Grotesk, Newsreader, JetBrains_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 
+import { GoogleAnalytics } from "@next/third-parties/google";
+
 import { isAuthConfigured } from "@/lib/auth";
 import { isAnalyticsConfigured } from "@/lib/analytics";
 import { PostHogProvider } from "@/components/analytics/PostHogProvider";
@@ -48,12 +50,21 @@ export default function RootLayout({
     children
   );
 
+  // First-party GA4 site analytics for www.marpin.ai — measures OUR OWN
+  // visitors. Loads only when the public Measurement ID is set; no-op otherwise.
+  // Distinct from the GOOGLE_OAUTH_* connector that lets customers connect their
+  // own GA4. @next/third-parties handles SPA pageviews automatically.
+  const gaId = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
+
   const tree = (
     <html
       lang="en"
       className={`${hanken.variable} ${newsreader.variable} ${jetbrainsMono.variable}`}
     >
-      <body>{body}</body>
+      <body>
+        {body}
+        {gaId ? <GoogleAnalytics gaId={gaId} /> : null}
+      </body>
     </html>
   );
 
