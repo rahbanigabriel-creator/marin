@@ -2,6 +2,9 @@
 
 You are an autonomous engineer with browser control. Your job: make **Marpin** (an AI marketing copilot at `www.marpin.ai`) a real, live product where **nothing is dormant** — the AI agent answers on real data, the marketing-platform connectors pull real numbers, billing works, analytics fire, and it's deployed on Vercel at the real domain. Read this whole file before acting. Work in small steps and **verify after each one**.
 
+## Scope for THIS pass — billing is DEFERRED
+We are in the **testing phase**. **Do NOT set up, configure, or enable Stripe / billing now** — no Stripe account, no prices, no webhook, no checkout. The billing code is already built and gated, so it stays dormant safely with no keys. Billing is revisited **only when the product is ready to ship to paying clients**. Skip every Stripe step below (each is marked DEFERRED). For this pass, "nothing dormant" means the **AI agent + connectors + analytics + deploy** are live; billing intentionally stays off.
+
 ## Ground rules (do not violate)
 - Repo: this project, root `/Users/gabriel/Desktop/Marin`, git remote `origin = github.com/rahbanigabriel-creator/marin`, current branch `backend` (NOT yet pushed). NEVER touch `/Users/gabriel/Desktop/Fit v2`.
 - **Verify-before-commit:** after every code change run `npx tsc --noEmit` and `npm run build`; both must be green. Do not run `npm run build` while `next dev` is running (it corrupts `.next` — stop dev first).
@@ -28,7 +31,7 @@ Stacks committed on `backend`:
 3. At least one **real** ad account from the human's test project is connected and its **real** numbers are in `MetricFact`; the workspace shows **"live"** data-mode (not "Sample"), and the agent's answer cites those real figures.
 4. Connectors implemented for real (not stubs): **Google Ads, GA4, Meta Ads, and a NEW Apple Search Ads connector** — each `fetchMetrics` returns real `CanonicalMetric[]`.
 5. Inngest cron + on-connect sync actually run in prod and ingest data.
-6. Stripe checkout completes (test mode ok) and writes a `Subscription`; webhook signature verified; a `UsageEvent` is recorded per answer.
+6. *(DEFERRED — billing is out of scope this pass; do not set up Stripe. `UsageEvent` metering may stay as-is.)*
 7. GA4 fires on marpin.ai; Sentry, PostHog, Langfuse all receiving events in prod.
 8. Clerk sign-in/sign-up work in prod; a real user gets their own workspace (no shared dev workspace).
 9. `tsc` + `build` green; no secrets in git.
@@ -45,7 +48,7 @@ Close these BEFORE deploying. After each: `npx tsc --noEmit` + `npm run build`.
 4. **ADD Apple Search Ads connector** (NEW — not built): add `apple_search_ads` to the registry + a client. NOTE Apple's auth is different: Apple Search Ads uses OAuth2 client-credentials with a client secret generated from a private key (not the Google/Meta authorization-code flow). Implement its auth + the Campaign Management Reports API (`https://api.searchads.apple.com/api/v5/reports/campaigns`). Add env vars `APPLE_SEARCH_ADS_CLIENT_ID`, `APPLE_SEARCH_ADS_TEAM_ID`, `APPLE_SEARCH_ADS_KEY_ID`, `APPLE_SEARCH_ADS_PRIVATE_KEY` (document in `.env.example`). Keep it graceful-without-keys like the others.
 5. **Wire on-connect backfill:** in `src/app/api/connect/[platform]/callback/route.ts`, after the `Connection` upsert (before the success redirect), call `emitConnectionConnected({ workspaceId, platform })` (defined in `src/lib/jobs/inngest.ts` but currently never called) so a sync fires immediately on connect.
 6. **Clerk auth pages + real tenancy:** create `src/app/sign-in/[[...sign-in]]/page.tsx` and `src/app/sign-up/[[...sign-up]]/page.tsx` (Clerk components). Fix `src/lib/auth.ts` so that when Clerk IS configured, `getCurrentWorkspace()` resolves a REAL per-user/per-org workspace (find-or-create by Clerk org/user id) instead of the shared dev workspace; use `prisma.workspace.upsert` to avoid the find-or-create race.
-7. **Stripe polish:** pre-create/reuse a Stripe customer per workspace at checkout (so the billing portal works before the first webhook). Decide with the human whether to enable `checkCreditBudget` enforcement (currently an always-allow stub) — if yes, enforce the plan's monthly credit cap in the chat route before answering.
+7. **Stripe polish — DEFERRED.** Skip this pass (testing phase; billing comes before client launch). Leave the billing code as-is (built + gated, dormant without keys).
 8. **Vault hardening (recommended):** bind tenant+account identity as GCM AAD when encrypting tokens so a blob can't be replayed across rows/tenants.
 
 ## PHASE 1 — prove connectors on REAL data, locally
@@ -63,7 +66,7 @@ Create or reuse, choosing EU regions, and collect the env values (full list belo
 - Google Ads developer token (Basic access) — approval may take ~1 day; start early.
 - Meta app (Marketing API): App ID/Secret; add prod redirect; for real customers, App Review for `ads_read`.
 - Apple Search Ads API: client id/secret/private key per Phase 0.4.
-- Stripe: secret key (start in TEST mode), create the 3 prices (€39.99/€149/€599 — match `src/lib/billing/plans.ts`), webhook endpoint `https://www.marpin.ai/api/billing/webhook` → signing secret.
+- Stripe: **DEFERRED — skip.** Do not create a Stripe account, prices, or webhook this pass.
 - Sentry (EU), PostHog (EU), Langfuse (EU), Resend, Upstash Redis (EU), Inngest (event + signing keys; point the Inngest app at `https://www.marpin.ai/api/inngest`).
 - GA4 property for marpin.ai → `NEXT_PUBLIC_GA_MEASUREMENT_ID` (G-XXXX).
 
@@ -73,19 +76,19 @@ Create or reuse, choosing EU regions, and collect the env values (full list belo
 3. Add ALL env vars (table below) in Vercel Project Settings → Environment Variables (Production). `NEXT_PUBLIC_*` must be set at build time.
 4. Run prod migrations: `npx prisma migrate deploy` against the prod `DATABASE_URL`/`DIRECT_URL` (do this once; or as a deploy step).
 5. Deploy. Then add the custom domain `www.marpin.ai` (and apex `marpin.ai` → redirect) in Vercel → Domains; update DNS at the registrar per Vercel's instructions (CNAME/A). **Ask the human before changing DNS.**
-6. After the domain resolves, set `APP_URL` / `NEXT_PUBLIC_APP_URL` to `https://www.marpin.ai`, and update every OAuth app's redirect URIs + the Stripe webhook URL + the Inngest serve URL to the prod domain. Redeploy.
+6. After the domain resolves, set `APP_URL` / `NEXT_PUBLIC_APP_URL` to `https://www.marpin.ai`, and update every OAuth app's redirect URIs + the Inngest serve URL to the prod domain (Stripe webhook is DEFERRED — skip). Redeploy.
 
 ## PHASE 4 — turn everything on + verify nothing dormant
 Walk the DEFINITION OF DONE checklist (above) in production:
 - Agent answers live; connect a real test ad account in prod → real `MetricFact` → "live" data-mode → agent cites real numbers.
-- Trigger an Inngest cron/sync; confirm ingestion. Confirm GA4 hit, Sentry event, PostHog event, Langfuse trace. Run a Stripe test checkout → `Subscription` written + `UsageEvent` per answer.
+- Trigger an Inngest cron/sync; confirm ingestion. Confirm GA4 hit, Sentry event, PostHog event, Langfuse trace. *(Stripe checkout is DEFERRED — skip.)*
 - Capture proof (screenshots / dashboard links) for each and report to the human.
 
 ## ENV VAR TABLE (source of truth; set locally in `.env`/`.env.local`, and in Vercel for prod)
 Core: `DATABASE_URL` (pooled in prod), `DIRECT_URL` (direct, for migrations), `TOKEN_ENC_KEY` (32-byte base64), `ANTHROPIC_API_KEY`, `USE_LIVE_AGENT` (leave unset/true).
 Auth: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`.
 Connectors: `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_ADS_DEVELOPER_TOKEN`, `META_APP_ID`, `META_APP_SECRET`, `APPLE_SEARCH_ADS_CLIENT_ID`, `APPLE_SEARCH_ADS_TEAM_ID`, `APPLE_SEARCH_ADS_KEY_ID`, `APPLE_SEARCH_ADS_PRIVATE_KEY`.
-Billing: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_SOLO`, `STRIPE_PRICE_BUSINESS`, `STRIPE_PRICE_MAX`.
+Billing (DEFERRED this pass — do not set): `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_SOLO`, `STRIPE_PRICE_BUSINESS`, `STRIPE_PRICE_MAX`.
 Jobs: `INNGEST_EVENT_KEY`, `INNGEST_SIGNING_KEY`, `INNGEST_BASE_URL` (optional).
 Observability: `SENTRY_DSN`, `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN` (source maps), `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST` (EU), `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASEURL` (EU).
 Comms/cache: `RESEND_API_KEY`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`.
