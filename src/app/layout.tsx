@@ -4,6 +4,8 @@ import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 
 import { isAuthConfigured } from "@/lib/auth";
+import { isAnalyticsConfigured } from "@/lib/analytics";
+import { PostHogProvider } from "@/components/analytics/PostHogProvider";
 
 const hanken = Hanken_Grotesk({
   subsets: ["latin"],
@@ -37,12 +39,21 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // Mount the client-side PostHog initialiser ONLY when analytics is
+  // configured. With no key the body renders children unchanged and the SDK is
+  // never loaded — keeping the validated mockup byte-identical offline.
+  const body = isAnalyticsConfigured() ? (
+    <PostHogProvider>{children}</PostHogProvider>
+  ) : (
+    children
+  );
+
   const tree = (
     <html
       lang="en"
       className={`${hanken.variable} ${newsreader.variable} ${jetbrainsMono.variable}`}
     >
-      <body>{children}</body>
+      <body>{body}</body>
     </html>
   );
 

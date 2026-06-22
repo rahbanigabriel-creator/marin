@@ -8,6 +8,9 @@ import { runAgentWithTools } from "@/lib/agent/loop";
 import type { MetricsSource } from "@/lib/agent/tools";
 import { getCurrentWorkspace } from "@/lib/auth";
 import { createDbMetricsSource, hasLiveData } from "@/lib/metrics/source";
+import { capture, flushAnalytics } from "@/lib/analytics";
+import { recordUsage, creditsForAnswer } from "@/lib/billing/usage";
+import { getRateLimiter } from "@/lib/cache/redis";
 
 /**
  * SSE chat endpoint.
@@ -62,22 +65,47 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
  */
 async function resolveMetricsSource(
   artifacts: ArtifactPayload[],
-): Promise<{ source: MetricsSource; mode: DataMode }> {
+): Promise<{ source: MetricsSource; mode: DataMode; workspaceId: string | null }> {
   const canned: MetricsSource = { getAccountMetrics: () => serializeArtifacts(artifacts) };
   try {
     const workspace = await getCurrentWorkspace();
     if (workspace && (await hasLiveData(workspace.id))) {
       const source = await createDbMetricsSource(workspace.id);
-      return { source, mode: "live" };
+      return { source, mode: "live", workspaceId: workspace.id };
     }
+    return { source: canned, mode: "sample", workspaceId: workspace?.id ?? null };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(`[agent] live data unavailable, using sample data: ${msg}`);
   }
-  return { source: canned, mode: "sample" };
+  return { source: canned, mode: "sample", workspaceId: null };
+}
+
+/** Sliding-window throttle for the answer stream (Stack C — Upstash). With no
+ * Upstash env this limiter is a permissive no-op (always allowed), so behaviour
+ * is unchanged offline; with Upstash configured it caps answers per client. */
+const chatRateLimiter = getRateLimiter({ tokens: 30, window: "1 m", prefix: "chat" });
+
+/** Best-effort client identifier for rate limiting, derived from the standard
+ * forwarding headers. Falls back to a shared bucket when no IP is present (dev). */
+function clientKey(req: Request): string {
+  const fwd = req.headers.get("x-forwarded-for");
+  const ip = fwd?.split(",")[0]?.trim() || req.headers.get("x-real-ip");
+  return ip || "anonymous";
 }
 
 export async function POST(req: Request): Promise<Response> {
+  // Rate limit early (before parsing/work). Permissive without Upstash; on a
+  // limiter outage getRateLimiter fails open, so this never blocks legit traffic.
+  const { success: allowed, reset } = await chatRateLimiter.limit(clientKey(req));
+  if (!allowed) {
+    const retryMs = Math.max(0, reset - Date.now());
+    return new Response("rate limit exceeded", {
+      status: 429,
+      headers: { "Retry-After": String(Math.ceil(retryMs / 1000)) },
+    });
+  }
+
   let body: ChatRequest;
   try {
     body = (await req.json()) as ChatRequest;
@@ -103,7 +131,7 @@ export async function POST(req: Request): Promise<Response> {
         // else the canned sample dataset. Internal-first is preserved — the
         // agent still reads through get_account_metrics; only the source varies.
         // The mode drives an honest "Sample data" label in the UI.
-        const { source, mode } = await resolveMetricsSource(body.artifacts);
+        const { source, mode, workspaceId } = await resolveMetricsSource(body.artifacts);
         send({ type: "data-mode", mode });
 
         await sleep(LEAD_START_MS);
@@ -198,11 +226,39 @@ export async function POST(req: Request): Promise<Response> {
         if (!chipsSent) send({ type: "result-chips", chips: body.chips });
         if (!closingSent) send({ type: "closing", closing: body.closing });
 
+        // Product analytics: record that an answer completed. No-op without a
+        // PostHog key (see src/lib/analytics.ts); never throws. We only send
+        // non-sensitive shape data — never the question text or any token.
+        capture("answer_generated", workspaceId, {
+          persona: body.persona,
+          data_mode: mode,
+          model_tier: decision.tier,
+          model: decision.model,
+          live: streamed,
+          artifact_count: body.artifacts.length,
+        });
+
+        // Billing/metering: record the credits this answer consumed (deep/Opus
+        // answers cost 2, standard 1 — pricing-strategy.md §1). Additive + no-op
+        // without a DB (see recordUsage); never throws, so the keyless answer
+        // stream is byte-identical. Enforcement (refuse-at-limit) is a documented
+        // stub for now (see checkCreditBudget) and is intentionally NOT wired here.
+        if (workspaceId) {
+          await recordUsage(workspaceId, {
+            kind: "answer",
+            credits: creditsForAnswer(decision.tier),
+            model: decision.model,
+          });
+        }
+
         send({ type: "done" });
       } catch (err) {
         send({ type: "error", message: err instanceof Error ? err.message : String(err) });
       } finally {
         closed = true;
+        // Deliver any queued analytics before the function suspends. No-op
+        // without a PostHog key; never throws.
+        await flushAnalytics();
         try {
           controller.close();
         } catch {

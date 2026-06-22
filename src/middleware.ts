@@ -26,14 +26,22 @@ function isClerkConfigured(): boolean {
 }
 
 /**
- * Routes that stay open even when auth is on: Clerk's own sign-in/sign-up,
- * webhooks, and a health endpoint. Everything else requires a signed-in user.
+ * Routes that stay open even when auth is on: Clerk's own sign-in/sign-up, a
+ * health endpoint, and machine-to-machine endpoints that authenticate
+ * themselves (NOT via a Clerk session) and so must bypass auth.protect():
+ *   • /api/billing/webhook — Stripe; verified via constructEvent (signature).
+ *   • /api/inngest         — Inngest; verified via INNGEST_SIGNING_KEY.
+ * Without these, enabling Clerk would 401 Stripe/Inngest before they reach
+ * their own signature checks, silently breaking subscription + background sync.
+ * Everything else requires a signed-in user.
  */
 const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
   "/api/webhooks(.*)",
   "/api/health(.*)",
+  "/api/billing/webhook(.*)",
+  "/api/inngest(.*)",
 ]);
 
 /** Live auth path: protect non-public routes once Clerk is configured. */
