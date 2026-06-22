@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Channel, Mode } from "@/types/views";
 import type { Persona, Scenario } from "@/types/scenario";
 import { PERSONAS } from "@/lib/data/personas";
@@ -20,8 +20,18 @@ import { ConnectionsModal } from "@/components/modals/ConnectionsModal";
 import { OnboardingScreen } from "@/components/screens/OnboardingScreen";
 import { ForecastScreen } from "@/components/screens/ForecastScreen";
 import { ClientsScreen } from "@/components/screens/ClientsScreen";
+import { FirstRunScreen } from "@/components/screens/FirstRunScreen";
 
 type Screen = "chat" | "onboarding" | "forecast" | "clients";
+
+const REAL_CONNECTOR_CHANNELS: Channel[] = [
+  { name: "Google Ads", platform: "google_ads", status: "disconnected" },
+  { name: "Google Analytics 4", platform: "ga4", status: "disconnected" },
+  { name: "Meta Ads", platform: "meta_ads", status: "disconnected" },
+  { name: "Apple Search Ads", platform: "apple_search_ads", status: "disconnected" },
+];
+
+const DEMO_MODE = process.env.NEXT_PUBLIC_MARPIN_DEMO_MODE === "true";
 
 /**
  * Top-level orchestrator. Owns the active persona + dataset, the top-level
@@ -34,17 +44,70 @@ export function AppShell() {
   const [mode, setMode] = useState<Mode>("split");
   const [scenario, setScenario] = useState<Scenario>(() => defaultScenarioFor("founder", SCENARIOS));
   const [question, setQuestion] = useState(scenario.question);
-  const [channels, setChannels] = useState<Channel[]>(PERSONAS.founder.channels);
+  const [channels, setChannels] = useState<Channel[]>(REAL_CONNECTOR_CHANNELS);
+  const [workspaceName, setWorkspaceName] = useState("Personal workspace");
   const [modalOpen, setModalOpen] = useState(false);
   const [activeChat, setActiveChat] = useState(0);
   const [activeClient, setActiveClient] = useState<string | null>(null);
   const [founderConfig, setFounderConfig] = useState<ForecastConfig>(DEFAULT_FORECAST);
 
   const dataset = PERSONAS[persona];
+  const realProductMode = !DEMO_MODE;
+  const realChannels = channels;
+  const connectedCount = realChannels.filter((channel) => channel.status === "connected").length;
+  const showFirstRun = realProductMode && connectedCount === 0 && screen === "chat";
+  const sidebarAccount = realProductMode
+    ? { name: workspaceName, sub: "Marpin workspace", initials: workspaceName.slice(0, 2).toUpperCase() }
+    : dataset.account;
   // The staged-reveal surface is fed by a real SSE stream (/api/chat) through the
   // shared StreamEvent reducer. `status`/`thinking` carry the live agent activity.
-  const { state, replay, status, thinking, dataMode } = useStreamingChat(scenario);
+  const {
+    state,
+    replay,
+    status,
+    thinking,
+    artifacts,
+    chips,
+    closing,
+    dataMode,
+  } = useStreamingChat(scenario, { enabled: screen === "chat" && !showFirstRun });
   const { step, typed } = state;
+  const liveSuggestions = useMemo(
+    () => [
+      "Where am I wasting ad spend?",
+      "Which platform is performing best?",
+      "Why is my CPA going up?",
+    ],
+    [],
+  );
+
+  const refreshConnections = useCallback(async () => {
+    try {
+      const res = await fetch("/api/connections", { cache: "no-store" });
+      if (!res.ok) return;
+      const payload = (await res.json()) as {
+        workspace?: { name?: string };
+        connections?: Channel[];
+      };
+      if (payload.workspace?.name) setWorkspaceName(payload.workspace.name);
+      if (payload.connections?.length) setChannels(payload.connections);
+    } catch (err) {
+      console.warn("[connections] failed to refresh connection status", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    setChannels(REAL_CONNECTOR_CHANNELS);
+    void refreshConnections();
+  }, [refreshConnections]);
+
+  useEffect(() => {
+    if (!realProductMode) return;
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("connect")) return;
+    void refreshConnections();
+    window.history.replaceState({}, "", window.location.pathname);
+  }, [realProductMode, refreshConnections]);
 
   const ask = useCallback(
     (text: string) => {
@@ -76,7 +139,6 @@ export function AppShell() {
       setPersona(p);
       setActiveChat(0);
       setActiveClient(null);
-      setChannels(PERSONAS[p].channels);
       const sc = defaultScenarioFor(p, SCENARIOS);
       setScenario(sc);
       setQuestion(sc.question);
@@ -105,12 +167,14 @@ export function AppShell() {
       const names = ["Google Ads", "Meta Ads", "GA4", "Search Console", "TikTok Ads", "LinkedIn Ads"];
       setPersona("founder");
       // A freshly-onboarded founder only has the channels they actually picked.
-      setChannels(
-        names.map((name): Channel => ({
-          name,
-          status: intake.channels.includes(name) ? "connected" : "disconnected",
-        })),
-      );
+      if (!realProductMode) {
+        setChannels(
+          REAL_CONNECTOR_CHANNELS.map((channel) => ({
+            ...channel,
+            status: intake.channels.includes(channel.name) ? "connected" : "disconnected",
+          })),
+        );
+      }
       setFounderConfig({ ...DEFAULT_FORECAST, current: intake.budget });
       setActiveChat(0);
       setActiveClient(null);
@@ -122,10 +186,14 @@ export function AppShell() {
     [replay],
   );
 
-  const toggleChannel = useCallback((index: number) => {
+  const connectChannel = useCallback((channel: Channel) => {
+    if (channel.platform) {
+      window.location.href = `/api/connect/${channel.platform}`;
+      return;
+    }
     setChannels((prev) =>
-      prev.map((ch, i) =>
-        i === index
+      prev.map((ch) =>
+        ch.name === channel.name
           ? { ...ch, status: ch.status === "connected" ? "disconnected" : "connected" }
           : ch,
       ),
@@ -138,17 +206,21 @@ export function AppShell() {
         activeChat={activeChat}
         onSelectChat={selectChat}
         recentChats={dataset.recentChats}
-        channels={channels}
-        account={dataset.account}
+        channels={realChannels}
+        account={sidebarAccount}
         showClients={persona === "agency"}
         onViewClients={() => setScreen("clients")}
         onNewChat={replay}
-        onStartPlan={() => setScreen("onboarding")}
+        onStartPlan={() => (realProductMode ? setModalOpen(true) : setScreen("onboarding"))}
         onOpenModal={() => setModalOpen(true)}
+        hideRecent={realProductMode}
+        primaryActionLabel={realProductMode ? "Connect data" : "New plan"}
       />
 
       <main className="flex min-w-0 flex-1 flex-col">
-        {screen === "onboarding" ? (
+        {showFirstRun ? (
+          <FirstRunScreen channels={realChannels} onConnect={connectChannel} />
+        ) : screen === "onboarding" ? (
           <OnboardingScreen onComplete={completeOnboarding} onCancel={() => setScreen("chat")} />
         ) : screen === "forecast" ? (
           <ForecastScreen
@@ -164,12 +236,13 @@ export function AppShell() {
               onSetMode={setMode}
               onReplay={replay}
               title={screen === "clients" ? "Clients" : scenario.title}
-              channels={channels}
+              channels={realChannels}
               persona={persona}
               onSwitchPersona={switchPersona}
               onForecast={() => setScreen("forecast")}
               chatControls={screen === "chat"}
               activeClient={screen === "chat" ? activeClient : null}
+              showPersonaSwitcher={!realProductMode}
             />
 
             {screen === "clients" ? (
@@ -186,10 +259,15 @@ export function AppShell() {
                 thinking={thinking}
                 question={question}
                 scenario={scenario}
+                artifacts={artifacts}
+                chips={chips}
+                closing={closing}
                 onSend={ask}
                 onSuggest={ask}
-                suggestions={dataset.suggestions}
+                suggestions={realProductMode ? liveSuggestions : dataset.suggestions}
                 dataMode={dataMode}
+                onOpenConnections={() => setModalOpen(true)}
+                connectedCount={connectedCount}
               />
             ) : mode === "thread" ? (
               <ThreadView
@@ -199,9 +277,14 @@ export function AppShell() {
                 thinking={thinking}
                 question={question}
                 scenario={scenario}
+                artifacts={artifacts}
+                chips={chips}
+                closing={closing}
+                dataMode={dataMode}
                 onSend={ask}
                 onSuggest={ask}
-                suggestions={dataset.suggestions}
+                suggestions={realProductMode ? liveSuggestions : dataset.suggestions}
+                connectedCount={connectedCount}
               />
             ) : (
               <ReportView
@@ -209,7 +292,17 @@ export function AppShell() {
                 typed={typed}
                 question={question}
                 scenario={scenario}
-                workspace={persona === "agency" && activeClient ? activeClient : dataset.workspace}
+                workspace={
+                  realProductMode
+                    ? workspaceName
+                    : persona === "agency" && activeClient
+                      ? activeClient
+                      : dataset.workspace
+                }
+                artifacts={artifacts}
+                closing={closing}
+                dataMode={dataMode}
+                onOpenConnections={() => setModalOpen(true)}
               />
             )}
           </>
@@ -220,7 +313,7 @@ export function AppShell() {
         <ConnectionsModal
           channels={channels}
           onClose={() => setModalOpen(false)}
-          onToggle={toggleChannel}
+          onConnect={connectChannel}
         />
       )}
     </div>

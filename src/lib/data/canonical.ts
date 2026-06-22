@@ -58,6 +58,7 @@ export const PLATFORM_ICON_COLORS: Record<string, string> = {
   "Google Ads": "#4285F4",
   "Meta Ads": "#1877F2",
   GA4: "#E8710A",
+  "Apple Search Ads": "#2B2722",
   "Search Console": "#5E7B52",
   "TikTok Ads": "#2B2722",
   "LinkedIn Ads": "#0A66C2",

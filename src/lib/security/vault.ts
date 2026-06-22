@@ -31,6 +31,7 @@ const KEY_BYTES = 32; // AES-256
 const IV_BYTES = 12; // GCM standard nonce length
 const AUTH_TAG_BYTES = 16; // GCM tag length
 const BLOB_VERSION = "v1";
+const AAD_BLOB_VERSION = "v2";
 const ENV_KEY = "TOKEN_ENC_KEY";
 
 /** Thrown when encrypt/decrypt is called without a valid 32-byte TOKEN_ENC_KEY. */
@@ -96,17 +97,18 @@ function requireKey(): Buffer {
  * A fresh 12-byte random IV is generated per call. Throws
  * VaultNotConfiguredError if no valid key is configured.
  */
-export function encryptToken(plaintext: string): string {
+export function encryptToken(plaintext: string, aad?: string): string {
   const key = requireKey();
   const iv = randomBytes(IV_BYTES);
   const cipher = createCipheriv(ALGORITHM, key, iv);
+  if (aad) cipher.setAAD(Buffer.from(aad, "utf8"));
   const ciphertext = Buffer.concat([
     cipher.update(plaintext, "utf8"),
     cipher.final(),
   ]);
   const authTag = cipher.getAuthTag();
   return [
-    BLOB_VERSION,
+    aad ? AAD_BLOB_VERSION : BLOB_VERSION,
     iv.toString("base64"),
     authTag.toString("base64"),
     ciphertext.toString("base64"),
@@ -118,7 +120,7 @@ export function encryptToken(plaintext: string): string {
  * VaultNotConfiguredError if no valid key is configured, or VaultDecryptError
  * if the blob is malformed or fails authentication (tampering / wrong key).
  */
-export function decryptToken(blob: string): string {
+export function decryptToken(blob: string, aad?: string): string {
   const key = requireKey();
 
   const parts = blob.split(".");
@@ -126,8 +128,11 @@ export function decryptToken(blob: string): string {
     throw new VaultDecryptError("malformed blob (expected 4 segments)");
   }
   const [version, ivB64, authTagB64, ciphertextB64] = parts;
-  if (version !== BLOB_VERSION) {
+  if (version !== BLOB_VERSION && version !== AAD_BLOB_VERSION) {
     throw new VaultDecryptError(`unsupported blob version "${version}"`);
+  }
+  if (version === AAD_BLOB_VERSION && !aad) {
+    throw new VaultDecryptError("AAD is required for this blob");
   }
 
   const iv = Buffer.from(ivB64, "base64");
@@ -142,6 +147,7 @@ export function decryptToken(blob: string): string {
 
   try {
     const decipher = createDecipheriv(ALGORITHM, key, iv);
+    if (version === AAD_BLOB_VERSION) decipher.setAAD(Buffer.from(aad ?? "", "utf8"));
     decipher.setAuthTag(authTag);
     const plaintext = Buffer.concat([
       decipher.update(ciphertext),
@@ -152,6 +158,21 @@ export function decryptToken(blob: string): string {
     // Do not leak crypto internals or any token material in the message.
     throw new VaultDecryptError("authentication failed (tampered or wrong key)");
   }
+}
+
+export function tokenAad(input: {
+  workspaceId: string;
+  platform: string;
+  externalAccountId: string;
+  tokenKind: "access" | "refresh";
+}): string {
+  return [
+    "marin-token-v1",
+    input.workspaceId,
+    input.platform,
+    input.externalAccountId,
+    input.tokenKind,
+  ].join(":");
 }
 
 /**

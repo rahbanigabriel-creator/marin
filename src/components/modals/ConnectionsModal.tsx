@@ -6,7 +6,7 @@ import { PLATFORM_ICON_COLORS } from "@/lib/data/canonical";
 interface ConnectionsModalProps {
   channels: Channel[];
   onClose: () => void;
-  onToggle: (index: number) => void;
+  onConnect: (channel: Channel) => void;
 }
 
 function initialFor(name: string): string {
@@ -18,7 +18,7 @@ function initialFor(name: string): string {
     .toUpperCase();
 }
 
-export function ConnectionsModal({ channels, onClose, onToggle }: ConnectionsModalProps) {
+export function ConnectionsModal({ channels, onClose, onConnect }: ConnectionsModalProps) {
   return (
     <div
       onClick={onClose}
@@ -40,11 +40,12 @@ export function ConnectionsModal({ channels, onClose, onToggle }: ConnectionsMod
           </button>
         </div>
         <div className="mb-[20px] font-sans text-[13px] text-ink-400">
-          Marin reads live metrics and can push changes back to connected platforms.
+          Marpin reads live metrics and can push changes back to connected platforms.
         </div>
         <div className="grid grid-cols-2 gap-[11px]">
           {channels.map((c, i) => {
             const on = c.status === "connected";
+            const errored = c.status === "error";
             return (
               <div
                 key={c.name}
@@ -65,14 +66,19 @@ export function ConnectionsModal({ channels, onClose, onToggle }: ConnectionsMod
                   <div className="font-sans text-[13.5px] font-semibold text-ink-900">{c.name}</div>
                   <div
                     className="mt-[2px] font-sans text-[11px] font-medium"
-                    style={{ color: on ? "#5E7B52" : "#A89D8B" }}
+                    style={{ color: on ? "#5E7B52" : errored ? "#B23A4B" : "#A89D8B" }}
                   >
-                    {on ? "Connected · syncing" : "Not connected"}
+                    {on
+                      ? c.displayName ?? "Connected · syncing"
+                      : errored
+                        ? "Connection needs attention"
+                        : "Not connected"}
                   </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => onToggle(i)}
+                  onClick={() => onConnect(c)}
+                  disabled={!c.platform}
                   className="flex-none cursor-pointer rounded-chip font-sans text-[12px] font-semibold"
                   style={
                     on
@@ -90,7 +96,7 @@ export function ConnectionsModal({ channels, onClose, onToggle }: ConnectionsMod
                         }
                   }
                 >
-                  {on ? "Disconnect" : "Connect"}
+                  {on ? "Reconnect" : "Connect"}
                 </button>
               </div>
             );

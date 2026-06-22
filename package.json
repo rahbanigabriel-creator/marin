@@ -2,10 +2,11 @@
   "name": "marin",
   "version": "0.1.0",
   "private": true,
-  "description": "Marin — AI marketing copilot",
+  "description": "Marpin — AI marketing copilot",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && next build",
+    "postinstall": "prisma generate",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",

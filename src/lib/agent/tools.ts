@@ -20,7 +20,7 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: "get_account_metrics",
     description:
-      "Returns the user's connected marketing-account data (KPIs, spend, ROAS, CPA, campaigns, leaks, funnel, etc.) from Marin's internal store. Always call this before answering, and ground every number you state in the result. Do not invent metrics.",
+      "Returns the user's connected marketing-account data (KPIs, spend, ROAS, CPA, campaigns, leaks, funnel, etc.) from Marpin's internal store. Always call this before answering, and ground every number you state in the result. Do not invent metrics.",
     input_schema: {
       type: "object",
       properties: {

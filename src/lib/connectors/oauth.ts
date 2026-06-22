@@ -92,6 +92,13 @@ export interface OAuthTokens {
   tokenType?: string;
 }
 
+export interface RefreshedOAuthToken {
+  accessToken: string;
+  expiresAt?: Date;
+  scope?: string;
+  tokenType?: string;
+}
+
 /** Raw shape of an OAuth 2.0 token-endpoint JSON body (provider-agnostic). */
 interface TokenResponseBody {
   access_token?: string;
@@ -178,6 +185,51 @@ export class OAuthError extends Error {
   }
 }
 
+export async function refreshAccessToken(input: {
+  tokenUrl: string;
+  clientId: string;
+  clientSecret: string;
+  refreshToken: string;
+  signal?: AbortSignal;
+}): Promise<RefreshedOAuthToken> {
+  const form = new URLSearchParams();
+  form.set("grant_type", "refresh_token");
+  form.set("refresh_token", input.refreshToken);
+  form.set("client_id", input.clientId);
+  form.set("client_secret", input.clientSecret);
+
+  const res = await fetch(input.tokenUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json",
+    },
+    body: form.toString(),
+    signal: input.signal,
+  });
+
+  let body: TokenResponseBody;
+  try {
+    body = (await res.json()) as TokenResponseBody;
+  } catch {
+    throw new OAuthError(`refresh endpoint returned non-JSON (status ${res.status})`);
+  }
+
+  if (!res.ok || body.error || !body.access_token) {
+    throw new OAuthError(body.error ? `${body.error}` : `token refresh failed (status ${res.status})`);
+  }
+
+  return {
+    accessToken: body.access_token,
+    expiresAt:
+      typeof body.expires_in === "number"
+        ? new Date(Date.now() + body.expires_in * 1000)
+        : undefined,
+    scope: body.scope,
+    tokenType: body.token_type,
+  };
+}
+
 // ── Signed OAuth-transaction cookie (state + PKCE verifier) ──────────────────
 
 /**
@@ -193,9 +245,21 @@ export interface OAuthTransaction {
 
 /** Cookie name carrying the signed OAuth transaction. */
 export const OAUTH_TX_COOKIE = "marin_oauth_tx";
+/** Cookie name carrying encrypted tokens while the user picks an account. */
+export const OAUTH_PENDING_COOKIE = "marin_oauth_pending";
 
 /** Max lifetime of the in-flight OAuth transaction cookie (seconds). */
 export const OAUTH_TX_MAX_AGE = 600; // 10 minutes
+
+export interface OAuthPendingSelection {
+  platform: string;
+  encAccessToken: string;
+  encRefreshToken?: string;
+  expiresAt?: string;
+  scope?: string;
+  tokenType?: string;
+  exp: number;
+}
 
 /**
  * Derive a stable HMAC key for cookie signing from TOKEN_ENC_KEY (already a
@@ -223,9 +287,22 @@ function readSigningKey(): Buffer | null {
  * should already have refused via isConnectorConfigured / vault checks.
  */
 export function signTransaction(tx: OAuthTransaction): string | null {
+  return signJson(tx);
+}
+
+export function signPendingSelection(
+  selection: Omit<OAuthPendingSelection, "exp">,
+): string | null {
+  return signJson({
+    ...selection,
+    exp: Math.floor(Date.now() / 1000) + OAUTH_TX_MAX_AGE,
+  });
+}
+
+function signJson(value: unknown): string | null {
   const key = readSigningKey();
   if (!key) return null;
-  const payload = base64url(Buffer.from(JSON.stringify(tx), "utf8"));
+  const payload = base64url(Buffer.from(JSON.stringify(value), "utf8"));
   const sig = base64url(createHmac("sha256", key).update(payload).digest());
   return `${payload}.${sig}`;
 }
@@ -235,6 +312,27 @@ export function signTransaction(tx: OAuthTransaction): string | null {
  * malformed value, or missing key (constant-time signature comparison).
  */
 export function verifyTransaction(cookieValue: string | undefined): OAuthTransaction | null {
+  const parsed = verifyJson(cookieValue) as OAuthTransaction | null;
+  if (!parsed) return null;
+  if (typeof parsed.platform !== "string" || typeof parsed.state !== "string") return null;
+  return parsed;
+}
+
+export function verifyPendingSelection(cookieValue: string | undefined): OAuthPendingSelection | null {
+  const parsed = verifyJson(cookieValue) as OAuthPendingSelection | null;
+  if (!parsed) return null;
+  if (
+    typeof parsed.platform !== "string" ||
+    typeof parsed.encAccessToken !== "string" ||
+    typeof parsed.exp !== "number" ||
+    parsed.exp < Math.floor(Date.now() / 1000)
+  ) {
+    return null;
+  }
+  return parsed;
+}
+
+function verifyJson(cookieValue: string | undefined): unknown | null {
   if (!cookieValue) return null;
   const key = readSigningKey();
   if (!key) return null;
@@ -251,9 +349,7 @@ export function verifyTransaction(cookieValue: string | undefined): OAuthTransac
 
   try {
     const json = Buffer.from(payload, "base64url").toString("utf8");
-    const parsed = JSON.parse(json) as OAuthTransaction;
-    if (typeof parsed.platform !== "string" || typeof parsed.state !== "string") return null;
-    return parsed;
+    return JSON.parse(json) as unknown;
   } catch {
     return null;
   }

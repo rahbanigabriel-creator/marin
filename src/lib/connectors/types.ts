@@ -11,7 +11,7 @@ import type { Connection } from "@prisma/client";
  */
 
 /** The platforms we ship in connectors round 1. */
-export type ConnectorPlatform = "google_ads" | "ga4" | "meta_ads";
+export type ConnectorPlatform = "google_ads" | "ga4" | "meta_ads" | "apple_search_ads";
 
 /** A normalized date range for a metrics pull (inclusive `from`/`to`). */
 export interface MetricRange {

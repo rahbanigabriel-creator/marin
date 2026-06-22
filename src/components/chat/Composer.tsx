@@ -7,9 +7,10 @@ interface ComposerProps {
   onSuggest: (text: string) => void;
   variant: "split" | "thread";
   suggestions: string[];
+  connectedCount: number;
 }
 
-export function Composer({ onSend, onSuggest, variant, suggestions }: ComposerProps) {
+export function Composer({ onSend, onSuggest, variant, suggestions, connectedCount }: ComposerProps) {
   const [input, setInput] = useState("");
 
   function send() {
@@ -82,7 +83,9 @@ export function Composer({ onSend, onSuggest, variant, suggestions }: ComposerPr
         />
         <div className="mt-[6px] flex items-center justify-between">
           <span className="font-mono text-[11px] font-medium text-ink-200">
-            ⌘ 4 sources connected
+            {connectedCount === 0
+              ? "No sources connected"
+              : `${connectedCount} source${connectedCount === 1 ? "" : "s"} connected`}
           </span>
           <button
             type="button"

@@ -27,9 +27,10 @@ export interface ChatStreamState {
   /** terminal error message, if the stream failed */
   error: string | null;
   /**
-   * Whether this answer is grounded in live (DB-backed) data or the canned
-   * sample dataset. Defaults to "sample" so the offline / no-DB path is
-   * labelled honestly; the route emits a "data-mode" event to upgrade to "live".
+   * Whether this answer is grounded in live (DB-backed) data, waiting on
+   * connected accounts, or running in the explicit demo fallback. Defaults to
+   * "empty" so real users never see a sample badge before the route identifies
+   * the data source.
    */
   dataMode: DataMode;
 }
@@ -44,7 +45,7 @@ export const initialChatState: ChatStreamState = {
   closing: null,
   done: false,
   error: null,
-  dataMode: "sample",
+  dataMode: "empty",
 };
 
 export function streamReducer(state: ChatStreamState, event: StreamEvent): ChatStreamState {

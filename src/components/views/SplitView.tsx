@@ -1,5 +1,6 @@
 import type { Scenario } from "@/types/scenario";
-import type { AgentStatusKey, DataMode } from "@/lib/streaming/events";
+import type { AgentStatusKey, ArtifactPayload, DataMode } from "@/lib/streaming/events";
+import type { ResultChip } from "@/types/artifacts";
 import { gatesForStep } from "@/lib/streaming/stepModel";
 import { UserBubble } from "@/components/chat/UserBubble";
 import { AssistantBlock } from "@/components/chat/AssistantBlock";
@@ -14,11 +15,16 @@ interface SplitViewProps {
   thinking: string;
   question: string;
   scenario: Scenario;
+  artifacts: ArtifactPayload[];
+  chips: ResultChip[];
+  closing: Scenario["closing"] | null;
   onSend: (text: string) => void;
   onSuggest: (text: string) => void;
   suggestions: string[];
   /** whether the workspace pane reflects live (DB-backed) or sample data */
   dataMode: DataMode;
+  onOpenConnections: () => void;
+  connectedCount: number;
 }
 
 export function SplitView({
@@ -28,10 +34,15 @@ export function SplitView({
   thinking,
   question,
   scenario,
+  artifacts,
+  chips,
+  closing,
   onSend,
   onSuggest,
   suggestions,
   dataMode,
+  onOpenConnections,
+  connectedCount,
 }: SplitViewProps) {
   const g = gatesForStep(step, typed.length, scenario.lead.length);
 
@@ -47,12 +58,18 @@ export function SplitView({
             status={status}
             thinking={thinking}
             lead={scenario.lead}
-            chips={scenario.chips}
-            closing={scenario.closing}
+            chips={chips}
+            closing={closing}
             variant="split"
           />
         </div>
-        <Composer variant="split" onSend={onSend} onSuggest={onSuggest} suggestions={suggestions} />
+        <Composer
+          variant="split"
+          onSend={onSend}
+          onSuggest={onSuggest}
+          suggestions={suggestions}
+          connectedCount={connectedCount}
+        />
       </div>
 
       {/* workspace pane */}
@@ -64,6 +81,14 @@ export function SplitView({
               <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#9A3D63" }} />
               live from your data
             </span>
+          ) : dataMode === "empty" ? (
+            <button
+              type="button"
+              onClick={onOpenConnections}
+              className="cursor-pointer rounded-full border border-plum-border bg-surface-chip px-[9px] py-[3px] font-mono text-[11px] font-medium text-plum-deep"
+            >
+              Connect data
+            </button>
           ) : (
             <span
               className="flex items-center gap-[6px] rounded-full border border-line-4 px-[8px] py-[2px] font-mono text-[11px] font-medium text-ink-300"
@@ -75,8 +100,22 @@ export function SplitView({
           )}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-[24px]">
-          {g.canvasReady ? (
-            <AnswerCanvas step={step} artifacts={scenario.artifacts} />
+          {g.canvasReady && artifacts.length > 0 ? (
+            <AnswerCanvas step={step} artifacts={artifacts} />
+          ) : g.canvasReady && dataMode === "empty" ? (
+            <div className="flex h-full min-h-[340px] flex-col items-center justify-center gap-[12px] rounded-[8px] border border-dashed border-line-2 bg-surface-card p-[24px] text-center">
+              <div className="font-serif text-[21px] font-medium text-ink-900">No connected data yet</div>
+              <div className="max-w-[360px] font-sans text-[13px] leading-[1.55] text-ink-400">
+                Connect Google Ads, GA4, Meta Ads, or Apple Search Ads to render real KPIs and graphs.
+              </div>
+              <button
+                type="button"
+                onClick={onOpenConnections}
+                className="mt-[4px] cursor-pointer rounded-btn border-none bg-plum px-[16px] py-[9px] font-sans text-[13px] font-semibold text-white"
+              >
+                Connect accounts
+              </button>
+            </div>
           ) : (
             <div className="flex h-full min-h-[340px] flex-col items-center justify-center gap-[14px] text-ink-200">
               <ThinkingDots size={8} />

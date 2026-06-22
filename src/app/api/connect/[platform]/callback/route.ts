@@ -1,8 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { getCurrentWorkspace } from "@/lib/auth";
-import { isDatabaseConfigured, prisma } from "@/lib/db";
-import { encryptToken, isVaultConfigured } from "@/lib/security/vault";
+import { isDatabaseConfigured } from "@/lib/db";
+import type { ConnectorPlatform } from "@/lib/connectors/types";
+import { encryptToken, isVaultConfigured, tokenAad } from "@/lib/security/vault";
 import {
   getConnectorConfig,
   getConnectorCredentials,
@@ -10,10 +11,17 @@ import {
 } from "@/lib/connectors/registry";
 import {
   exchangeCodeForTokens,
+  OAUTH_PENDING_COOKIE,
   OAUTH_TX_COOKIE,
+  OAUTH_TX_MAX_AGE,
+  signPendingSelection,
   statesMatch,
   verifyTransaction,
+  type OAuthTokens,
 } from "@/lib/connectors/oauth";
+import { listOAuthAccounts, type AccountSelection } from "@/lib/connectors/clients";
+import { persistOAuthConnection } from "@/lib/connectors/persist";
+import { emitConnectionConnected } from "@/lib/jobs/inngest";
 
 /**
  * GET /api/connect/[platform]/callback — finish a connector OAuth flow.
@@ -49,6 +57,111 @@ function appRedirect(req: NextRequest, status: string, platform?: string): NextR
   const res = NextResponse.redirect(url);
   // Single-use transaction cookie — always clear it on the way out.
   res.cookies.delete(OAUTH_TX_COOKIE);
+  res.cookies.delete(OAUTH_PENDING_COOKIE);
+  return res;
+}
+
+const PENDING_ACCOUNT_ID = "__pending__";
+
+function htmlEscape(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function selectionResponse(input: {
+  req: NextRequest;
+  platform: Exclude<ConnectorPlatform, "apple_search_ads">;
+  label: string;
+  workspaceId: string;
+  tokens: OAuthTokens;
+  accounts: AccountSelection[];
+}): NextResponse {
+  const { req, platform, label, workspaceId, tokens, accounts } = input;
+  const encAccessToken = encryptToken(
+    tokens.accessToken,
+    tokenAad({
+      workspaceId,
+      platform,
+      externalAccountId: PENDING_ACCOUNT_ID,
+      tokenKind: "access",
+    }),
+  );
+  const encRefreshToken = tokens.refreshToken
+    ? encryptToken(
+        tokens.refreshToken,
+        tokenAad({
+          workspaceId,
+          platform,
+          externalAccountId: PENDING_ACCOUNT_ID,
+          tokenKind: "refresh",
+        }),
+      )
+    : undefined;
+
+  const signed = signPendingSelection({
+    platform,
+    encAccessToken,
+    encRefreshToken,
+    expiresAt: tokens.expiresAt?.toISOString(),
+    scope: tokens.scope,
+    tokenType: tokens.tokenType,
+  });
+  if (!signed) return appRedirect(req, "vault_unconfigured", platform);
+
+  const action = `/api/connect/${platform}/select`;
+  const buttons = accounts
+    .map(
+      (account) => `
+        <button name="account_id" value="${htmlEscape(account.externalAccountId)}" type="submit">
+          <span>${htmlEscape(account.displayName)}</span>
+          <small>${htmlEscape(account.externalAccountId)}</small>
+        </button>`,
+    )
+    .join("");
+  const body = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Select ${htmlEscape(label)} account · Marpin</title>
+    <style>
+      body{margin:0;background:#F2F1EC;color:#2B2722;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+      main{min-height:100vh;display:grid;place-items:center;padding:32px}
+      section{width:min(520px,100%);background:#FBFAF6;border:1px solid #DDDBD2;border-radius:10px;padding:24px;box-shadow:0 16px 42px rgba(43,39,34,.12)}
+      h1{font-family:Georgia,serif;font-size:24px;line-height:1.15;margin:0 0 8px}
+      p{margin:0 0 18px;color:#6B6359;font-size:14px;line-height:1.55}
+      form{display:grid;gap:10px}
+      button{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;border:1px solid #DDDBD2;background:#fff;border-radius:8px;padding:13px 14px;text-align:left;cursor:pointer;color:#2B2722}
+      button:hover{border-color:#9A3D63}
+      span{font-weight:650;font-size:14px}
+      small{color:#8A8072;font-size:12px}
+    </style>
+  </head>
+  <body>
+    <main>
+      <section>
+        <h1>Select your ${htmlEscape(label)} account</h1>
+        <p>Marpin found multiple accounts. Choose the one whose metrics should power this workspace.</p>
+        <form method="post" action="${htmlEscape(action)}">${buttons}</form>
+      </section>
+    </main>
+  </body>
+</html>`;
+
+  const res = new NextResponse(body, {
+    headers: { "Content-Type": "text/html; charset=utf-8" },
+  });
+  res.cookies.delete(OAUTH_TX_COOKIE);
+  res.cookies.set(OAUTH_PENDING_COOKIE, signed, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: OAUTH_TX_MAX_AGE,
+  });
   return res;
 }
 
@@ -58,6 +171,9 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Re
   const config = getConnectorConfig(platform);
   if (!config) {
     return NextResponse.json({ error: "unknown_platform", platform }, { status: 404 });
+  }
+  if (config.id === "apple_search_ads") {
+    return appRedirect(req, "unsupported_callback", config.id);
   }
   if (!isConnectorConfigured(config.id)) {
     return NextResponse.json(
@@ -107,14 +223,6 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Re
     return appRedirect(req, "exchange_failed", config.id);
   }
 
-  // ── Encrypt tokens — vault must be configured to persist them ──
-  if (!isVaultConfigured()) {
-    console.warn(`[connect] vault not configured; cannot persist ${config.id} tokens`);
-    return appRedirect(req, "vault_unconfigured", config.id);
-  }
-  const encAccessToken = encryptToken(tokens.accessToken);
-  const encRefreshToken = tokens.refreshToken ? encryptToken(tokens.refreshToken) : null;
-
   // ── Resolve tenant + persist the Connection (DB; guarded) ──
   const workspace = await getCurrentWorkspace();
   if (!workspace) {
@@ -129,38 +237,40 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Re
     return appRedirect(req, "connected", config.id);
   }
 
-  // externalAccountId is resolved from the platform once we can call its
-  // account-listing API; until then key the row by a stable placeholder so the
-  // upsert natural key (workspace×platform×externalAccountId) is satisfied.
-  const externalAccountId = "default";
+  const oauthPlatform = config.id as Exclude<ConnectorPlatform, "apple_search_ads">;
+
+  if (!isVaultConfigured()) {
+    console.warn(`[connect] vault not configured; cannot persist ${config.id} tokens`);
+    return appRedirect(req, "vault_unconfigured", config.id);
+  }
+
+  let accounts;
+  try {
+    accounts = await listOAuthAccounts(oauthPlatform, tokens.accessToken);
+  } catch (err) {
+    console.warn(
+      `[connect] failed to resolve ${config.id} account: ${err instanceof Error ? err.name : "error"}`,
+    );
+    return appRedirect(req, "account_unavailable", config.id);
+  }
+
+  if (accounts.length > 1) {
+    return selectionResponse({
+      req,
+      platform: oauthPlatform,
+      label: config.label,
+      workspaceId: workspace.id,
+      tokens,
+      accounts,
+    });
+  }
 
   try {
-    await prisma.connection.upsert({
-      where: {
-        workspaceId_platform_externalAccountId: {
-          workspaceId: workspace.id,
-          platform: config.id,
-          externalAccountId,
-        },
-      },
-      update: {
-        status: "connected",
-        scopes: tokens.scope ?? config.scopes.join(" "),
-        encAccessToken,
-        encRefreshToken,
-        expiresAt: tokens.expiresAt ?? null,
-      },
-      create: {
-        workspaceId: workspace.id,
-        platform: config.id,
-        externalAccountId,
-        displayName: config.label,
-        status: "connected",
-        scopes: tokens.scope ?? config.scopes.join(" "),
-        encAccessToken,
-        encRefreshToken,
-        expiresAt: tokens.expiresAt ?? null,
-      },
+    await persistOAuthConnection({
+      workspaceId: workspace.id,
+      platform: oauthPlatform,
+      account: accounts[0],
+      tokens: { ...tokens, scope: tokens.scope ?? config.scopes.join(" ") },
     });
   } catch (err) {
     console.warn(
@@ -168,6 +278,8 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Re
     );
     return appRedirect(req, "persist_failed", config.id);
   }
+
+  await emitConnectionConnected({ workspaceId: workspace.id, platform: config.id });
 
   return appRedirect(req, "connected", config.id);
 }

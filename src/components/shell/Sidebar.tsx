@@ -15,6 +15,8 @@ interface SidebarProps {
   onOpenModal: () => void;
   showClients: boolean;
   onViewClients: () => void;
+  hideRecent?: boolean;
+  primaryActionLabel?: string;
 }
 
 export function Sidebar({
@@ -28,6 +30,8 @@ export function Sidebar({
   onOpenModal,
   showClients,
   onViewClients,
+  hideRecent = false,
+  primaryActionLabel = "New plan",
 }: SidebarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -42,7 +46,7 @@ export function Sidebar({
           m
         </div>
         <span className="font-serif text-[18px] font-semibold tracking-[-0.01em] text-ink-900">
-          Marin
+          Marpin
         </span>
         <span
           className="rounded-[5px] font-mono text-[9.5px] font-semibold tracking-[0.04em]"
@@ -77,29 +81,33 @@ export function Sidebar({
           className="mb-[18px] flex w-full items-center gap-[9px] rounded-btn font-sans text-[13px] font-semibold text-white"
           style={{ padding: "10px 12px", cursor: "pointer", border: "none", background: "#9A3D63" }}
         >
-          <span className="text-[15px] leading-none">✨</span> New plan
+          <span className="text-[15px] leading-none">＋</span> {primaryActionLabel}
         </button>
       )}
 
       {/* scroll area */}
       <div className="flex min-h-0 flex-1 flex-col gap-[2px] overflow-y-auto">
-        <div className="p-[6px_8px_5px] font-mono text-[10.5px] font-semibold tracking-[0.08em] text-ink-200">
-          RECENT
-        </div>
-        {recentChats.map((chat, i) => (
-          <div
-            key={chat.title}
-            onClick={() => onSelectChat(i)}
-            className="cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap rounded-chip p-[8px_10px] font-sans text-[13px]"
-            style={
-              i === activeChat
-                ? { background: "#F9F9F4", color: "#2B2722", fontWeight: 600 }
-                : { color: "#5A544A", fontWeight: 500 }
-            }
-          >
-            {chat.title}
-          </div>
-        ))}
+        {!hideRecent && (
+          <>
+            <div className="p-[6px_8px_5px] font-mono text-[10.5px] font-semibold tracking-[0.08em] text-ink-200">
+              RECENT
+            </div>
+            {recentChats.map((chat, i) => (
+              <div
+                key={chat.title}
+                onClick={() => onSelectChat(i)}
+                className="cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap rounded-chip p-[8px_10px] font-sans text-[13px]"
+                style={
+                  i === activeChat
+                    ? { background: "#F9F9F4", color: "#2B2722", fontWeight: 600 }
+                    : { color: "#5A544A", fontWeight: 500 }
+                }
+              >
+                {chat.title}
+              </div>
+            ))}
+          </>
+        )}
 
         <div className="p-[16px_8px_5px] font-mono text-[10.5px] font-semibold tracking-[0.08em] text-ink-200">
           CHANNELS

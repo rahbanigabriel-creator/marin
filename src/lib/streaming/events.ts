@@ -91,13 +91,15 @@ export const AGENT_STATUS_LABEL: Record<AgentStatusKey, string> = {
  * Where the grounding data for this answer came from:
  *   • "live"   — real metrics read from the database (a workspace has MetricFact
  *                rows behind the MetricsSource interface).
- *   • "sample" — no connected data yet, so the answer is grounded in the canned
- *                demo dataset. The UI labels this clearly so a sample answer is
- *                never mistaken for the user's real numbers.
+ *   • "empty"  — auth is configured and this real workspace has no connected
+ *                metrics yet. The UI shows a connect state and never renders
+ *                sample graphs to a real user.
+ *   • "sample" — no connected data yet in the unauthenticated/dev demo path, so
+ *                the answer is grounded in the canned demo dataset.
  * Defaults to "sample" everywhere (the offline / no-DB path), so the existing
- * mockup behaviour is preserved unless the route explicitly signals "live".
+ * mockup behaviour is preserved unless the route explicitly signals otherwise.
  */
-export type DataMode = "live" | "sample";
+export type DataMode = "live" | "empty" | "sample";
 
 export type StreamEvent =
   | { type: "start"; question: string }

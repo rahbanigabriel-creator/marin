@@ -6,8 +6,9 @@ import { buildAgentPrompt, serializeArtifacts } from "@/lib/agent/prompt";
 import { isLiveAgentEnabled } from "@/lib/agent/provider";
 import { runAgentWithTools } from "@/lib/agent/loop";
 import type { MetricsSource } from "@/lib/agent/tools";
-import { getCurrentWorkspace } from "@/lib/auth";
-import { createDbMetricsSource, hasLiveData } from "@/lib/metrics/source";
+import { getCurrentWorkspace, isAuthConfigured } from "@/lib/auth";
+import { createDbMetricsSource, hasLiveData, readRecentMetricFacts } from "@/lib/metrics/source";
+import { buildMetricArtifacts } from "@/lib/metrics/artifacts";
 import { capture, flushAnalytics } from "@/lib/analytics";
 import { recordUsage, creditsForAnswer } from "@/lib/billing/usage";
 import { getRateLimiter } from "@/lib/cache/redis";
@@ -46,8 +47,30 @@ const PHASES: Array<[number, number]> = [
 
 const LEAD_START_MS = 140;
 const WORD_MS = 26;
+const DEMO_MODE = process.env.NEXT_PUBLIC_MARPIN_DEMO_MODE === "true";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+function emptyResolution(workspaceId: string | null): {
+  source: MetricsSource;
+  mode: DataMode;
+  workspaceId: string | null;
+  artifacts: ArtifactPayload[];
+  chips: ResultChip[];
+  closing: AnswerData["closing"];
+} {
+  return {
+    source: { getAccountMetrics: () => "(no connected-account data available yet)" },
+    mode: "empty",
+    workspaceId,
+    artifacts: [],
+    chips: [],
+    closing: {
+      split: "Connect your accounts to see real metrics here.",
+      thread: "Connect your accounts and I will answer from your real marketing data.",
+    },
+  };
+}
 
 /**
  * Resolve the internal-read data source for this turn, preferring real
@@ -56,8 +79,9 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
  * get_account_metrics; ONLY the source behind that tool changes.
  *
  *   • Workspace has live MetricFact data → DB source, mode "live".
- *   • Otherwise (no DB, no rows, or any resolution error) → the existing canned
- *     source built from the request artifacts, mode "sample".
+ *   • A real/dev workspace exists but has no rows → empty source, mode "empty".
+ *   • No workspace/DB in the explicit offline mockup path → sample source,
+ *     mode "sample".
  *
  * Never throws: any failure resolving the workspace or reading the DB degrades
  * gracefully to the labelled sample path, so behaviour is byte-compatible with
@@ -65,20 +89,59 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
  */
 async function resolveMetricsSource(
   artifacts: ArtifactPayload[],
-): Promise<{ source: MetricsSource; mode: DataMode; workspaceId: string | null }> {
+): Promise<{
+  source: MetricsSource;
+  mode: DataMode;
+  workspaceId: string | null;
+  artifacts: ArtifactPayload[];
+  chips: ResultChip[];
+  closing: AnswerData["closing"];
+}> {
   const canned: MetricsSource = { getAccountMetrics: () => serializeArtifacts(artifacts) };
   try {
     const workspace = await getCurrentWorkspace();
     if (workspace && (await hasLiveData(workspace.id))) {
       const source = await createDbMetricsSource(workspace.id);
-      return { source, mode: "live", workspaceId: workspace.id };
+      const rows = await readRecentMetricFacts(workspace.id);
+      const visual = buildMetricArtifacts(rows);
+      if (visual) {
+        return { source, mode: "live", workspaceId: workspace.id, ...visual };
+      }
     }
-    return { source: canned, mode: "sample", workspaceId: workspace?.id ?? null };
+    if (workspace || isAuthConfigured()) {
+      return emptyResolution(workspace?.id ?? null);
+    }
+    return {
+      source: canned,
+      mode: "sample",
+      workspaceId: null,
+      artifacts,
+      chips: [],
+      closing: {
+        split: "",
+        thread: "",
+      },
+    };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[agent] live data unavailable, using sample data: ${msg}`);
+    console.warn(
+      DEMO_MODE
+        ? `[agent] live data unavailable, using sample data: ${msg}`
+        : `[agent] live data unavailable, showing empty state: ${msg}`,
+    );
+    if (!DEMO_MODE) return emptyResolution(null);
   }
-  return { source: canned, mode: "sample", workspaceId: null };
+  return {
+    source: canned,
+    mode: "sample",
+    workspaceId: null,
+    artifacts,
+    chips: [],
+    closing: {
+      split: "",
+      thread: "",
+    },
+  };
 }
 
 /** Sliding-window throttle for the answer stream (Stack C — Upstash). With no
@@ -127,11 +190,14 @@ export async function POST(req: Request): Promise<Response> {
       try {
         send({ type: "start", question: body.question });
 
-        // ── Data source: real DB-backed metrics when the workspace has them,
-        // else the canned sample dataset. Internal-first is preserved — the
-        // agent still reads through get_account_metrics; only the source varies.
-        // The mode drives an honest "Sample data" label in the UI.
-        const { source, mode, workspaceId } = await resolveMetricsSource(body.artifacts);
+        // ── Data source: real DB-backed metrics when the workspace has them;
+        // otherwise an empty connected-data state for real workspaces, with the
+        // old sample path reserved for explicit offline demo mode.
+        const resolved = await resolveMetricsSource(body.artifacts);
+        const { source, mode, workspaceId } = resolved;
+        const answerArtifacts = mode === "sample" ? body.artifacts : resolved.artifacts;
+        const answerChips = mode === "sample" ? body.chips : resolved.chips;
+        const answerClosing = mode === "sample" ? body.closing : resolved.closing;
         send({ type: "data-mode", mode });
 
         await sleep(LEAD_START_MS);
@@ -194,7 +260,7 @@ export async function POST(req: Request): Promise<Response> {
           }
         }
 
-        // ── Remaining phases: canned artifacts/chips/closing on staged reveal ──
+        // ── Remaining phases: stream artifacts/chips/closing on staged reveal ──
         const emitted = new Set<number>();
         let chipsSent = false;
         let closingSent = false;
@@ -203,28 +269,28 @@ export async function POST(req: Request): Promise<Response> {
           await sleep(delay);
           send({ type: "phase", step });
 
-          body.artifacts.forEach((a, i) => {
+          answerArtifacts.forEach((a, i) => {
             if (!emitted.has(i) && STEP_FOR_KIND[a.kind] <= step) {
               send({ type: "artifact", payload: a });
               emitted.add(i);
             }
           });
           if (!chipsSent && step >= 2) {
-            send({ type: "result-chips", chips: body.chips });
+            send({ type: "result-chips", chips: answerChips });
             chipsSent = true;
           }
           if (!closingSent && step >= 6) {
-            send({ type: "closing", closing: body.closing });
+            send({ type: "closing", closing: answerClosing });
             closingSent = true;
           }
         }
 
         // Flush anything not yet emitted (defensive).
-        body.artifacts.forEach((a, i) => {
+        answerArtifacts.forEach((a, i) => {
           if (!emitted.has(i)) send({ type: "artifact", payload: a });
         });
-        if (!chipsSent) send({ type: "result-chips", chips: body.chips });
-        if (!closingSent) send({ type: "closing", closing: body.closing });
+        if (!chipsSent) send({ type: "result-chips", chips: answerChips });
+        if (!closingSent) send({ type: "closing", closing: answerClosing });
 
         // Product analytics: record that an answer completed. No-op without a
         // PostHog key (see src/lib/analytics.ts); never throws. We only send
@@ -235,7 +301,7 @@ export async function POST(req: Request): Promise<Response> {
           model_tier: decision.tier,
           model: decision.model,
           live: streamed,
-          artifact_count: body.artifacts.length,
+          artifact_count: answerArtifacts.length,
         });
 
         // Billing/metering: record the credits this answer consumed (deep/Opus

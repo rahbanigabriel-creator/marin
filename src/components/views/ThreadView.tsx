@@ -1,5 +1,6 @@
 import type { Scenario } from "@/types/scenario";
-import type { AgentStatusKey } from "@/lib/streaming/events";
+import type { AgentStatusKey, ArtifactPayload, DataMode } from "@/lib/streaming/events";
+import type { ResultChip } from "@/types/artifacts";
 import { gatesForStep } from "@/lib/streaming/stepModel";
 import { UserBubble } from "@/components/chat/UserBubble";
 import { AssistantBlock } from "@/components/chat/AssistantBlock";
@@ -13,9 +14,14 @@ interface ThreadViewProps {
   thinking: string;
   question: string;
   scenario: Scenario;
+  artifacts: ArtifactPayload[];
+  chips: ResultChip[];
+  closing: Scenario["closing"] | null;
+  dataMode: DataMode;
   onSend: (text: string) => void;
   onSuggest: (text: string) => void;
   suggestions: string[];
+  connectedCount: number;
 }
 
 export function ThreadView({
@@ -25,9 +31,14 @@ export function ThreadView({
   thinking,
   question,
   scenario,
+  artifacts,
+  chips,
+  closing,
+  dataMode,
   onSend,
   onSuggest,
   suggestions,
+  connectedCount,
 }: ThreadViewProps) {
   const g = gatesForStep(step, typed.length, scenario.lead.length);
 
@@ -41,11 +52,16 @@ export function ThreadView({
           status={status}
           thinking={thinking}
           lead={scenario.lead}
-          chips={scenario.chips}
-          closing={scenario.closing}
+          chips={chips}
+          closing={closing}
           variant="thread"
-          inlineCanvas={g.canvasReady ? <AnswerCanvas step={step} artifacts={scenario.artifacts} /> : null}
+          inlineCanvas={g.canvasReady && artifacts.length > 0 ? <AnswerCanvas step={step} artifacts={artifacts} /> : null}
         />
+        {g.canvasReady && dataMode === "empty" && (
+          <div className="rounded-[8px] border border-dashed border-line-2 bg-surface-card p-[18px] font-sans text-[13px] text-ink-400">
+            Connect accounts to render real charts in this thread.
+          </div>
+        )}
       </div>
       <div
         className="sticky bottom-0 p-[8px_28px_22px]"
@@ -54,7 +70,13 @@ export function ThreadView({
         }}
       >
         <div className="mx-auto w-full max-w-thread">
-          <Composer variant="thread" onSend={onSend} onSuggest={onSuggest} suggestions={suggestions} />
+          <Composer
+            variant="thread"
+            onSend={onSend}
+            onSuggest={onSuggest}
+            suggestions={suggestions}
+            connectedCount={connectedCount}
+          />
         </div>
       </div>
     </div>

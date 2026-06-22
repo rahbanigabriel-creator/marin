@@ -116,16 +116,11 @@ async function resolveClerkIdentity(): Promise<ResolvedIdentity | null> {
 async function findOrCreateWorkspace(
   identity: ResolvedIdentity,
 ): Promise<Workspace> {
-  // Find-or-create by the stable per-tenant slug.
-  const existing = await prisma.workspace.findUnique({
+  const workspace = await prisma.workspace.upsert({
     where: { slug: identity.slug },
+    update: {},
+    create: { name: identity.suggestedName, slug: identity.slug },
   });
-
-  const workspace =
-    existing ??
-    (await prisma.workspace.create({
-      data: { name: identity.suggestedName, slug: identity.slug },
-    }));
 
   // Ensure the signed-in user is a member of this workspace (idempotent). The
   // first member of a brand-new workspace is the owner.
@@ -140,7 +135,7 @@ async function findOrCreateWorkspace(
     create: {
       workspaceId: workspace.id,
       clerkUserId: identity.clerkUserId,
-      role: existing ? "member" : "owner",
+      role: "owner",
     },
   });
 
@@ -187,8 +182,13 @@ function toRef(w: Workspace): WorkspaceRef {
  * that require a user should use requireWorkspace()).
  */
 export async function getCurrentWorkspace(): Promise<WorkspaceRef | null> {
-  // No Clerk → single-tenant dev mode. Deterministic, no I/O.
-  if (!isAuthConfigured()) return DEV_WORKSPACE;
+  // No Clerk → single-tenant dev mode. If a DB is configured, create a real
+  // workspace row so local connector tests can persist Connection/MetricFact
+  // rows under valid foreign keys; otherwise stay synthetic and I/O-free.
+  if (!isAuthConfigured()) {
+    if (!isDatabaseConfigured()) return DEV_WORKSPACE;
+    return toRef(await findOrCreateWorkspace(DEV_IDENTITY));
+  }
 
   const identity = await resolveClerkIdentity();
   if (!identity) return null; // configured, but no signed-in user

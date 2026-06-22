@@ -19,6 +19,7 @@ interface TopBarProps {
   chatControls?: boolean;
   /** agency: the client the workspace is currently scoped to */
   activeClient?: string | null;
+  showPersonaSwitcher?: boolean;
 }
 
 const TABS: Array<{ mode: Mode; label: string }> = [
@@ -38,6 +39,7 @@ export function TopBar({
   onForecast,
   chatControls = true,
   activeClient = null,
+  showPersonaSwitcher = true,
 }: TopBarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const connected = channels.filter((c) => c.status === "connected").map((c) => c.name);
@@ -50,7 +52,7 @@ export function TopBar({
   return (
     <header className="flex h-topbar flex-none items-center justify-between gap-[16px] border-b border-line-2 bg-surface-panel px-[20px]">
       <div className="flex min-w-0 items-center gap-[12px]">
-        {/* persona / demo switcher */}
+        {showPersonaSwitcher && (
         <div className="relative flex-none">
           <button
             type="button"
@@ -101,6 +103,7 @@ export function TopBar({
             </>
           )}
         </div>
+        )}
 
         {activeClient && (
           <span className="flex flex-none items-center gap-[7px] font-sans text-[13px] font-medium text-ink-400">

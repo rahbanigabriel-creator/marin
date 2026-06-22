@@ -1,5 +1,5 @@
 import type { ConnectorPlatform, ConnectorClient } from "./types";
-import { GoogleAdsClient, Ga4Client, MetaAdsClient } from "./clients";
+import { AppleSearchAdsClient, GoogleAdsClient, Ga4Client, MetaAdsClient } from "./clients";
 
 /**
  * Connector registry (Stack B, architecture §7). Server-only but import-safe.
@@ -104,6 +104,16 @@ export const CONNECTORS: Record<ConnectorPlatform, ConnectorConfig> = {
     clientSecretEnv: "META_APP_SECRET",
     usesPkce: false,
   },
+  apple_search_ads: {
+    id: "apple_search_ads",
+    label: "Apple Search Ads",
+    authorizeUrl: "",
+    tokenUrl: "https://appleid.apple.com/auth/oauth2/token",
+    scopes: [],
+    clientIdEnv: "APPLE_SEARCH_ADS_CLIENT_ID",
+    clientSecretEnv: "APPLE_SEARCH_ADS_PRIVATE_KEY",
+    usesPkce: false,
+  },
 };
 
 /** All platform ids the registry knows about. */
@@ -129,6 +139,21 @@ export function getConnectorConfig(
  */
 export function isConnectorConfigured(platform: ConnectorPlatform): boolean {
   const cfg = CONNECTORS[platform];
+  if (platform === "google_ads") {
+    return Boolean(
+      process.env.GOOGLE_OAUTH_CLIENT_ID &&
+        process.env.GOOGLE_OAUTH_CLIENT_SECRET &&
+        process.env.GOOGLE_ADS_DEVELOPER_TOKEN,
+    );
+  }
+  if (platform === "apple_search_ads") {
+    return Boolean(
+      process.env.APPLE_SEARCH_ADS_CLIENT_ID &&
+        process.env.APPLE_SEARCH_ADS_TEAM_ID &&
+        process.env.APPLE_SEARCH_ADS_KEY_ID &&
+        process.env.APPLE_SEARCH_ADS_PRIVATE_KEY,
+    );
+  }
   return Boolean(process.env[cfg.clientIdEnv]) && Boolean(process.env[cfg.clientSecretEnv]);
 }
 
@@ -170,6 +195,9 @@ export function getConnectorClient(platform: ConnectorPlatform): ConnectorClient
       break;
     case "meta_ads":
       client = new MetaAdsClient();
+      break;
+    case "apple_search_ads":
+      client = new AppleSearchAdsClient();
       break;
   }
   clientSingletons[platform] = client;

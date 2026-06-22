@@ -25,13 +25,25 @@ export interface StreamingState {
   typed: string;
 }
 
-export function useStreamingChat(scenario: Scenario) {
+interface UseStreamingChatOptions {
+  enabled?: boolean;
+}
+
+export function useStreamingChat(
+  scenario: Scenario,
+  { enabled = true }: UseStreamingChatOptions = {},
+) {
   const [chat, setChat] = useState<ChatStreamState>(initialChatState);
   const [nonce, setNonce] = useState(0);
 
   const replay = useCallback(() => setNonce((n) => n + 1), []);
 
   useEffect(() => {
+    if (!enabled) {
+      setChat(initialChatState);
+      return;
+    }
+
     const ac = new AbortController();
     let cancelled = false;
     setChat(initialChatState);
@@ -80,7 +92,7 @@ export function useStreamingChat(scenario: Scenario) {
       cancelled = true;
       ac.abort();
     };
-  }, [scenario, nonce]);
+  }, [enabled, scenario, nonce]);
 
   return {
     state: { step: chat.step, typed: chat.typed } as StreamingState,

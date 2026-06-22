@@ -15,7 +15,7 @@ interface AssistantBlockProps {
   thinking: string;
   lead: string;
   chips: ResultChip[];
-  closing: { split: string; thread: string };
+  closing: { split: string; thread: string } | null;
   variant: "split" | "thread";
   /** Thread mode renders the canvas inline between typed text and closing. */
   inlineCanvas?: React.ReactNode;
@@ -63,7 +63,7 @@ export function AssistantBlock({
       <div className="min-w-0 flex-1">
         <div className="mb-[6px] flex items-center gap-2" style={variant === "thread" ? { marginBottom: 7 } : undefined}>
           <span className="font-sans font-semibold text-ink-900" style={{ fontSize: nameSize }}>
-            Marin
+            Marpin
           </span>
         </div>
 
@@ -83,7 +83,7 @@ export function AssistantBlock({
 
         {variant === "thread" && inlineCanvas && <div className="mt-[16px]">{inlineCanvas}</div>}
 
-        {g.showClosing && (
+        {g.showClosing && closing && (
           <RichLine
             text={variant === "thread" ? closing.thread : closing.split}
             className="animate-fadeUp mt-[14px] font-sans text-ink-800"

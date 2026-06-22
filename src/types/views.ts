@@ -1,10 +1,15 @@
+import type { ConnectorPlatform } from "@/lib/connectors/types";
+
 export type Mode = "split" | "thread" | "report";
 
-export type ChannelStatus = "connected" | "disconnected";
+export type ChannelStatus = "connected" | "disconnected" | "error";
 
 export interface Channel {
   name: string;
   status: ChannelStatus;
+  platform?: ConnectorPlatform;
+  externalAccountId?: string;
+  displayName?: string | null;
 }
 
 /** A saved conversation in the sidebar's Recent list. */

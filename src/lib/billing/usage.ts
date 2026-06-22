@@ -58,6 +58,8 @@ export async function recordUsage(
   workspaceId: string,
   input: UsageInput,
 ): Promise<boolean> {
+  if (workspaceId === "dev-workspace") return false;
+
   // Dynamic import keeps Prisma out of this module's static import graph; the DB
   // is only touched on the live path, after the gate passes.
   const { prisma, isDatabaseConfigured } = await import("@/lib/db");
@@ -91,6 +93,8 @@ export async function sumCreditsUsed(
   from: Date,
   to: Date = new Date(),
 ): Promise<number> {
+  if (workspaceId === "dev-workspace") return 0;
+
   const { prisma, isDatabaseConfigured } = await import("@/lib/db");
   if (!isDatabaseConfigured()) return 0;
 

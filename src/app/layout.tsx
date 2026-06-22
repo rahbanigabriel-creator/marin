@@ -31,9 +31,9 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Marin — Marketing Copilot",
+  title: "Marpin — Marketing Copilot",
   description:
-    "Marin is an AI marketing copilot. Ask in natural language; get live, data-connected answers across Google Ads, Meta, GA4 and more.",
+    "Marpin is an AI marketing copilot. Ask in natural language; get live, data-connected answers across Google Ads, Meta, GA4 and more.",
 };
 
 export default function RootLayout({

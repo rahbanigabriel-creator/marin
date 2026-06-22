@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { Scenario } from "@/types/scenario";
+import type { ArtifactPayload, DataMode } from "@/lib/streaming/events";
 import { gatesForStep } from "@/lib/streaming/stepModel";
 import { AnswerCanvas } from "@/components/canvas/AnswerCanvas";
 import { ThinkingDots } from "@/components/ui/ThinkingDots";
@@ -14,9 +15,23 @@ interface ReportViewProps {
   question: string;
   scenario: Scenario;
   workspace: string;
+  artifacts: ArtifactPayload[];
+  closing: Scenario["closing"] | null;
+  dataMode: DataMode;
+  onOpenConnections: () => void;
 }
 
-export function ReportView({ step, typed, question, scenario, workspace }: ReportViewProps) {
+export function ReportView({
+  step,
+  typed,
+  question,
+  scenario,
+  workspace,
+  artifacts,
+  closing,
+  dataMode,
+  onOpenConnections,
+}: ReportViewProps) {
   const g = gatesForStep(step, typed.length, scenario.lead.length);
   const [copied, setCopied] = useState(false);
   const [scheduled, setScheduled] = useState(false);
@@ -89,7 +104,7 @@ export function ReportView({ step, typed, question, scenario, workspace }: Repor
             </div>
             <div className="text-right">
               <div className="font-mono text-[11px] font-medium text-ink-400">{period}</div>
-              <div className="font-mono text-[9.5px] text-ink-200">via Marin</div>
+              <div className="font-mono text-[9.5px] text-ink-200">via Marpin</div>
             </div>
           </div>
 
@@ -111,7 +126,7 @@ export function ReportView({ step, typed, question, scenario, workspace }: Repor
             </div>
           )}
 
-          {g.showClosing && (
+          {g.showClosing && closing && (
             <div
               className="mb-[26px] flex max-w-[720px] items-start gap-[10px] rounded-[10px] p-[12px_16px]"
               style={{ background: "#F5E0E3" }}
@@ -120,13 +135,27 @@ export function ReportView({ step, typed, question, scenario, workspace }: Repor
                 Recommended decision
               </span>
               <span className="font-sans text-[13.5px] leading-[1.5] text-ink-800">
-                {scenario.closing.thread}
+                {closing.thread}
               </span>
             </div>
           )}
 
-          {g.canvasReady ? (
-            <AnswerCanvas step={step} artifacts={scenario.artifacts} />
+          {g.canvasReady && artifacts.length > 0 ? (
+            <AnswerCanvas step={step} artifacts={artifacts} />
+          ) : g.canvasReady && dataMode === "empty" ? (
+            <div className="rounded-[8px] border border-dashed border-line-2 bg-surface-card p-[22px] text-center">
+              <div className="font-serif text-[20px] font-medium text-ink-900">No connected data yet</div>
+              <div className="mx-auto mt-[6px] max-w-[380px] font-sans text-[13px] leading-[1.55] text-ink-400">
+                Connect accounts before exporting a real marketing report.
+              </div>
+              <button
+                type="button"
+                onClick={onOpenConnections}
+                className="mt-[12px] cursor-pointer rounded-btn border-none bg-plum px-[16px] py-[9px] font-sans text-[13px] font-semibold text-white"
+              >
+                Connect accounts
+              </button>
+            </div>
           ) : (
             <div className="flex items-center gap-[10px] py-[30px] text-ink-200">
               <ThinkingDots size={8} />

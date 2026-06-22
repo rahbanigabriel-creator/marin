@@ -43,7 +43,7 @@ export type MetricFactQuery = (
   since: Date,
 ) => Promise<MetricFactRow[]>;
 
-const defaultQuery: MetricFactQuery = (workspaceId, since) =>
+export const defaultMetricFactQuery: MetricFactQuery = (workspaceId, since) =>
   prisma.metricFact.findMany({
     where: { workspaceId, date: { gte: since } },
     select: { platform: true, campaign: true, metric: true, value: true, date: true },
@@ -220,7 +220,7 @@ export function serializeMetricFacts(
  */
 export async function createDbMetricsSource(
   workspaceId: string,
-  query: MetricFactQuery = defaultQuery,
+  query: MetricFactQuery = defaultMetricFactQuery,
   windowDays = RECENT_WINDOW_DAYS,
 ): Promise<MetricsSource> {
   const since = windowStart(windowDays);
@@ -230,6 +230,15 @@ export async function createDbMetricsSource(
       return serializeMetricFacts(rows, sections, windowDays);
     },
   };
+}
+
+/** Read the same recent MetricFact rows used by the agent for visual artifacts. */
+export async function readRecentMetricFacts(
+  workspaceId: string,
+  query: MetricFactQuery = defaultMetricFactQuery,
+  windowDays = RECENT_WINDOW_DAYS,
+): Promise<MetricFactRow[]> {
+  return query(workspaceId, windowStart(windowDays));
 }
 
 /**
