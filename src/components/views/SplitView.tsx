@@ -106,7 +106,8 @@ export function SplitView({
             <div className="flex h-full min-h-[340px] flex-col items-center justify-center gap-[12px] rounded-[8px] border border-dashed border-line-2 bg-surface-card p-[24px] text-center">
               <div className="font-serif text-[21px] font-medium text-ink-900">No connected data yet</div>
               <div className="max-w-[360px] font-sans text-[13px] leading-[1.55] text-ink-400">
-                Connect Google Ads, GA4, Meta Ads, or Apple Search Ads to render real KPIs and graphs.
+                Connect any paid or organic channel — Google, Meta, TikTok, LinkedIn, GA4, Search
+                Console, and more — to render real KPIs and graphs.
               </div>
               <button
                 type="button"
