@@ -46,6 +46,27 @@ const REAL_CONNECTOR_CHANNELS: Channel[] = [
 const DEMO_MODE = process.env.NEXT_PUBLIC_MARPIN_DEMO_MODE === "true";
 
 /**
+ * In the real product the user's ACTUAL question must reach the live agent — not
+ * a canned demo scenario. resolveScenario() is a demo-only construct that maps a
+ * query to a pre-written answer (and replaces `.question` with the canned one),
+ * which is why typing a URL was getting answered as "wasted ad spend". This wraps
+ * the raw input as a live scenario: the agent generates the lead + canvas cards.
+ */
+function liveScenario(text: string, persona: Persona): Scenario {
+  return {
+    id: "live",
+    persona,
+    title: text.length > 48 ? text.slice(0, 46) + "…" : text,
+    question: text,
+    keywords: [],
+    lead: "",
+    chips: [],
+    artifacts: [],
+    closing: { split: "", thread: "" },
+  };
+}
+
+/**
  * Top-level orchestrator. Owns the active persona + dataset, the top-level
  * screen, view mode, the active question + resolved scenario, the agency's
  * active client, channels, the modal, and recent-chat selection.
@@ -133,11 +154,13 @@ export function AppShell() {
       if (!trimmed) return;
       setActiveClient(null);
       setQuestion(trimmed);
-      setScenario(resolveScenario(trimmed, persona, SCENARIOS));
+      setScenario(
+        realProductMode ? liveScenario(trimmed, persona) : resolveScenario(trimmed, persona, SCENARIOS),
+      );
       setHasAsked(true);
       replay();
     },
-    [persona, replay],
+    [persona, realProductMode, replay],
   );
 
   // "New conversation" returns the real product to the clean welcome state

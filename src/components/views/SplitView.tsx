@@ -121,7 +121,7 @@ export function SplitView({
             <div className="flex h-full min-h-[340px] flex-col items-center justify-center gap-[14px] text-ink-200">
               <ThinkingDots size={8} />
               <span className="font-sans text-[13px] font-medium">
-                Querying Google Ads, Meta &amp; GA4…
+                Building your answer…
               </span>
             </div>
           )}
