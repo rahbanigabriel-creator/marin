@@ -38,7 +38,7 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: "marketing_reference",
     description:
-      "Privately consult proven marketing frameworks to pressure-test your thinking on a genuinely HARD strategic problem — a full go-to-market strategy, a tricky multi-cause diagnosis, a major budget reallocation. SKIP it for quick, tactical, creative, or conversational asks, and skip it while you're still clarifying scope; just answer from your own expertise. When you do use it, reason from it silently and answer in your OWN voice — never mention this tool, frameworks, references, 'doctrine', or any ids/codes to the user. Does NOT require any connected account.",
+      "Privately consult proven marketing frameworks to pressure-test your thinking on a genuinely HARD strategic problem — a full go-to-market strategy, a tricky multi-cause diagnosis, a major budget reallocation. SKIP it for quick, tactical, creative, conversational, or single-metric diagnostic asks; just answer from your own expertise. Reaching for it is never a reason to clarify or stall — if the answer is in your head, deliver it. When you do use it, reason from it silently and answer in your OWN voice — never mention this tool, frameworks, references, 'doctrine', or any ids/codes to the user. Does NOT require any connected account.",
     input_schema: {
       type: "object",
       properties: {
