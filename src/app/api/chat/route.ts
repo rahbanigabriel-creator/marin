@@ -5,6 +5,7 @@ import { routeModel } from "@/lib/agent/router";
 import { buildAgentPrompt, serializeArtifacts } from "@/lib/agent/prompt";
 import { isLiveAgentEnabled } from "@/lib/agent/provider";
 import { runAgentWithTools } from "@/lib/agent/loop";
+import { buildOfflineDoctrineLead } from "@/lib/agent/fallback-lead";
 import type { MetricsSource } from "@/lib/agent/tools";
 import { getCurrentWorkspace, isAuthConfigured } from "@/lib/auth";
 import { createDbMetricsSource, hasLiveData, readRecentMetricFacts } from "@/lib/metrics/source";
@@ -60,7 +61,10 @@ function emptyResolution(workspaceId: string | null): {
   closing: AnswerData["closing"];
 } {
   return {
-    source: { getAccountMetrics: () => "(no connected-account data available yet)" },
+    source: {
+      getAccountMetrics: () =>
+        "(no connected-account data available yet — do not fabricate numbers; answer from doctrine and note what connecting an account would unlock)",
+    },
     mode: "empty",
     workspaceId,
     artifacts: [],
@@ -74,18 +78,21 @@ function emptyResolution(workspaceId: string | null): {
 
 /**
  * Resolve the internal-read data source for this turn, preferring real
- * DB-backed metrics over the canned sample dataset — without ever breaking the
- * offline path. Internal-first is preserved: the agent still calls
- * get_account_metrics; ONLY the source behind that tool changes.
+ * DB-backed metrics, then falling back to the ZERO-CONNECTOR empty state. The
+ * agent reaches for doctrine (retrieve_doctrine) regardless; get_account_metrics
+ * only ever exposes REAL data or an honest "nothing connected" message.
  *
  *   • Workspace has live MetricFact data → DB source, mode "live".
- *   • A real/dev workspace exists but has no rows → empty source, mode "empty".
- *   • No workspace/DB in the explicit offline mockup path → sample source,
- *     mode "sample".
+ *   • Otherwise (real workspace with no rows, auth configured, OR the default
+ *     keyless/offline session) → empty source, mode "empty". The agent answers
+ *     from doctrine; it is told that connecting an account unlocks real metrics.
+ *   • Sample source / mode "sample" is reserved STRICTLY for the explicit demo
+ *     flag (NEXT_PUBLIC_MARPIN_DEMO_MODE=true). It is NEVER the default, so a
+ *     plain local run never presents the canned dataset as the user's real
+ *     numbers (the "fake numbers as real data" bug, Phase-1 constraint #2).
  *
  * Never throws: any failure resolving the workspace or reading the DB degrades
- * gracefully to the labelled sample path, so behaviour is byte-compatible with
- * today aside from the honest "Sample data" label.
+ * gracefully to the empty (zero-connector) state — never to fabricated data.
  */
 async function resolveMetricsSource(
   artifacts: ArtifactPayload[],
@@ -97,7 +104,22 @@ async function resolveMetricsSource(
   chips: ResultChip[];
   closing: AnswerData["closing"];
 }> {
-  const canned: MetricsSource = { getAccountMetrics: () => serializeArtifacts(artifacts) };
+  const sampleResolution = (): {
+    source: MetricsSource;
+    mode: DataMode;
+    workspaceId: string | null;
+    artifacts: ArtifactPayload[];
+    chips: ResultChip[];
+    closing: AnswerData["closing"];
+  } => ({
+    source: { getAccountMetrics: () => serializeArtifacts(artifacts) },
+    mode: "sample",
+    workspaceId: null,
+    artifacts,
+    chips: [],
+    closing: { split: "", thread: "" },
+  });
+
   try {
     const workspace = await getCurrentWorkspace();
     if (workspace && (await hasLiveData(workspace.id))) {
@@ -108,20 +130,12 @@ async function resolveMetricsSource(
         return { source, mode: "live", workspaceId: workspace.id, ...visual };
       }
     }
-    if (workspace || isAuthConfigured()) {
-      return emptyResolution(workspace?.id ?? null);
+    // No live rows. Sample data ONLY behind the explicit demo flag; otherwise
+    // the honest zero-connector empty state (no fabricated numbers).
+    if (DEMO_MODE && !workspace && !isAuthConfigured()) {
+      return sampleResolution();
     }
-    return {
-      source: canned,
-      mode: "sample",
-      workspaceId: null,
-      artifacts,
-      chips: [],
-      closing: {
-        split: "",
-        thread: "",
-      },
-    };
+    return emptyResolution(workspace?.id ?? null);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(
@@ -129,19 +143,9 @@ async function resolveMetricsSource(
         ? `[agent] live data unavailable, using sample data: ${msg}`
         : `[agent] live data unavailable, showing empty state: ${msg}`,
     );
-    if (!DEMO_MODE) return emptyResolution(null);
+    if (DEMO_MODE) return sampleResolution();
+    return emptyResolution(null);
   }
-  return {
-    source: canned,
-    mode: "sample",
-    workspaceId: null,
-    artifacts,
-    chips: [],
-    closing: {
-      split: "",
-      thread: "",
-    },
-  };
 }
 
 /** Sliding-window throttle for the answer stream (Stack C — Upstash). With no
@@ -245,14 +249,28 @@ export async function POST(req: Request): Promise<Response> {
         }
         if (!streamed) {
           // Deterministic fallback (no key / error): synthetic activity statuses
-          // so the UI still feels dynamic, then the canned lead, chunked the same
-          // way the prototype's typewriter did (every character preserved).
+          // so the UI still feels dynamic, then a lead chunked the same way the
+          // prototype's typewriter did (every character preserved).
+          //
+          // CONSTRAINT #2 — NO FAKE DATA ON THE DEFAULT SESSION. The canned
+          // scenario lead (body.lead) carries fabricated euro figures ("€612k
+          // revenue", "4.6× ROAS", "€11.5k leaking") presented as the user's real
+          // data. We may ONLY stream it behind the explicit demo flag. On the
+          // default keyless/offline path we instead synthesize an HONEST,
+          // doctrine-grounded lead with zero fabricated numbers (same lexical
+          // retriever the live agent uses — no key required), so a real strategy
+          // question never gets answered with invented metrics.
+          const fallbackLead =
+            DEMO_MODE && mode === "sample"
+              ? body.lead
+              : buildOfflineDoctrineLead(body.question, body.persona);
+
           send({ type: "status", key: "reading", label: AGENT_STATUS_LABEL.reading });
           await sleep(420);
           send({ type: "status", key: "analyzing", label: AGENT_STATUS_LABEL.analyzing });
           await sleep(520);
           send({ type: "status", key: "writing", label: AGENT_STATUS_LABEL.writing });
-          const chunks = body.lead.match(/\s*\S+/g) ?? [body.lead];
+          const chunks = fallbackLead.match(/\s*\S+/g) ?? [fallbackLead];
           for (const c of chunks) {
             if (closed) return;
             send({ type: "text-delta", text: c });

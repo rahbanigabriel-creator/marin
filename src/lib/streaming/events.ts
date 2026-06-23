@@ -72,7 +72,9 @@ export type ArtifactPayload =
  */
 export type AgentStatusKey =
   | "reading"
+  | "consulting"
   | "analyzing"
+  | "researching"
   | "verifying"
   | "refining"
   | "writing"
@@ -80,7 +82,9 @@ export type AgentStatusKey =
 
 export const AGENT_STATUS_LABEL: Record<AgentStatusKey, string> = {
   reading: "Reading your account data",
+  consulting: "Consulting the playbooks",
   analyzing: "Analyzing performance",
+  researching: "Researching the live web",
   verifying: "Checking every figure",
   refining: "Double-checking the numbers",
   writing: "Writing your answer",

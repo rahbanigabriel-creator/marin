@@ -3,6 +3,25 @@ import { withSentryConfig } from "@sentry/nextjs";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  /**
+   * Ship the doctrine corpus markdown with the serverless trace.
+   *
+   * src/lib/rag/corpus.ts reads src/lib/rag/corpus/*.md at runtime via a dynamic
+   * readdirSync path (resolved from import.meta.url). Next's file tracer cannot
+   * statically follow a dynamic readdir, so on a standalone / Vercel serverless
+   * build the .md files would NOT be bundled — loadCorpus() would silently return
+   * [] and the zero-connector brain would lose ALL doctrine grounding in prod
+   * (invisible at build time because the loader degrades gracefully).
+   *
+   * Pinning the glob here forces every route that can reach the retriever to
+   * include the corpus in its trace. We key it broadly (the chat API route plus a
+   * catch-all) so the corpus rides along wherever loadCorpus is reachable.
+   */
+  outputFileTracingIncludes: {
+    "/api/chat": ["./src/lib/rag/corpus/**/*.md"],
+    "/api/**/*": ["./src/lib/rag/corpus/**/*.md"],
+    "/**/*": ["./src/lib/rag/corpus/**/*.md"],
+  },
 };
 
 /**
