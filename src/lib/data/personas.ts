@@ -26,6 +26,12 @@ const Q = {
   health: "Is my marketing working — should I cut or raise budget?",
   why: "Why is my CPA going up?",
   tracking: "Do I have a tracking problem?",
+  // Broad, no-data-required starters — Marpin is a full CMO, not a metrics box.
+  strategy: "Build a growth strategy for my business",
+  competitors: "Analyze my top competitors and where I can win",
+  website: "Audit my website and funnel — what should I fix first?",
+  launch: "Plan a campaign I can launch this month",
+  channelmix: "What's the best channel mix for my budget?",
 };
 
 function channels(connected: string[]): Channel[] {
@@ -45,11 +51,7 @@ export const PERSONAS: Record<Persona, PersonaConfig> = {
     account: { name: "Alex Lemoine", sub: "Northwind · Founder", initials: "AL" },
     channels: DEFAULT_CHANNELS,
     recentChats: RECENT_CHATS,
-    suggestions: [
-      "Where am I wasting ad spend?",
-      "Which platform is performing best?",
-      "Why is my CPA going up?",
-    ],
+    suggestions: [Q.strategy, Q.competitors, Q.launch],
   },
   cmo: {
     label: "Marketing lead",
@@ -61,7 +63,7 @@ export const PERSONAS: Record<Persona, PersonaConfig> = {
       { title: "Is marketing working?", question: Q.health },
       { title: "Wasted ad spend audit", question: Q.wasted },
     ],
-    suggestions: [Q.compare, Q.health, "Where am I wasting ad spend?"],
+    suggestions: [Q.channelmix, Q.competitors, Q.compare],
   },
   ceo: {
     label: "Executive",
@@ -73,7 +75,7 @@ export const PERSONAS: Record<Persona, PersonaConfig> = {
       { title: "Which platform is winning", question: Q.compare },
       { title: "Q3 board readout", question: Q.health },
     ],
-    suggestions: [Q.health, Q.compare, Q.why],
+    suggestions: [Q.strategy, Q.health, Q.compare],
   },
   agency: {
     label: "Agency",
@@ -86,6 +88,6 @@ export const PERSONAS: Record<Persona, PersonaConfig> = {
       { title: "Wasted ad spend audit", question: Q.wasted },
       { title: "Which platform is winning", question: Q.compare },
     ],
-    suggestions: [Q.why, Q.tracking, Q.compare],
+    suggestions: [Q.competitors, Q.launch, Q.website],
   },
 };

@@ -75,7 +75,7 @@ export function Composer({ onSend, onSuggest, variant, suggestions, connectedCou
       <div className="rounded-input border border-line-1 bg-surface-card p-[10px_12px]">
         <textarea
           rows={2}
-          placeholder="Ask about spend, ROAS, creative, attribution…"
+          placeholder="Ask anything — strategy, competitors, campaigns, SEO, your website…"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKey}

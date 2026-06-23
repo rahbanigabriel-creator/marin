@@ -85,9 +85,10 @@ export function AppShell() {
   const { step, typed } = state;
   const liveSuggestions = useMemo(
     () => [
-      "Where am I wasting ad spend?",
-      "Which platform is performing best?",
-      "Why is my CPA going up?",
+      "Build a growth strategy for my business",
+      "Analyze my top competitors and where I can win",
+      "Plan a campaign I can launch this month",
+      "Audit my website and funnel — what should I fix first?",
     ],
     [],
   );

@@ -20,14 +20,6 @@ import { retrieveDoctrine, type RetrievedDoc } from "@/lib/rag/retrieve";
  * connect prompt — still no fabricated data.
  */
 
-/** Human-readable label for each doc type, for the lead prose. */
-const DOC_TYPE_LABEL: Record<RetrievedDoc["docType"], string> = {
-  philosophy: "first-principles",
-  diagnostic_framework: "diagnostic",
-  practitioner: "practitioner",
-  strategic: "strategic",
-};
-
 /** Pull a short, number-free orienting sentence from a retrieved doc body. */
 function leadSentenceFrom(doc: RetrievedDoc): string | null {
   // Strip markdown headings/frontmatter noise and take the first substantive
@@ -69,25 +61,18 @@ export function buildOfflineDoctrineLead(question: string, persona?: string): st
     docs = [];
   }
 
-  if (docs.length === 0) {
+  // Speak entirely in Marpin's own voice — no framework names, ids, or
+  // "doctrine". Use a retrieved orienting sentence as substance when we have one,
+  // then ask for the specifics needed to turn it into a tailored plan (the same
+  // clarify-first behaviour the live agent follows). Never fabricates numbers.
+  const orient = docs.length ? leadSentenceFrom(docs[0]) : null;
+  if (orient) {
     return (
-      "I can answer this from marketing doctrine and first principles, but I won't invent numbers for your account. " +
-      "Connect Google Ads, Meta, GA4 or Search Console and I'll ground every figure in your real data; until then, ask me anything strategic and I'll reason it through with you."
+      `${orient} ` +
+      "Tell me your website or app, what the business does, and who you're selling to, and I'll turn this into a concrete, tailored plan."
     );
   }
-
-  const primary = docs[0];
-  const frameworkLabel = DOC_TYPE_LABEL[primary.docType] ?? "doctrine";
-  const orient = leadSentenceFrom(primary);
-  const ids = docs.map((d) => d.docId).join(", ");
-
-  const opener = orient
-    ? `${orient} (applying Marpin's ${frameworkLabel} framework ${primary.docId}).`
-    : `Here's how Marpin's ${frameworkLabel} framework ${primary.docId} approaches this.`;
-
   return (
-    `${opener} ` +
-    `I'm answering from doctrine (${ids}) rather than your account — to keep this honest I won't fabricate your numbers or graphs. ` +
-    `Connect an account and I'll ground every figure in your real data.`
+    "Happy to dig into this. So I give you a real, tailored answer instead of generic advice, tell me a bit more — your website or app, what the business does, and who you're trying to reach — and I'll map out the strategy and the next moves."
   );
 }

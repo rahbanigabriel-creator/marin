@@ -38,10 +38,10 @@ export const RECENT_CHATS: RecentChat[] = [
 ];
 
 export const SUGGESTIONS = [
-  "Which platform is performing best?",
-  "Is my marketing working — should I cut or raise budget?",
-  "Why is my CPA going up?",
-  "Do I have a tracking problem?",
+  "Build a growth strategy for my business",
+  "Analyze my top competitors and where I can win",
+  "Plan a campaign I can launch this month",
+  "Audit my website and funnel — what should I fix first?",
 ];
 
 export const DEFAULT_CHANNELS: Channel[] = [

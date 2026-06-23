@@ -1,9 +1,9 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import { AGENT_STATUS_LABEL, type AgentStatusKey } from "@/lib/streaming/events";
+import { AGENT_STATUS_LABEL, type AgentStatusKey, type ArtifactPayload } from "@/lib/streaming/events";
 import { getClient } from "./provider";
 import { TIER_MODEL, type ModelTier } from "./router";
 import { checkGroundedness } from "./oracle";
-import { dispatchTool, TOOLS, type DispatchCtx, type MetricsSource } from "./tools";
+import { dispatchTool, briefFromInput, TOOLS, type DispatchCtx, type MetricsSource } from "./tools";
 import { startLlmTrace, type LlmTrace } from "@/lib/observability/llm-trace";
 
 /**
@@ -32,6 +32,7 @@ import { startLlmTrace, type LlmTrace } from "@/lib/observability/llm-trace";
 export type AgentEvent =
   | { kind: "status"; key: AgentStatusKey; label: string }
   | { kind: "thinking"; text: string }
+  | { kind: "artifact"; payload: ArtifactPayload }
   | { kind: "text"; text: string };
 
 // Headroom for a full zero-connector research turn: retrieve_doctrine (1) +
@@ -40,7 +41,10 @@ export type AgentEvent =
 // iteration is one HTTP round-trip; 10 comfortably covers a doctrine→web→answer
 // path without truncating mid-research, and is a no-op when fewer tools are used.
 const MAX_ITERATIONS = 10;
-const MAX_TOKENS = 4096;
+// Headroom for the answer PLUS one to three structured canvas cards (each
+// add_canvas_card call is tool-input JSON counted as output) and summarized
+// thinking sharing the same budget.
+const MAX_TOKENS = 8192;
 const WORD_MS = 22;
 
 /**
@@ -104,10 +108,11 @@ export async function* runAgentWithTools(opts: {
   const trace = startLlmTrace({ name: "agent_answer", tier, model: opts.model });
 
   try {
-    // Neutral opening status. The precise activity ("consulting the playbooks" /
-    // "researching the live web" / "reading your account data") is emitted as the
-    // model actually reaches for each tool below — it is NOT account-first.
-    yield status("reading");
+    // Neutral opening status. The precise activity ("researching the live web" /
+    // "reading your connected data") is emitted as the model actually reaches for
+    // each tool below — it is NOT account-first and never says it's reading data
+    // it doesn't have.
+    yield status("analyzing");
 
     for (let i = 0; i < MAX_ITERATIONS; i++) {
       // No tool is forced: the model decides (system prompt says retrieve
@@ -180,10 +185,26 @@ export async function* runAgentWithTools(opts: {
         messages.push({ role: "assistant", content: message.content });
         const results: Anthropic.ToolResultBlockParam[] = [];
         for (const tu of toolUses) {
-          // Surface the real activity per tool: doctrine retrieval is the
-          // zero-connector default ("consulting the playbooks"); an account read
-          // only happens when the model judges a real connection is relevant.
-          if (tu.name === "retrieve_doctrine" && !ctx.doctrineRetrieved) yield status("consulting");
+          // add_canvas_card renders a visual card on the workspace canvas — we
+          // intercept it here (yield an artifact the route streams straight
+          // through) rather than routing it through the text dispatch path.
+          if (tu.name === "add_canvas_card") {
+            const card = briefFromInput(tu.input);
+            if (card) yield { kind: "artifact", payload: card };
+            results.push({
+              type: "tool_result",
+              tool_use_id: tu.id,
+              content: card
+                ? "Card rendered on the canvas."
+                : "Card needs a title and at least one section — try again.",
+              is_error: !card,
+            });
+            continue;
+          }
+          // Surface the real activity per tool: the model only consults the
+          // reference frameworks on hard strategic problems; an account read only
+          // happens when it judges a real connection is relevant.
+          if (tu.name === "marketing_reference" && !ctx.doctrineRetrieved) yield status("consulting");
           else if (tu.name === "get_account_metrics" && !ctx.internalReadDone) yield status("reading");
           const outcome = await dispatchTool(tu.name, tu.input, opts.source, ctx);
           if (tu.name === "get_account_metrics" && !outcome.isError) internalData = outcome.content;

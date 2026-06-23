@@ -13,6 +13,7 @@ import type {
   TrackingHealthData,
   ForecastResultData,
   PlanAllocationData,
+  BriefData,
 } from "@/types/artifacts";
 
 /**
@@ -34,7 +35,8 @@ export type ArtifactKind =
   | "rootCause"
   | "trackingHealth"
   | "forecastResult"
-  | "planAllocation";
+  | "planAllocation"
+  | "brief";
 
 /** Base reveal step per artifact kind (the canvas enforces monotonic order on top). */
 export const STEP_FOR_KIND: Record<ArtifactKind, number> = {
@@ -50,6 +52,7 @@ export const STEP_FOR_KIND: Record<ArtifactKind, number> = {
   trackingHealth: 3,
   forecastResult: 4,
   planAllocation: 2,
+  brief: 2,
 };
 
 export type ArtifactPayload =
@@ -64,7 +67,8 @@ export type ArtifactPayload =
   | { kind: "rootCause"; data: RootCauseData }
   | { kind: "trackingHealth"; data: TrackingHealthData }
   | { kind: "forecastResult"; data: ForecastResultData }
-  | { kind: "planAllocation"; data: PlanAllocationData };
+  | { kind: "planAllocation"; data: PlanAllocationData }
+  | { kind: "brief"; data: BriefData };
 
 /**
  * Live agent-activity states, surfaced in the UI so "thinking" is dynamic and
@@ -81,9 +85,9 @@ export type AgentStatusKey =
   | "done";
 
 export const AGENT_STATUS_LABEL: Record<AgentStatusKey, string> = {
-  reading: "Reading your account data",
-  consulting: "Consulting the playbooks",
-  analyzing: "Analyzing performance",
+  reading: "Reading your connected data",
+  consulting: "Working through the strategy",
+  analyzing: "Working through it",
   researching: "Researching the live web",
   verifying: "Checking every figure",
   refining: "Double-checking the numbers",

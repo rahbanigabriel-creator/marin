@@ -201,7 +201,7 @@ export async function POST(req: Request): Promise<Response> {
         const { source, mode, workspaceId } = resolved;
         const answerArtifacts = mode === "sample" ? body.artifacts : resolved.artifacts;
         const answerChips = mode === "sample" ? body.chips : resolved.chips;
-        const answerClosing = mode === "sample" ? body.closing : resolved.closing;
+        let answerClosing = mode === "sample" ? body.closing : resolved.closing;
         send({ type: "data-mode", mode });
 
         await sleep(LEAD_START_MS);
@@ -216,6 +216,7 @@ export async function POST(req: Request): Promise<Response> {
         console.log(`[agent] route ${decision.tier} (${decision.model}) — ${decision.reason}`);
 
         let streamed = false;
+        let liveArtifacts = false;
         if (isLiveAgentEnabled()) {
           try {
             const { system, userContent } = buildAgentPrompt({
@@ -233,7 +234,13 @@ export async function POST(req: Request): Promise<Response> {
               if (closed) return;
               if (ev.kind === "status") send({ type: "status", key: ev.key, label: ev.label });
               else if (ev.kind === "thinking") send({ type: "thinking-delta", text: ev.text });
-              else {
+              else if (ev.kind === "artifact") {
+                // Agent-generated canvas card (strategy / competitor / audit /
+                // campaign). Streamed straight through so the workspace renders
+                // it even with zero connected data.
+                send({ type: "artifact", payload: ev.payload });
+                liveArtifacts = true;
+              } else {
                 send({ type: "text-delta", text: ev.text });
                 streamed = true;
               }
@@ -276,6 +283,13 @@ export async function POST(req: Request): Promise<Response> {
             send({ type: "text-delta", text: c });
             await sleep(WORD_MS);
           }
+        }
+
+        // If the agent rendered its own canvas cards, the answer is already rich
+        // with zero connected data — drop the "connect your accounts" footer that
+        // would otherwise contradict it.
+        if (liveArtifacts && mode === "empty") {
+          answerClosing = { split: "", thread: "" };
         }
 
         // ── Remaining phases: stream artifacts/chips/closing on staged reveal ──

@@ -1,5 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { retrieveDoctrine, formatRetrieved } from "@/lib/rag/retrieve";
+import type { BriefData } from "@/types/artifacts";
 
 /**
  * The agent's tool catalog + dispatcher (architecture §4).
@@ -28,22 +29,23 @@ import { retrieveDoctrine, formatRetrieved } from "@/lib/rag/retrieve";
 export type ToolScope = "doctrine" | "internal" | "external";
 
 export const TOOL_SCOPE: Record<string, ToolScope> = {
-  retrieve_doctrine: "doctrine",
+  marketing_reference: "doctrine",
   get_account_metrics: "internal",
+  add_canvas_card: "doctrine",
 };
 
 export const TOOLS: Anthropic.Tool[] = [
   {
-    name: "retrieve_doctrine",
+    name: "marketing_reference",
     description:
-      "Retrieve the relevant marketing-doctrine frameworks for a question from Marpin's curated corpus (diagnostic waterfalls, attribution, unit economics, SEO/GEO, competitor research, creative, growth strategy). Call this FIRST for any strategy, diagnostic, competitor, SEO/GEO, measurement, or tactical question — it returns the exact signals, API fields, numeric thresholds, and disambiguation logic to ground your answer in. Returns parent-document markdown; ground your reasoning in it and cite the framework ids you used. Does NOT require any connected account.",
+      "Privately consult proven marketing frameworks to pressure-test your thinking on a genuinely HARD strategic problem — a full go-to-market strategy, a tricky multi-cause diagnosis, a major budget reallocation. SKIP it for quick, tactical, creative, or conversational asks, and skip it while you're still clarifying scope; just answer from your own expertise. When you do use it, reason from it silently and answer in your OWN voice — never mention this tool, frameworks, references, 'doctrine', or any ids/codes to the user. Does NOT require any connected account.",
     input_schema: {
       type: "object",
       properties: {
         query: {
           type: "string",
           description:
-            "The user's question (or a focused sub-question) to retrieve doctrine for, e.g. 'why is my ROAS down', 'how do I research competitors', 'growth strategy for a SaaS on a small budget'.",
+            "The hard strategic question (or a focused sub-question) to pull frameworks for, e.g. 'go-to-market for a B2B SaaS on a small budget', 'why did blended CAC jump across channels'.",
         },
         intent: {
           type: "string",
@@ -52,6 +54,45 @@ export const TOOLS: Anthropic.Tool[] = [
         },
       },
       required: ["query"],
+    },
+  },
+  {
+    name: "add_canvas_card",
+    description:
+      "Render a clean, structured card in the workspace canvas beside the chat — this is how you SHOW your work visually (strategy, competitor analysis, website/funnel audit, channel or budget plan, campaign brief, SEO/content roadmap). Works with zero connected data. Call it 1–3 times to build the visual answer, each call adding one card, THEN write a short chat summary. Keep each card focused: 2–6 sections, each a heading with 2–6 tight bullet points. Use real, specific, expert content — not placeholders.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          description:
+            "Card title, e.g. 'Go-to-market strategy', 'Competitor analysis: Notion vs Coda', '90-day SEO roadmap', 'Launch campaign: spring promo'.",
+        },
+        subtitle: { type: "string", description: "Optional one-line subtitle for context." },
+        label: {
+          type: "string",
+          description:
+            "Optional short tag shown on the card, e.g. 'Strategy', 'Competitors', 'Audit', 'Campaign', 'SEO', 'Plan'.",
+        },
+        sections: {
+          type: "array",
+          description: "2–6 sections, each a heading plus 2–6 concise bullet points.",
+          items: {
+            type: "object",
+            properties: {
+              heading: { type: "string" },
+              points: { type: "array", items: { type: "string" } },
+            },
+            required: ["heading", "points"],
+          },
+        },
+        cta: {
+          type: "string",
+          description:
+            "Optional closing next-step line. If it proposes spending money or posting publicly, phrase it as a proposal awaiting approval.",
+        },
+      },
+      required: ["title", "sections"],
     },
   },
   {
@@ -75,6 +116,40 @@ export const TOOLS: Anthropic.Tool[] = [
 /** Backing data source for internal reads. Sample data only behind a demo flag. */
 export interface MetricsSource {
   getAccountMetrics(sections?: string[]): string;
+}
+
+/**
+ * Coerce an `add_canvas_card` tool input into a validated `brief` artifact, or
+ * null if it has no usable title + sections. Defensive: the model's JSON is
+ * untrusted, so every field is checked and trimmed. The loop renders the result
+ * directly to the canvas (it never goes through the normal text dispatch path).
+ */
+export function briefFromInput(input: unknown): { kind: "brief"; data: BriefData } | null {
+  const o = (input ?? {}) as Record<string, unknown>;
+  const title = typeof o.title === "string" ? o.title.trim() : "";
+  const rawSections = Array.isArray(o.sections) ? o.sections : [];
+  const sections = rawSections
+    .map((s) => {
+      const sec = (s ?? {}) as Record<string, unknown>;
+      const heading = typeof sec.heading === "string" ? sec.heading.trim() : "";
+      const points = Array.isArray(sec.points)
+        ? sec.points
+            .filter((p): p is string => typeof p === "string" && p.trim().length > 0)
+            .map((p) => p.trim())
+        : [];
+      return { heading, points };
+    })
+    .filter((s) => s.heading.length > 0 || s.points.length > 0);
+  if (!title || sections.length === 0) return null;
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+  const data: BriefData = {
+    title,
+    subtitle: str(o.subtitle),
+    label: str(o.label),
+    sections,
+    cta: str(o.cta),
+  };
+  return { kind: "brief", data };
 }
 
 /** Per-turn dispatch state. Retained for tracing/telemetry; no longer gates tools. */
@@ -108,11 +183,11 @@ export async function dispatchTool(
     return { content: `Unknown tool: ${name}`, isError: true };
   }
 
-  if (name === "retrieve_doctrine") {
+  if (name === "marketing_reference") {
     const { query, intent } = (input as { query?: string; intent?: string } | null) ?? {};
     const q = (query ?? "").trim();
     if (!q) {
-      return { content: "retrieve_doctrine requires a non-empty 'query'.", isError: true };
+      return { content: "marketing_reference requires a non-empty 'query'.", isError: true };
     }
     const docs = retrieveDoctrine(q, { intent });
     ctx.doctrineRetrieved = true;
@@ -123,6 +198,16 @@ export async function dispatchTool(
     const sections = (input as { sections?: string[] } | null)?.sections;
     ctx.internalReadDone = true;
     return { content: source.getAccountMetrics(sections), isError: false };
+  }
+
+  if (name === "add_canvas_card") {
+    // The agent loop intercepts this to render the card on the canvas; reaching
+    // dispatch is a defensive fallback that simply acknowledges the call.
+    const ok = briefFromInput(input) !== null;
+    return {
+      content: ok ? "Card rendered on the canvas." : "Card needs a title and at least one section.",
+      isError: !ok,
+    };
   }
 
   return { content: `Tool not implemented: ${name}`, isError: true };

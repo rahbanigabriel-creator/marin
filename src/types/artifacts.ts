@@ -175,6 +175,24 @@ export interface ForecastResultData {
   curve: ForecastPoint[];
 }
 
+/**
+ * A flexible, structured "brief" card — the workhorse artifact for answers that
+ * don't depend on the user's connected data: strategy, competitor analysis,
+ * website/brand audits, channel plans, campaign briefs, SEO/content roadmaps.
+ * The agent renders one or more of these so the canvas is rich with ZERO data
+ * connected. Intentionally simple (heading + bullets) so the model fills it
+ * reliably; richer typed cards (campaign, comparison) layer on top later.
+ */
+export interface BriefData {
+  title: string;
+  subtitle?: string;
+  /** short tag shown on the card, e.g. "Strategy", "Competitors", "Audit". */
+  label?: string;
+  sections: { heading: string; points: string[] }[];
+  /** optional closing call-to-action / next step line. */
+  cta?: string;
+}
+
 export interface PlanAllocationData {
   goal: string;
   business: string;
