@@ -19,6 +19,8 @@ const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GA4_ADMIN_URL = "https://analyticsadmin.googleapis.com/v1beta/accountSummaries";
 const APPLE_TOKEN_URL = "https://appleid.apple.com/auth/oauth2/token";
 const APPLE_SEARCH_ADS_API = "https://api.searchads.apple.com/api/v5";
+const LINKEDIN_API = "https://api.linkedin.com/rest";
+const LINKEDIN_VERSION = "202406";
 
 export interface AccountSelection {
   externalAccountId: string;
@@ -363,6 +365,77 @@ function actionValue(actions: Array<{ action_type?: string; value?: string }> | 
     .reduce((sum, action) => sum + n(action.value), 0);
 }
 
+interface LinkedInAnalytics {
+  elements?: Array<{
+    dateRange?: { start?: { year?: number; month?: number; day?: number } };
+    costInLocalCurrency?: string | number;
+    impressions?: string | number;
+    clicks?: string | number;
+    externalWebsiteConversions?: string | number;
+    pivotValues?: string[];
+  }>;
+}
+
+function linkedinHeaders(accessToken: string): HeadersInit {
+  return {
+    Authorization: `Bearer ${accessToken}`,
+    "LinkedIn-Version": LINKEDIN_VERSION,
+    "X-Restli-Protocol-Version": "2.0.0",
+    Accept: "application/json",
+  };
+}
+
+export class LinkedInAdsClient implements ConnectorClient {
+  readonly platform = "linkedin_ads" as const;
+
+  async fetchMetrics(connection: Connection, range: MetricRange): Promise<CanonicalMetric[]> {
+    const accessToken = await accessTokenFor(connection, this.platform);
+    const accountId = connection.externalAccountId.replace(/\D/g, "");
+    if (!accountId) {
+      throw new ConnectorNotReadyError(this.platform, "connection has no LinkedIn ad account id");
+    }
+    const dateRange =
+      `(start:(year:${range.from.getUTCFullYear()},month:${range.from.getUTCMonth() + 1},day:${range.from.getUTCDate()}),` +
+      `end:(year:${range.to.getUTCFullYear()},month:${range.to.getUTCMonth() + 1},day:${range.to.getUTCDate()}))`;
+
+    const url = new URL(`${LINKEDIN_API}/adAnalytics`);
+    url.searchParams.set("q", "analytics");
+    url.searchParams.set("pivot", "CAMPAIGN");
+    url.searchParams.set("timeGranularity", "DAILY");
+    url.searchParams.set("dateRange", dateRange);
+    url.searchParams.set("accounts", `List(urn:li:sponsoredAccount:${accountId})`);
+    url.searchParams.set(
+      "fields",
+      "dateRange,costInLocalCurrency,impressions,clicks,externalWebsiteConversions,pivotValues",
+    );
+
+    const res = await fetch(url, { headers: linkedinHeaders(accessToken) });
+    if (!res.ok) {
+      throw new ConnectorNotReadyError(this.platform, `LinkedIn adAnalytics responded ${res.status}`);
+    }
+    return this.normalize((await res.json()) as LinkedInAnalytics);
+  }
+
+  private normalize(payload: LinkedInAnalytics): CanonicalMetric[] {
+    return (payload.elements ?? []).flatMap((row) => {
+      const start = row.dateRange?.start;
+      const date = start?.year
+        ? new Date(Date.UTC(start.year, (start.month ?? 1) - 1, start.day ?? 1))
+        : new Date();
+      const campaign = row.pivotValues?.[0]?.replace("urn:li:sponsoredCampaign:", "");
+      return rowsFor({
+        platform: this.platform,
+        date,
+        campaign,
+        spend: n(row.costInLocalCurrency),
+        conversions: n(row.externalWebsiteConversions),
+        clicks: n(row.clicks),
+        impressions: n(row.impressions),
+      });
+    });
+  }
+}
+
 interface AppleReport {
   data?: {
     reportingDataResponse?: {
@@ -458,6 +531,8 @@ export async function listOAuthAccounts(
       return listGa4Properties(accessToken);
     case "meta_ads":
       return listMetaAdAccounts(accessToken);
+    case "linkedin_ads":
+      return listLinkedInAdAccounts(accessToken);
   }
 }
 
@@ -552,6 +627,21 @@ async function listMetaAdAccounts(accessToken: string): Promise<AccountSelection
     return [{ externalAccountId: id.replace(/^act_/, ""), displayName: account.name ?? id }];
   });
   if (accounts.length === 0) throw new ConnectorNotReadyError("meta_ads", "no Meta ad accounts available");
+  return accounts;
+}
+
+async function listLinkedInAdAccounts(accessToken: string): Promise<AccountSelection[]> {
+  const res = await fetch(`${LINKEDIN_API}/adAccountUsers?q=authenticatedUser`, {
+    headers: linkedinHeaders(accessToken),
+  });
+  if (!res.ok) throw new ConnectorNotReadyError("linkedin_ads", `LinkedIn adAccountUsers responded ${res.status}`);
+  const payload = (await res.json()) as { elements?: Array<{ account?: string }> };
+  const accounts = (payload.elements ?? []).flatMap((entry) => {
+    const id = entry.account?.replace("urn:li:sponsoredAccount:", "");
+    if (!id) return [];
+    return [{ externalAccountId: id, displayName: `LinkedIn Ads ${id}` }];
+  });
+  if (accounts.length === 0) throw new ConnectorNotReadyError("linkedin_ads", "no LinkedIn ad accounts available");
   return accounts;
 }
 

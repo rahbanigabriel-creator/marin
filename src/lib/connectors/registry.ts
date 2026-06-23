@@ -1,5 +1,5 @@
 import type { ConnectorPlatform, ConnectorClient } from "./types";
-import { AppleSearchAdsClient, GoogleAdsClient, Ga4Client, MetaAdsClient } from "./clients";
+import { AppleSearchAdsClient, GoogleAdsClient, Ga4Client, LinkedInAdsClient, MetaAdsClient } from "./clients";
 
 /**
  * Connector registry (Stack B, architecture §7). Server-only but import-safe.
@@ -104,6 +104,18 @@ export const CONNECTORS: Record<ConnectorPlatform, ConnectorConfig> = {
     clientSecretEnv: "META_APP_SECRET",
     usesPkce: false,
   },
+  linkedin_ads: {
+    id: "linkedin_ads",
+    label: "LinkedIn Ads",
+    // Standard OAuth 2.0 (authorization code). Reporting via the versioned REST
+    // adAnalytics API (LinkedIn-Version header set in the client).
+    authorizeUrl: "https://www.linkedin.com/oauth/v2/authorization",
+    tokenUrl: "https://www.linkedin.com/oauth/v2/accessToken",
+    scopes: ["r_ads", "r_ads_reporting"],
+    clientIdEnv: "LINKEDIN_CLIENT_ID",
+    clientSecretEnv: "LINKEDIN_CLIENT_SECRET",
+    usesPkce: false,
+  },
   apple_search_ads: {
     id: "apple_search_ads",
     label: "Apple Search Ads",
@@ -195,6 +207,9 @@ export function getConnectorClient(platform: ConnectorPlatform): ConnectorClient
       break;
     case "meta_ads":
       client = new MetaAdsClient();
+      break;
+    case "linkedin_ads":
+      client = new LinkedInAdsClient();
       break;
     case "apple_search_ads":
       client = new AppleSearchAdsClient();
