@@ -1,5 +1,19 @@
-import type { ConnectorPlatform, ConnectorClient } from "./types";
-import { AppleSearchAdsClient, GoogleAdsClient, Ga4Client, LinkedInAdsClient, MetaAdsClient } from "./clients";
+import type { ConnectorPlatform, ConnectorClient, ConnectorCategory } from "./types";
+import {
+  AmazonAdsClient,
+  AppleSearchAdsClient,
+  GoogleAdsClient,
+  Ga4Client,
+  LinkedInAdsClient,
+  MetaAdsClient,
+  MicrosoftAdsClient,
+  PinterestAdsClient,
+  RedditAdsClient,
+  SearchConsoleClient,
+  SnapchatAdsClient,
+  TikTokAdsClient,
+  XAdsClient,
+} from "./clients";
 
 /**
  * Connector registry (Stack B, architecture §7). Server-only but import-safe.
@@ -56,6 +70,20 @@ export interface ConnectorConfig {
   clientSecretEnv: string;
   /** True when the provider's auth-code flow supports PKCE (Google: yes). */
   usesPkce: boolean;
+  /** Paid-ads vs organic/SEO — drives the Paid/Organic split in the channel UI. */
+  category: ConnectorCategory;
+  /**
+   * How client credentials are presented at the token endpoint:
+   *   "body"  — client_id/secret in the form body (default; Google, Meta, …)
+   *   "basic" — HTTP Basic auth header (Pinterest v5, Reddit, X/Twitter)
+   */
+  tokenAuthStyle?: "body" | "basic";
+  /**
+   * OAuth dialect. "standard" (default) is RFC-6749 authorization-code. "tiktok"
+   * is TikTok Business' non-standard portal auth + JSON {app_id,secret,auth_code}
+   * token exchange (handled in the OAuth helper).
+   */
+  oauthStyle?: "standard" | "tiktok";
   /**
    * Extra static authorize-endpoint params merged in by the OAuth helper, e.g.
    * Google's offline access + forced consent so a refresh token is returned.
@@ -69,6 +97,7 @@ export interface ConnectorConfig {
  * only in `scopes`.
  */
 export const CONNECTORS: Record<ConnectorPlatform, ConnectorConfig> = {
+  // ── Paid ads ───────────────────────────────────────────────────────────────
   google_ads: {
     id: "google_ads",
     label: "Google Ads",
@@ -81,17 +110,7 @@ export const CONNECTORS: Record<ConnectorPlatform, ConnectorConfig> = {
     clientIdEnv: "GOOGLE_OAUTH_CLIENT_ID",
     clientSecretEnv: "GOOGLE_OAUTH_CLIENT_SECRET",
     usesPkce: true,
-    extraAuthorizeParams: { access_type: "offline", prompt: "consent" },
-  },
-  ga4: {
-    id: "ga4",
-    label: "Google Analytics 4",
-    authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth",
-    tokenUrl: "https://oauth2.googleapis.com/token",
-    scopes: ["https://www.googleapis.com/auth/analytics.readonly"],
-    clientIdEnv: "GOOGLE_OAUTH_CLIENT_ID",
-    clientSecretEnv: "GOOGLE_OAUTH_CLIENT_SECRET",
-    usesPkce: true,
+    category: "paid",
     extraAuthorizeParams: { access_type: "offline", prompt: "consent" },
   },
   meta_ads: {
@@ -103,6 +122,21 @@ export const CONNECTORS: Record<ConnectorPlatform, ConnectorConfig> = {
     clientIdEnv: "META_APP_ID",
     clientSecretEnv: "META_APP_SECRET",
     usesPkce: false,
+    category: "paid",
+  },
+  tiktok_ads: {
+    id: "tiktok_ads",
+    label: "TikTok Ads",
+    // Non-standard: portal auth (app_id) + JSON {app_id,secret,auth_code} token
+    // exchange + an "Access-Token" header on the API (see oauth.ts / clients.ts).
+    authorizeUrl: "https://business-api.tiktok.com/portal/auth",
+    tokenUrl: "https://business-api.tiktok.com/open_api/v1.3/oauth2/access_token/",
+    scopes: [],
+    clientIdEnv: "TIKTOK_APP_ID",
+    clientSecretEnv: "TIKTOK_APP_SECRET",
+    usesPkce: false,
+    category: "paid",
+    oauthStyle: "tiktok",
   },
   linkedin_ads: {
     id: "linkedin_ads",
@@ -115,6 +149,84 @@ export const CONNECTORS: Record<ConnectorPlatform, ConnectorConfig> = {
     clientIdEnv: "LINKEDIN_CLIENT_ID",
     clientSecretEnv: "LINKEDIN_CLIENT_SECRET",
     usesPkce: false,
+    category: "paid",
+  },
+  microsoft_ads: {
+    id: "microsoft_ads",
+    label: "Microsoft Ads",
+    // Azure AD v2 OAuth. Bing Ads reporting itself is SOAP — the client wires
+    // OAuth + tokens now; reporting is finalized against a live account.
+    authorizeUrl: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+    tokenUrl: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+    scopes: ["https://ads.microsoft.com/msads.manage", "offline_access"],
+    clientIdEnv: "MICROSOFT_ADS_CLIENT_ID",
+    clientSecretEnv: "MICROSOFT_ADS_CLIENT_SECRET",
+    usesPkce: false,
+    category: "paid",
+  },
+  pinterest_ads: {
+    id: "pinterest_ads",
+    label: "Pinterest Ads",
+    authorizeUrl: "https://www.pinterest.com/oauth/",
+    tokenUrl: "https://api.pinterest.com/v5/oauth/token",
+    scopes: ["ads:read"],
+    clientIdEnv: "PINTEREST_APP_ID",
+    clientSecretEnv: "PINTEREST_APP_SECRET",
+    usesPkce: false,
+    category: "paid",
+    tokenAuthStyle: "basic",
+  },
+  snapchat_ads: {
+    id: "snapchat_ads",
+    label: "Snapchat Ads",
+    authorizeUrl: "https://accounts.snapchat.com/login/oauth2/authorize",
+    tokenUrl: "https://accounts.snapchat.com/login/oauth2/access_token",
+    scopes: ["snapchat-marketing-api"],
+    clientIdEnv: "SNAPCHAT_CLIENT_ID",
+    clientSecretEnv: "SNAPCHAT_CLIENT_SECRET",
+    usesPkce: false,
+    category: "paid",
+  },
+  reddit_ads: {
+    id: "reddit_ads",
+    label: "Reddit Ads",
+    authorizeUrl: "https://www.reddit.com/api/v1/authorize",
+    tokenUrl: "https://www.reddit.com/api/v1/access_token",
+    scopes: ["adsread", "read"],
+    clientIdEnv: "REDDIT_CLIENT_ID",
+    clientSecretEnv: "REDDIT_CLIENT_SECRET",
+    usesPkce: false,
+    category: "paid",
+    tokenAuthStyle: "basic",
+    extraAuthorizeParams: { duration: "permanent" },
+  },
+  x_ads: {
+    id: "x_ads",
+    label: "X (Twitter) Ads",
+    // OAuth 2.0 (PKCE + Basic auth). NOTE: the X Ads API itself uses OAuth 1.0a +
+    // elevated access; this connects the v2 OAuth2 surface — Ads reporting is
+    // finalized against a live account.
+    authorizeUrl: "https://twitter.com/i/oauth2/authorize",
+    tokenUrl: "https://api.twitter.com/2/oauth2/token",
+    scopes: ["tweet.read", "users.read", "offline.access"],
+    clientIdEnv: "X_CLIENT_ID",
+    clientSecretEnv: "X_CLIENT_SECRET",
+    usesPkce: true,
+    category: "paid",
+    tokenAuthStyle: "basic",
+  },
+  amazon_ads: {
+    id: "amazon_ads",
+    label: "Amazon Ads",
+    // Login with Amazon (LWA). Profiles list now; reporting is async
+    // (request → poll → download) and finalized against a live account.
+    authorizeUrl: "https://www.amazon.com/ap/oa",
+    tokenUrl: "https://api.amazon.com/auth/o2/token",
+    scopes: ["advertising::campaign_management"],
+    clientIdEnv: "AMAZON_ADS_CLIENT_ID",
+    clientSecretEnv: "AMAZON_ADS_CLIENT_SECRET",
+    usesPkce: false,
+    category: "paid",
   },
   apple_search_ads: {
     id: "apple_search_ads",
@@ -125,6 +237,33 @@ export const CONNECTORS: Record<ConnectorPlatform, ConnectorConfig> = {
     clientIdEnv: "APPLE_SEARCH_ADS_CLIENT_ID",
     clientSecretEnv: "APPLE_SEARCH_ADS_PRIVATE_KEY",
     usesPkce: false,
+    category: "paid",
+  },
+  // ── Organic / SEO / analytics ────────────────────────────────────────────
+  ga4: {
+    id: "ga4",
+    label: "Google Analytics 4",
+    authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+    tokenUrl: "https://oauth2.googleapis.com/token",
+    scopes: ["https://www.googleapis.com/auth/analytics.readonly"],
+    clientIdEnv: "GOOGLE_OAUTH_CLIENT_ID",
+    clientSecretEnv: "GOOGLE_OAUTH_CLIENT_SECRET",
+    usesPkce: true,
+    category: "organic",
+    extraAuthorizeParams: { access_type: "offline", prompt: "consent" },
+  },
+  search_console: {
+    id: "search_console",
+    label: "Google Search Console",
+    // Shares the Google OAuth app (same client id/secret) — different scope.
+    authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+    tokenUrl: "https://oauth2.googleapis.com/token",
+    scopes: ["https://www.googleapis.com/auth/webmasters.readonly"],
+    clientIdEnv: "GOOGLE_OAUTH_CLIENT_ID",
+    clientSecretEnv: "GOOGLE_OAUTH_CLIENT_SECRET",
+    usesPkce: true,
+    category: "organic",
+    extraAuthorizeParams: { access_type: "offline", prompt: "consent" },
   },
 };
 
@@ -210,6 +349,30 @@ export function getConnectorClient(platform: ConnectorPlatform): ConnectorClient
       break;
     case "linkedin_ads":
       client = new LinkedInAdsClient();
+      break;
+    case "tiktok_ads":
+      client = new TikTokAdsClient();
+      break;
+    case "microsoft_ads":
+      client = new MicrosoftAdsClient();
+      break;
+    case "pinterest_ads":
+      client = new PinterestAdsClient();
+      break;
+    case "snapchat_ads":
+      client = new SnapchatAdsClient();
+      break;
+    case "reddit_ads":
+      client = new RedditAdsClient();
+      break;
+    case "x_ads":
+      client = new XAdsClient();
+      break;
+    case "amazon_ads":
+      client = new AmazonAdsClient();
+      break;
+    case "search_console":
+      client = new SearchConsoleClient();
       break;
     case "apple_search_ads":
       client = new AppleSearchAdsClient();

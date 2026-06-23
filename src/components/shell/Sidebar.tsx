@@ -109,30 +109,38 @@ export function Sidebar({
           </>
         )}
 
-        <div className="p-[16px_8px_5px] font-mono text-[10.5px] font-semibold tracking-[0.08em] text-ink-200">
-          CHANNELS
-        </div>
-        {channels.map((ch) => {
-          const on = ch.status === "connected";
+        {(["paid", "organic"] as const).map((cat) => {
+          const group = channels.filter((ch) => (ch.category ?? "paid") === cat);
+          if (group.length === 0) return null;
           return (
-            <div
-              key={ch.name}
-              onClick={onOpenModal}
-              className="flex cursor-pointer items-center gap-[9px] rounded-chip p-[7px_8px]"
-            >
-              <span
-                className="flex-none"
-                style={{ width: 8, height: 8, borderRadius: "50%", background: on ? "#5E7B52" : "#C9A24A" }}
-              />
-              <span className="flex-1 font-sans text-[13px] font-medium text-ink-800">{ch.name}</span>
-              {!on && (
-                <span
-                  className="rounded-pill font-sans text-[10.5px] font-semibold"
-                  style={{ color: "#8A4A66", background: "#F2E2EA", padding: "2px 8px" }}
-                >
-                  Connect
-                </span>
-              )}
+            <div key={cat}>
+              <div className="p-[16px_8px_5px] font-mono text-[10.5px] font-semibold tracking-[0.08em] text-ink-200">
+                {cat === "paid" ? "PAID ADS" : "ORGANIC & SEO"}
+              </div>
+              {group.map((ch) => {
+                const on = ch.status === "connected";
+                return (
+                  <div
+                    key={ch.name}
+                    onClick={onOpenModal}
+                    className="flex cursor-pointer items-center gap-[9px] rounded-chip p-[7px_8px]"
+                  >
+                    <span
+                      className="flex-none"
+                      style={{ width: 8, height: 8, borderRadius: "50%", background: on ? "#5E7B52" : "#C9A24A" }}
+                    />
+                    <span className="flex-1 font-sans text-[13px] font-medium text-ink-800">{ch.name}</span>
+                    {!on && (
+                      <span
+                        className="rounded-pill font-sans text-[10.5px] font-semibold"
+                        style={{ color: "#8A4A66", background: "#F2E2EA", padding: "2px 8px" }}
+                      >
+                        Connect
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           );
         })}

@@ -25,10 +25,21 @@ import { FirstRunScreen } from "@/components/screens/FirstRunScreen";
 type Screen = "chat" | "onboarding" | "forecast" | "clients";
 
 const REAL_CONNECTOR_CHANNELS: Channel[] = [
-  { name: "Google Ads", platform: "google_ads", status: "disconnected" },
-  { name: "Google Analytics 4", platform: "ga4", status: "disconnected" },
-  { name: "Meta Ads", platform: "meta_ads", status: "disconnected" },
-  { name: "Apple Search Ads", platform: "apple_search_ads", status: "disconnected" },
+  // Paid ads
+  { name: "Google Ads", platform: "google_ads", category: "paid", status: "disconnected" },
+  { name: "Meta Ads", platform: "meta_ads", category: "paid", status: "disconnected" },
+  { name: "TikTok Ads", platform: "tiktok_ads", category: "paid", status: "disconnected" },
+  { name: "LinkedIn Ads", platform: "linkedin_ads", category: "paid", status: "disconnected" },
+  { name: "Microsoft Ads", platform: "microsoft_ads", category: "paid", status: "disconnected" },
+  { name: "Pinterest Ads", platform: "pinterest_ads", category: "paid", status: "disconnected" },
+  { name: "Snapchat Ads", platform: "snapchat_ads", category: "paid", status: "disconnected" },
+  { name: "Reddit Ads", platform: "reddit_ads", category: "paid", status: "disconnected" },
+  { name: "X (Twitter) Ads", platform: "x_ads", category: "paid", status: "disconnected" },
+  { name: "Amazon Ads", platform: "amazon_ads", category: "paid", status: "disconnected" },
+  { name: "Apple Search Ads", platform: "apple_search_ads", category: "paid", status: "disconnected" },
+  // Organic / SEO
+  { name: "Google Analytics 4", platform: "ga4", category: "organic", status: "disconnected" },
+  { name: "Google Search Console", platform: "search_console", category: "organic", status: "disconnected" },
 ];
 
 const DEMO_MODE = process.env.NEXT_PUBLIC_MARPIN_DEMO_MODE === "true";

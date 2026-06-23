@@ -1,4 +1,4 @@
-import type { ConnectorPlatform } from "@/lib/connectors/types";
+import type { ConnectorPlatform, ConnectorCategory } from "@/lib/connectors/types";
 
 export type Mode = "split" | "thread" | "report";
 
@@ -8,6 +8,8 @@ export interface Channel {
   name: string;
   status: ChannelStatus;
   platform?: ConnectorPlatform;
+  /** Paid ads vs organic/SEO — drives the channel grouping in the sidebar. */
+  category?: ConnectorCategory;
   externalAccountId?: string;
   displayName?: string | null;
 }

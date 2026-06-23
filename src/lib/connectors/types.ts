@@ -10,13 +10,26 @@ import type { Connection } from "@prisma/client";
  * the registry (./registry) wires platform → config + client.
  */
 
-/** The platforms we ship in connectors round 1. */
+/** Every marketing channel Marpin can connect (paid ads + organic/SEO). */
 export type ConnectorPlatform =
+  // ── Paid ads ──
   | "google_ads"
-  | "ga4"
   | "meta_ads"
+  | "tiktok_ads"
+  | "linkedin_ads"
+  | "microsoft_ads"
+  | "pinterest_ads"
+  | "snapchat_ads"
+  | "reddit_ads"
+  | "x_ads"
+  | "amazon_ads"
   | "apple_search_ads"
-  | "linkedin_ads";
+  // ── Organic / SEO / analytics ──
+  | "ga4"
+  | "search_console";
+
+/** Marketing-channel category — drives the Paid vs Organic split in the UI. */
+export type ConnectorCategory = "paid" | "organic";
 
 /** A normalized date range for a metrics pull (inclusive `from`/`to`). */
 export interface MetricRange {

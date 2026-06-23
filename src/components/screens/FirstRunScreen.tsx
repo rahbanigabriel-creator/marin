@@ -34,37 +34,48 @@ export function FirstRunScreen({ channels, onConnect }: FirstRunScreenProps) {
           </p>
         </div>
 
-        <div className="grid gap-[12px]" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))" }}>
-          {channels.map((channel) => (
-            <button
-              key={channel.name}
-              type="button"
-              onClick={() => onConnect(channel)}
-              disabled={!channel.platform}
-              className="flex cursor-pointer items-center gap-[12px] rounded-[8px] border border-line-2 bg-surface-card p-[14px] text-left shadow-composer transition-all hover:border-plum-border"
-            >
-              <span
-                className="flex flex-none items-center justify-center font-sans text-[12px] font-semibold text-white"
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 8,
-                  background: PLATFORM_ICON_COLORS[channel.name] ?? "#857B6D",
-                }}
-              >
-                {initialFor(channel.name)}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block font-sans text-[13.5px] font-semibold text-ink-900">
-                  {channel.name}
-                </span>
-                <span className="mt-[2px] block font-sans text-[11.5px] font-medium text-plum">
-                  Connect account
-                </span>
-              </span>
-            </button>
-          ))}
-        </div>
+        {(["paid", "organic"] as const).map((cat) => {
+          const group = channels.filter((channel) => (channel.category ?? "paid") === cat);
+          if (group.length === 0) return null;
+          return (
+            <div key={cat} className="mb-[20px]">
+              <div className="mb-[10px] font-mono text-[11px] font-semibold tracking-[0.08em] text-plum-muted2">
+                {cat === "paid" ? "PAID ADS" : "ORGANIC & SEO"}
+              </div>
+              <div className="grid gap-[12px]" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))" }}>
+                {group.map((channel) => (
+                  <button
+                    key={channel.name}
+                    type="button"
+                    onClick={() => onConnect(channel)}
+                    disabled={!channel.platform}
+                    className="flex cursor-pointer items-center gap-[12px] rounded-[8px] border border-line-2 bg-surface-card p-[14px] text-left shadow-composer transition-all hover:border-plum-border"
+                  >
+                    <span
+                      className="flex flex-none items-center justify-center font-sans text-[12px] font-semibold text-white"
+                      style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: 8,
+                        background: PLATFORM_ICON_COLORS[channel.name] ?? "#857B6D",
+                      }}
+                    >
+                      {initialFor(channel.name)}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-sans text-[13.5px] font-semibold text-ink-900">
+                        {channel.name}
+                      </span>
+                      <span className="mt-[2px] block font-sans text-[11.5px] font-medium text-plum">
+                        Connect account
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

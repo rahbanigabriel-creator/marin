@@ -34,6 +34,7 @@ export async function GET(): Promise<Response> {
     return {
       platform,
       name: CONNECTORS[platform].label,
+      category: CONNECTORS[platform].category,
       status: row?.status ?? "disconnected",
       externalAccountId: row?.externalAccountId,
       displayName: row?.displayName,

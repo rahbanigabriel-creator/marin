@@ -62,6 +62,17 @@ export interface AuthorizeUrlInput {
  */
 export function buildAuthorizeUrl(input: AuthorizeUrlInput): string {
   const { config, clientId, redirectUri, state, codeChallenge } = input;
+
+  // TikTok Business uses a non-standard portal: app_id (not client_id), no
+  // response_type/scope params; the granted scopes live on the app itself.
+  if (config.oauthStyle === "tiktok") {
+    const url = new URL(config.authorizeUrl);
+    url.searchParams.set("app_id", clientId);
+    url.searchParams.set("redirect_uri", redirectUri);
+    url.searchParams.set("state", state);
+    return url.toString();
+  }
+
   const url = new URL(config.authorizeUrl);
   const params = url.searchParams;
   params.set("client_id", clientId);
@@ -133,20 +144,39 @@ export async function exchangeCodeForTokens(
 ): Promise<OAuthTokens> {
   const { config, clientId, clientSecret, redirectUri, code, codeVerifier, signal } = input;
 
+  // TikTok Business: JSON {app_id, secret, auth_code} → {data:{access_token,…}}.
+  if (config.oauthStyle === "tiktok") {
+    return exchangeTikTokCode({
+      tokenUrl: config.tokenUrl,
+      appId: clientId,
+      secret: clientSecret,
+      authCode: code,
+      signal,
+    });
+  }
+
   const form = new URLSearchParams();
   form.set("grant_type", "authorization_code");
   form.set("code", code);
   form.set("redirect_uri", redirectUri);
-  form.set("client_id", clientId);
-  form.set("client_secret", clientSecret);
   if (codeVerifier) form.set("code_verifier", codeVerifier);
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/x-www-form-urlencoded",
+    Accept: "application/json",
+  };
+  // Providers that want HTTP Basic auth at the token endpoint (Pinterest v5,
+  // Reddit, X/Twitter) take credentials in the header, not the form body.
+  if (config.tokenAuthStyle === "basic") {
+    headers.Authorization = `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`;
+  } else {
+    form.set("client_id", clientId);
+    form.set("client_secret", clientSecret);
+  }
 
   const res = await fetch(config.tokenUrl, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Accept: "application/json",
-    },
+    headers,
     body: form.toString(),
     signal,
   });
@@ -174,6 +204,55 @@ export async function exchangeCodeForTokens(
         : undefined,
     scope: body.scope,
     tokenType: body.token_type,
+  };
+}
+
+/**
+ * TikTok Business OAuth token exchange — non-standard: POST JSON
+ * {app_id, secret, auth_code} → { code, data:{access_token, refresh_token?,
+ * expires_in?, scope?} }. The API thereafter expects an "Access-Token" header
+ * (handled in the TikTok client), and accounts come from a separate endpoint.
+ */
+async function exchangeTikTokCode(input: {
+  tokenUrl: string;
+  appId: string;
+  secret: string;
+  authCode: string;
+  signal?: AbortSignal;
+}): Promise<OAuthTokens> {
+  const res = await fetch(input.tokenUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ app_id: input.appId, secret: input.secret, auth_code: input.authCode }),
+    signal: input.signal,
+  });
+  let payload: {
+    code?: number;
+    message?: string;
+    data?: {
+      access_token?: string;
+      refresh_token?: string;
+      expires_in?: number;
+      scope?: string | string[];
+    };
+  };
+  try {
+    payload = (await res.json()) as typeof payload;
+  } catch {
+    throw new OAuthError(`TikTok token endpoint returned non-JSON (status ${res.status})`);
+  }
+  const data = payload.data;
+  if (!res.ok || (typeof payload.code === "number" && payload.code !== 0) || !data?.access_token) {
+    throw new OAuthError(
+      payload.message ? `tiktok: ${payload.message}` : `tiktok token exchange failed (status ${res.status})`,
+    );
+  }
+  return {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
+    expiresAt:
+      typeof data.expires_in === "number" ? new Date(Date.now() + data.expires_in * 1000) : undefined,
+    scope: Array.isArray(data.scope) ? data.scope.join(" ") : data.scope,
   };
 }
 

@@ -188,7 +188,13 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Re
     return appRedirect(req, "error", config.id);
   }
 
-  const code = req.nextUrl.searchParams.get("code");
+  // TikTok returns `auth_code` (alongside a DIFFERENT `code`); its token endpoint
+  // wants auth_code, so prefer it for the TikTok dialect. Standard providers
+  // only ever return `code`.
+  const code =
+    config.oauthStyle === "tiktok"
+      ? req.nextUrl.searchParams.get("auth_code") ?? req.nextUrl.searchParams.get("code")
+      : req.nextUrl.searchParams.get("code");
   const returnedState = req.nextUrl.searchParams.get("state");
   if (!code || !returnedState) {
     return appRedirect(req, "error", config.id);

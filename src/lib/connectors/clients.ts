@@ -12,7 +12,7 @@ import {
   type ConnectorPlatform,
   type MetricRange,
 } from "./types";
-import { META_GRAPH_VERSION } from "./registry";
+import { CONNECTORS, META_GRAPH_VERSION } from "./registry";
 
 const GOOGLE_ADS_API_VERSION = "v24";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -21,6 +21,11 @@ const APPLE_TOKEN_URL = "https://appleid.apple.com/auth/oauth2/token";
 const APPLE_SEARCH_ADS_API = "https://api.searchads.apple.com/api/v5";
 const LINKEDIN_API = "https://api.linkedin.com/rest";
 const LINKEDIN_VERSION = "202406";
+const TIKTOK_API = "https://business-api.tiktok.com/open_api/v1.3";
+const PINTEREST_API = "https://api.pinterest.com/v5";
+const SNAPCHAT_API = "https://adsapi.snapchat.com/v1";
+const SEARCH_CONSOLE_API = "https://www.googleapis.com/webmasters/v3";
+const AMAZON_ADS_API = "https://advertising-api.amazon.com";
 
 export interface AccountSelection {
   externalAccountId: string;
@@ -69,7 +74,9 @@ async function refreshStoredToken(connection: Connection, platform: ConnectorPla
     }),
   );
 
-  if (platform !== "google_ads" && platform !== "ga4") return null;
+  // Google-family connectors (Ads, GA4, Search Console) share the Google OAuth
+  // app and refresh the same way; others use their long-lived stored token.
+  if (platform !== "google_ads" && platform !== "ga4" && platform !== "search_console") return null;
   const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
   if (!clientId || !clientSecret) return null;
@@ -508,6 +515,205 @@ export class AppleSearchAdsClient implements ConnectorClient {
   }
 }
 
+// ── TikTok Ads (paid) — real reporting via the integrated report API ─────────
+export class TikTokAdsClient implements ConnectorClient {
+  readonly platform = "tiktok_ads" as const;
+
+  async fetchMetrics(connection: Connection, range: MetricRange): Promise<CanonicalMetric[]> {
+    const accessToken = await accessTokenFor(connection, this.platform);
+    const advertiserId = connection.externalAccountId;
+    if (!advertiserId) throw new ConnectorNotReadyError(this.platform, "connection has no TikTok advertiser id");
+    const url = new URL(`${TIKTOK_API}/report/integrated/get/`);
+    url.searchParams.set("advertiser_id", advertiserId);
+    url.searchParams.set("report_type", "BASIC");
+    url.searchParams.set("data_level", "AUCTION_CAMPAIGN");
+    url.searchParams.set("dimensions", JSON.stringify(["campaign_id", "stat_time_day"]));
+    url.searchParams.set(
+      "metrics",
+      JSON.stringify(["spend", "impressions", "clicks", "conversion", "total_complete_payment_rate"]),
+    );
+    url.searchParams.set("start_date", isoDate(range.from));
+    url.searchParams.set("end_date", isoDate(range.to));
+    url.searchParams.set("page_size", "1000");
+    const res = await fetch(url, { headers: { "Access-Token": accessToken, Accept: "application/json" } });
+    if (!res.ok) throw new ConnectorNotReadyError(this.platform, `TikTok report API responded ${res.status}`);
+    const payload = (await res.json()) as {
+      data?: { list?: Array<{ dimensions?: Record<string, string>; metrics?: Record<string, string> }> };
+    };
+    return (payload.data?.list ?? []).flatMap((row) => {
+      const day = row.dimensions?.stat_time_day;
+      if (!day) return [];
+      return rowsFor({
+        platform: this.platform,
+        date: compactDate(day.slice(0, 10)),
+        campaign: row.dimensions?.campaign_id,
+        spend: n(row.metrics?.spend),
+        conversions: n(row.metrics?.conversion),
+        clicks: n(row.metrics?.clicks),
+        impressions: n(row.metrics?.impressions),
+      });
+    });
+  }
+}
+
+// ── Pinterest Ads (paid) — synchronous daily analytics ───────────────────────
+export class PinterestAdsClient implements ConnectorClient {
+  readonly platform = "pinterest_ads" as const;
+
+  async fetchMetrics(connection: Connection, range: MetricRange): Promise<CanonicalMetric[]> {
+    const accessToken = await accessTokenFor(connection, this.platform);
+    const accountId = connection.externalAccountId;
+    if (!accountId) throw new ConnectorNotReadyError(this.platform, "connection has no Pinterest ad account id");
+    const url = new URL(`${PINTEREST_API}/ad_accounts/${accountId}/analytics`);
+    url.searchParams.set("start_date", isoDate(range.from));
+    url.searchParams.set("end_date", isoDate(range.to));
+    url.searchParams.set("granularity", "DAY");
+    url.searchParams.set("columns", "SPEND_IN_DOLLAR,IMPRESSION_1,CLICKTHROUGH_1,TOTAL_CONVERSIONS");
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" } });
+    if (!res.ok) throw new ConnectorNotReadyError(this.platform, `Pinterest analytics API responded ${res.status}`);
+    const payload = (await res.json()) as Array<{
+      DATE?: string;
+      SPEND_IN_DOLLAR?: number;
+      IMPRESSION_1?: number;
+      CLICKTHROUGH_1?: number;
+      TOTAL_CONVERSIONS?: number;
+    }>;
+    const rows = Array.isArray(payload) ? payload : [];
+    return rows.flatMap((row) => {
+      if (!row.DATE) return [];
+      return rowsFor({
+        platform: this.platform,
+        date: compactDate(row.DATE),
+        spend: n(row.SPEND_IN_DOLLAR),
+        conversions: n(row.TOTAL_CONVERSIONS),
+        clicks: n(row.CLICKTHROUGH_1),
+        impressions: n(row.IMPRESSION_1),
+      });
+    });
+  }
+}
+
+// ── Snapchat Ads (paid) — daily stats (spend/revenue in micro-currency) ──────
+export class SnapchatAdsClient implements ConnectorClient {
+  readonly platform = "snapchat_ads" as const;
+
+  async fetchMetrics(connection: Connection, range: MetricRange): Promise<CanonicalMetric[]> {
+    const accessToken = await accessTokenFor(connection, this.platform);
+    const accountId = connection.externalAccountId;
+    if (!accountId) throw new ConnectorNotReadyError(this.platform, "connection has no Snapchat ad account id");
+    const url = new URL(`${SNAPCHAT_API}/adaccounts/${accountId}/stats`);
+    url.searchParams.set("granularity", "DAY");
+    url.searchParams.set("fields", "spend,impressions,swipes,conversion_purchases,conversion_purchases_value");
+    url.searchParams.set("start_time", `${isoDate(range.from)}T00:00:00.000-00:00`);
+    url.searchParams.set("end_time", `${isoDate(range.to)}T00:00:00.000-00:00`);
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" } });
+    if (!res.ok) throw new ConnectorNotReadyError(this.platform, `Snapchat stats API responded ${res.status}`);
+    const payload = (await res.json()) as {
+      timeseries_stats?: Array<{
+        timeseries_stat?: { timeseries?: Array<{ start_time?: string; stats?: Record<string, number> }> };
+      }>;
+    };
+    const series = payload.timeseries_stats?.[0]?.timeseries_stat?.timeseries ?? [];
+    return series.flatMap((point) => {
+      if (!point.start_time) return [];
+      const stats = point.stats ?? {};
+      return rowsFor({
+        platform: this.platform,
+        date: compactDate(point.start_time.slice(0, 10)),
+        spend: n(stats.spend) / 1_000_000,
+        revenue: n(stats.conversion_purchases_value) / 1_000_000,
+        conversions: n(stats.conversion_purchases),
+        clicks: n(stats.swipes),
+        impressions: n(stats.impressions),
+      });
+    });
+  }
+}
+
+// ── Google Search Console (organic / SEO) — search analytics by day ──────────
+export class SearchConsoleClient implements ConnectorClient {
+  readonly platform = "search_console" as const;
+
+  async fetchMetrics(connection: Connection, range: MetricRange): Promise<CanonicalMetric[]> {
+    const accessToken = await accessTokenFor(connection, this.platform);
+    const site = connection.externalAccountId;
+    if (!site) throw new ConnectorNotReadyError(this.platform, "connection has no Search Console site");
+    const res = await fetch(`${SEARCH_CONSOLE_API}/sites/${encodeURIComponent(site)}/searchAnalytics/query`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        startDate: isoDate(range.from),
+        endDate: isoDate(range.to),
+        dimensions: ["date"],
+        rowLimit: 1000,
+      }),
+    });
+    if (!res.ok) throw new ConnectorNotReadyError(this.platform, `Search Console API responded ${res.status}`);
+    const payload = (await res.json()) as {
+      rows?: Array<{ keys?: string[]; clicks?: number; impressions?: number }>;
+    };
+    return (payload.rows ?? []).flatMap((row) => {
+      const day = row.keys?.[0];
+      if (!day) return [];
+      return rowsFor({
+        platform: this.platform,
+        date: compactDate(day),
+        clicks: n(row.clicks),
+        impressions: n(row.impressions),
+      });
+    });
+  }
+}
+
+// ── Amazon Ads (paid) — OAuth + profiles wired; reporting is async (pending) ──
+export class AmazonAdsClient implements ConnectorClient {
+  readonly platform = "amazon_ads" as const;
+
+  async fetchMetrics(_connection: Connection, _range: MetricRange): Promise<CanonicalMetric[]> {
+    throw new ConnectorNotReadyError(
+      this.platform,
+      "Amazon Ads reporting is async (request → poll → download); finalized against a live account",
+    );
+  }
+}
+
+// ── Microsoft Ads (paid) — OAuth wired; Bing reporting is SOAP (pending) ─────
+export class MicrosoftAdsClient implements ConnectorClient {
+  readonly platform = "microsoft_ads" as const;
+
+  async fetchMetrics(_connection: Connection, _range: MetricRange): Promise<CanonicalMetric[]> {
+    throw new ConnectorNotReadyError(
+      this.platform,
+      "Microsoft Advertising reporting (SOAP) is finalized against a live account",
+    );
+  }
+}
+
+// ── Reddit Ads (paid) — OAuth wired; reporting finalized on live connect ─────
+export class RedditAdsClient implements ConnectorClient {
+  readonly platform = "reddit_ads" as const;
+
+  async fetchMetrics(_connection: Connection, _range: MetricRange): Promise<CanonicalMetric[]> {
+    throw new ConnectorNotReadyError(this.platform, "Reddit Ads reporting is finalized against a live account");
+  }
+}
+
+// ── X (Twitter) Ads (paid) — OAuth2 surface; Ads API is OAuth1.0a (pending) ──
+export class XAdsClient implements ConnectorClient {
+  readonly platform = "x_ads" as const;
+
+  async fetchMetrics(_connection: Connection, _range: MetricRange): Promise<CanonicalMetric[]> {
+    throw new ConnectorNotReadyError(
+      this.platform,
+      "X Ads reporting uses OAuth 1.0a + elevated access; finalized against a live account",
+    );
+  }
+}
+
 export async function resolveOAuthAccount(
   platform: Exclude<ConnectorPlatform, "apple_search_ads">,
   accessToken: string,
@@ -533,6 +739,23 @@ export async function listOAuthAccounts(
       return listMetaAdAccounts(accessToken);
     case "linkedin_ads":
       return listLinkedInAdAccounts(accessToken);
+    case "tiktok_ads":
+      return listTikTokAdvertisers(accessToken);
+    case "pinterest_ads":
+      return listPinterestAdAccounts(accessToken);
+    case "snapchat_ads":
+      return listSnapchatAdAccounts(accessToken);
+    case "amazon_ads":
+      return listAmazonProfiles(accessToken);
+    case "search_console":
+      return listSearchConsoleSites(accessToken);
+    case "microsoft_ads":
+    case "reddit_ads":
+    case "x_ads":
+      // OAuth + token are valid; account-scoped reporting is finalized against a
+      // live account. Persist one default selection so the grant is KEPT and the
+      // platform shows connected, rather than discarding a valid token.
+      return [{ externalAccountId: "default", displayName: `${CONNECTORS[platform].label} account` }];
   }
 }
 
@@ -642,6 +865,97 @@ async function listLinkedInAdAccounts(accessToken: string): Promise<AccountSelec
     return [{ externalAccountId: id, displayName: `LinkedIn Ads ${id}` }];
   });
   if (accounts.length === 0) throw new ConnectorNotReadyError("linkedin_ads", "no LinkedIn ad accounts available");
+  return accounts;
+}
+
+async function listTikTokAdvertisers(accessToken: string): Promise<AccountSelection[]> {
+  const appId = process.env.TIKTOK_APP_ID;
+  const secret = process.env.TIKTOK_APP_SECRET;
+  if (!appId || !secret) throw new ConnectorNotReadyError("tiktok_ads", "missing TIKTOK_APP_ID / TIKTOK_APP_SECRET");
+  const url = new URL(`${TIKTOK_API}/oauth2/advertiser/get/`);
+  url.searchParams.set("access_token", accessToken);
+  url.searchParams.set("secret", secret);
+  url.searchParams.set("app_id", appId);
+  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  if (!res.ok) throw new ConnectorNotReadyError("tiktok_ads", `TikTok advertiser API responded ${res.status}`);
+  const payload = (await res.json()) as {
+    data?: { list?: Array<{ advertiser_id?: string; advertiser_name?: string }> };
+  };
+  const accounts = (payload.data?.list ?? []).flatMap((adv) =>
+    adv.advertiser_id
+      ? [{ externalAccountId: adv.advertiser_id, displayName: adv.advertiser_name ?? `Advertiser ${adv.advertiser_id}` }]
+      : [],
+  );
+  if (accounts.length === 0) throw new ConnectorNotReadyError("tiktok_ads", "no TikTok advertisers available");
+  return accounts;
+}
+
+async function listPinterestAdAccounts(accessToken: string): Promise<AccountSelection[]> {
+  const res = await fetch(`${PINTEREST_API}/ad_accounts`, {
+    headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+  });
+  if (!res.ok) throw new ConnectorNotReadyError("pinterest_ads", `Pinterest ad_accounts API responded ${res.status}`);
+  const payload = (await res.json()) as { items?: Array<{ id?: string; name?: string }> };
+  const accounts = (payload.items ?? []).flatMap((acct) =>
+    acct.id ? [{ externalAccountId: acct.id, displayName: acct.name ?? `Pinterest ${acct.id}` }] : [],
+  );
+  if (accounts.length === 0) throw new ConnectorNotReadyError("pinterest_ads", "no Pinterest ad accounts available");
+  return accounts;
+}
+
+async function listSnapchatAdAccounts(accessToken: string): Promise<AccountSelection[]> {
+  const res = await fetch(`${SNAPCHAT_API}/me/organizations?with_ad_accounts=true`, {
+    headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+  });
+  if (!res.ok) throw new ConnectorNotReadyError("snapchat_ads", `Snapchat organizations API responded ${res.status}`);
+  const payload = (await res.json()) as {
+    organizations?: Array<{ organization?: { ad_accounts?: Array<{ id?: string; name?: string }> } }>;
+  };
+  const accounts = (payload.organizations ?? []).flatMap((org) =>
+    (org.organization?.ad_accounts ?? []).flatMap((acct) =>
+      acct.id ? [{ externalAccountId: acct.id, displayName: acct.name ?? `Snapchat ${acct.id}` }] : [],
+    ),
+  );
+  if (accounts.length === 0) throw new ConnectorNotReadyError("snapchat_ads", "no Snapchat ad accounts available");
+  return accounts;
+}
+
+async function listAmazonProfiles(accessToken: string): Promise<AccountSelection[]> {
+  const clientId = process.env.AMAZON_ADS_CLIENT_ID;
+  if (!clientId) throw new ConnectorNotReadyError("amazon_ads", "missing AMAZON_ADS_CLIENT_ID");
+  const res = await fetch(`${AMAZON_ADS_API}/v2/profiles`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Amazon-Advertising-API-ClientId": clientId,
+      Accept: "application/json",
+    },
+  });
+  if (!res.ok) throw new ConnectorNotReadyError("amazon_ads", `Amazon profiles API responded ${res.status}`);
+  const payload = (await res.json()) as Array<{ profileId?: number; accountInfo?: { name?: string } }>;
+  const accounts = (Array.isArray(payload) ? payload : []).flatMap((profile) =>
+    profile.profileId
+      ? [
+          {
+            externalAccountId: String(profile.profileId),
+            displayName: profile.accountInfo?.name ?? `Profile ${profile.profileId}`,
+          },
+        ]
+      : [],
+  );
+  if (accounts.length === 0) throw new ConnectorNotReadyError("amazon_ads", "no Amazon advertising profiles available");
+  return accounts;
+}
+
+async function listSearchConsoleSites(accessToken: string): Promise<AccountSelection[]> {
+  const res = await fetch(`${SEARCH_CONSOLE_API}/sites`, {
+    headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+  });
+  if (!res.ok) throw new ConnectorNotReadyError("search_console", `Search Console sites API responded ${res.status}`);
+  const payload = (await res.json()) as { siteEntry?: Array<{ siteUrl?: string }> };
+  const accounts = (payload.siteEntry ?? []).flatMap((site) =>
+    site.siteUrl ? [{ externalAccountId: site.siteUrl, displayName: site.siteUrl }] : [],
+  );
+  if (accounts.length === 0) throw new ConnectorNotReadyError("search_console", "no Search Console sites available");
   return accounts;
 }
 
