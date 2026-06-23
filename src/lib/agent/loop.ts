@@ -79,10 +79,25 @@ const WEB_SEARCH_TOOL = {
   type: "web_search_20260209" as const,
   name: "web_search" as const,
   allowed_callers: ["direct" as const],
-  max_uses: 4,
+  max_uses: 5,
 };
 
-const AGENT_TOOLS = [...TOOLS, WEB_SEARCH_TOOL];
+/**
+ * Anthropic server-side web_fetch tool — lets the agent actually READ a page
+ * (the user's own website, a competitor's site, a landing page) rather than only
+ * searching for snippets. This is what makes "here's my URL, audit my site /
+ * SEO / competitors" real: the model fetches the page content and analyzes it.
+ * Same server-tool mechanics as web_search (pause_turn / inline), same
+ * "direct"-caller pin so it stays callable on every tier.
+ */
+const WEB_FETCH_TOOL = {
+  type: "web_fetch_20260209" as const,
+  name: "web_fetch" as const,
+  allowed_callers: ["direct" as const],
+  max_uses: 6,
+};
+
+const AGENT_TOOLS = [...TOOLS, WEB_SEARCH_TOOL, WEB_FETCH_TOOL];
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const status = (key: AgentStatusKey): AgentEvent => ({ kind: "status", key, label: AGENT_STATUS_LABEL[key] });
@@ -276,11 +291,14 @@ export async function* runAgentWithTools(opts: {
  * reliable signal that live research happened — not the `pause_turn` stop_reason.
  */
 function usedWebSearch(content: Anthropic.Message["content"]): boolean {
-  return content.some(
-    (b) =>
-      (b as { type?: string }).type === "server_tool_use" ||
-      (b as { type?: string }).type === "web_search_tool_result",
-  );
+  return content.some((b) => {
+    const t = (b as { type?: string }).type;
+    return (
+      t === "server_tool_use" ||
+      t === "web_search_tool_result" ||
+      t === "web_fetch_tool_result"
+    );
+  });
 }
 
 /** Map a concrete model id back to its router tier (for trace/cost labelling). */

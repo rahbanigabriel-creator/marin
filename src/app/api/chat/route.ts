@@ -34,7 +34,16 @@ interface ChatRequest {
   chips: ResultChip[];
   artifacts: ArtifactPayload[];
   closing: AnswerData["closing"];
+  /** Optional user-selected model id; overrides the auto-router when valid. */
+  model?: string;
 }
+
+/** Models the user can pick in the UI, with the effort each runs at. */
+const SELECTABLE_MODELS: Record<string, { tier: "low" | "medium" | "high"; effort: "low" | "medium" | "high" }> = {
+  "claude-haiku-4-5": { tier: "low", effort: "low" },
+  "claude-sonnet-4-6": { tier: "medium", effort: "medium" },
+  "claude-opus-4-8": { tier: "high", effort: "high" },
+};
 
 /** Phase reveal beats (step, delay-after-previous ms) once the lead is done. */
 const PHASES: Array<[number, number]> = [
@@ -208,11 +217,16 @@ export async function POST(req: Request): Promise<Response> {
         send({ type: "phase", step: 1 });
 
         // ── Lead prose: live model (routed + grounded) with canned fallback ──
-        const decision = routeModel({
+        let decision = routeModel({
           question: body.question,
           persona: body.persona,
           artifactKinds: body.artifacts.map((a) => a.kind),
         });
+        // A user-selected model overrides the auto-router (default is Sonnet 4.6).
+        const picked = body.model ? SELECTABLE_MODELS[body.model] : undefined;
+        if (picked) {
+          decision = { tier: picked.tier, model: body.model as string, effort: picked.effort, reason: "user-selected model" };
+        }
         console.log(`[agent] route ${decision.tier} (${decision.model}) — ${decision.reason}`);
 
         let streamed = false;

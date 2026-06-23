@@ -21,6 +21,7 @@ import { OnboardingScreen } from "@/components/screens/OnboardingScreen";
 import { ForecastScreen } from "@/components/screens/ForecastScreen";
 import { ClientsScreen } from "@/components/screens/ClientsScreen";
 import { FirstRunScreen } from "@/components/screens/FirstRunScreen";
+import { WelcomeScreen } from "@/components/screens/WelcomeScreen";
 
 type Screen = "chat" | "onboarding" | "forecast" | "clients";
 
@@ -61,12 +62,17 @@ export function AppShell() {
   const [activeChat, setActiveChat] = useState(0);
   const [activeClient, setActiveClient] = useState<string | null>(null);
   const [founderConfig, setFounderConfig] = useState<ForecastConfig>(DEFAULT_FORECAST);
+  const [model, setModel] = useState("claude-sonnet-4-6");
+  // Real product opens on a clean welcome, not a canned auto-answered question.
+  // Flips true the first time the user actually asks something.
+  const [hasAsked, setHasAsked] = useState(false);
 
   const dataset = PERSONAS[persona];
   const realProductMode = !DEMO_MODE;
   const realChannels = channels;
   const connectedCount = realChannels.filter((channel) => channel.status === "connected").length;
   const showFirstRun = realProductMode && connectedCount === 0 && screen === "chat";
+  const idle = realProductMode && screen === "chat" && !showFirstRun && !hasAsked;
   const sidebarAccount = realProductMode
     ? { name: workspaceName, sub: "Marpin workspace", initials: workspaceName.slice(0, 2).toUpperCase() }
     : dataset.account;
@@ -81,7 +87,7 @@ export function AppShell() {
     chips,
     closing,
     dataMode,
-  } = useStreamingChat(scenario, { enabled: screen === "chat" && !showFirstRun });
+  } = useStreamingChat(scenario, { enabled: screen === "chat" && !showFirstRun && !idle, model });
   const { step, typed } = state;
   const liveSuggestions = useMemo(
     () => [
@@ -128,10 +134,22 @@ export function AppShell() {
       setActiveClient(null);
       setQuestion(trimmed);
       setScenario(resolveScenario(trimmed, persona, SCENARIOS));
+      setHasAsked(true);
       replay();
     },
     [persona, replay],
   );
+
+  // "New conversation" returns the real product to the clean welcome state
+  // rather than re-streaming the previous answer (demo keeps the replay).
+  const newChat = useCallback(() => {
+    setActiveClient(null);
+    if (realProductMode) {
+      setHasAsked(false);
+      return;
+    }
+    replay();
+  }, [realProductMode, replay]);
 
   const selectChat = useCallback(
     (index: number) => {
@@ -140,6 +158,7 @@ export function AppShell() {
       const q = PERSONAS[persona].recentChats[index].question;
       setQuestion(q);
       setScenario(resolveScenario(q, persona, SCENARIOS));
+      setHasAsked(true);
       replay();
     },
     [persona, replay],
@@ -155,6 +174,7 @@ export function AppShell() {
       setScenario(sc);
       setQuestion(sc.question);
       setScreen(p === "agency" ? "clients" : "chat");
+      setHasAsked(true);
       replay();
     },
     [replay],
@@ -168,6 +188,7 @@ export function AppShell() {
       setScenario(buildClientScenario(c));
       setMode("split");
       setScreen("chat");
+      setHasAsked(true);
       replay();
     },
     [replay],
@@ -193,6 +214,7 @@ export function AppShell() {
       setQuestion(sc.question);
       setScenario(sc);
       setScreen("chat");
+      setHasAsked(true);
       replay();
     },
     [replay],
@@ -222,7 +244,7 @@ export function AppShell() {
         account={sidebarAccount}
         showClients={persona === "agency"}
         onViewClients={() => setScreen("clients")}
-        onNewChat={replay}
+        onNewChat={newChat}
         onStartPlan={() => (realProductMode ? setModalOpen(true) : setScreen("onboarding"))}
         onOpenModal={() => setModalOpen(true)}
         hideRecent={realProductMode}
@@ -247,7 +269,7 @@ export function AppShell() {
               mode={mode}
               onSetMode={setMode}
               onReplay={replay}
-              title={screen === "clients" ? "Clients" : scenario.title}
+              title={idle ? "New conversation" : screen === "clients" ? "Clients" : scenario.title}
               channels={realChannels}
               persona={persona}
               onSwitchPersona={switchPersona}
@@ -255,9 +277,18 @@ export function AppShell() {
               chatControls={screen === "chat"}
               activeClient={screen === "chat" ? activeClient : null}
               showPersonaSwitcher={!realProductMode}
+              model={model}
+              onModelChange={setModel}
             />
 
-            {screen === "clients" ? (
+            {idle ? (
+              <WelcomeScreen
+                onSend={ask}
+                onSuggest={ask}
+                suggestions={realProductMode ? liveSuggestions : dataset.suggestions}
+                connectedCount={connectedCount}
+              />
+            ) : screen === "clients" ? (
               <ClientsScreen
                 clients={AGENCY_CLIENTS}
                 workspace={dataset.workspace}

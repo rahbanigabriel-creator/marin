@@ -27,11 +27,13 @@ export interface StreamingState {
 
 interface UseStreamingChatOptions {
   enabled?: boolean;
+  /** User-selected model id; forwarded to /api/chat to override the auto-router. */
+  model?: string;
 }
 
 export function useStreamingChat(
   scenario: Scenario,
-  { enabled = true }: UseStreamingChatOptions = {},
+  { enabled = true, model }: UseStreamingChatOptions = {},
 ) {
   const [chat, setChat] = useState<ChatStreamState>(initialChatState);
   const [nonce, setNonce] = useState(0);
@@ -60,6 +62,7 @@ export function useStreamingChat(
             chips: scenario.chips,
             artifacts: scenario.artifacts,
             closing: scenario.closing,
+            model,
           }),
           signal: ac.signal,
         });
