@@ -54,6 +54,7 @@ export function ConnectionsModal({ channels, onClose, onConnect }: ConnectionsMo
                 {group.map((c) => {
                   const on = c.status === "connected";
                   const errored = c.status === "error";
+                  const configured = c.configured !== false;
                   return (
                     <div
                       key={c.name}
@@ -80,14 +81,16 @@ export function ConnectionsModal({ channels, onClose, onConnect }: ConnectionsMo
                             ? c.displayName ?? "Connected · syncing"
                             : errored
                               ? "Connection needs attention"
-                              : "Not connected"}
+                              : configured
+                                ? "Not connected"
+                                : "Setup needed"}
                         </div>
                       </div>
                       <button
                         type="button"
                         onClick={() => onConnect(c)}
-                        disabled={!c.platform}
-                        className="flex-none cursor-pointer rounded-chip font-sans text-[12px] font-semibold"
+                        disabled={!c.platform || !configured}
+                        className="flex-none cursor-pointer rounded-chip font-sans text-[12px] font-semibold disabled:cursor-not-allowed disabled:opacity-60"
                         style={
                           on
                             ? {
@@ -104,7 +107,7 @@ export function ConnectionsModal({ channels, onClose, onConnect }: ConnectionsMo
                               }
                         }
                       >
-                        {on ? "Reconnect" : "Connect"}
+                        {on ? "Reconnect" : configured ? "Connect" : "Setup"}
                       </button>
                     </div>
                   );

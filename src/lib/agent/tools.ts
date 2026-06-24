@@ -1,6 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { retrieveDoctrine, formatRetrieved } from "@/lib/rag/retrieve";
-import type { BriefData, ProposedStep } from "@/types/artifacts";
+import type { BriefData, MarketScanData, ProposedStep } from "@/types/artifacts";
 import type { ActionPlanInput } from "@/lib/actions/persist";
 
 /**
@@ -33,6 +33,7 @@ export const TOOL_SCOPE: Record<string, ToolScope> = {
   marketing_playbook: "doctrine",
   get_account_metrics: "internal",
   add_canvas_card: "doctrine",
+  add_market_scan: "doctrine",
   add_action_plan: "doctrine",
   ask_questions: "doctrine",
 };
@@ -96,6 +97,68 @@ export const TOOLS: Anthropic.Tool[] = [
         },
       },
       required: ["title", "sections"],
+    },
+  },
+  {
+    name: "add_market_scan",
+    description:
+      "Render the HERO Market Scan card — the designed, structured way to show a competitor / market landscape (use this instead of a plain card whenever you've researched who the competitors are and where the user stands). Fill it from your live research: a one-line 'read' (your sharp take), the ranked field by share of market with the user's OWN row marked you:true, and the concrete openings where they can win. Add headline stats and a momentum line when you have them. This is what makes the answer look like a strategist's briefing, not a chat reply — prefer it over add_canvas_card for any 'analyze my market / competitors / where I stand' answer.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Card title, e.g. 'Market scan: project-management SaaS'." },
+        read: {
+          type: "string",
+          description:
+            "Your one-line take, shown as the dark callout — e.g. \"You're #5 of 7, but the two leaders are beatable on TikTok and branded search.\"",
+        },
+        stats: {
+          type: "array",
+          description: "Optional 1–3 headline stats (market size, your share, growth).",
+          items: {
+            type: "object",
+            properties: {
+              label: { type: "string" },
+              value: { type: "string", description: "e.g. '$2.3B', '4.2%', '+58%'." },
+              sub: { type: "string" },
+            },
+            required: ["label", "value"],
+          },
+        },
+        field: {
+          type: "array",
+          description: "Competitors ranked by share of market (2–8 rows). Mark the user's own row with you:true.",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string", description: "Competitor (or the user's brand) name." },
+              sharePct: { type: "number", description: "Estimated share of market, 0–100." },
+              you: { type: "boolean", description: "true for the user's own row." },
+            },
+            required: ["name", "sharePct"],
+          },
+        },
+        momentum: {
+          type: "object",
+          description: "Optional growth comparison.",
+          properties: {
+            label: { type: "string", description: "Optional context, e.g. 'last 12 months'." },
+            you: { type: "string", description: "The user's growth, e.g. '+58%'." },
+            market: { type: "string", description: "Market-average growth, e.g. '+24%'." },
+          },
+          required: ["you", "market"],
+        },
+        openings: {
+          type: "array",
+          description: "2–5 concrete openings — where the user can win.",
+          items: { type: "string" },
+        },
+        cta: {
+          type: "string",
+          description: "Optional closing next step. Phrase as a proposal if it spends money or posts publicly.",
+        },
+      },
+      required: ["title", "read", "field"],
     },
   },
   {
@@ -226,6 +289,54 @@ export function briefFromInput(input: unknown): { kind: "brief"; data: BriefData
 }
 
 /**
+ * Coerce an `add_market_scan` tool input into a validated `marketScan` artifact,
+ * or null if it lacks a title, read, and at least two field rows. Defensive: the
+ * model's JSON is untrusted, so every field is checked, trimmed, and clamped.
+ */
+export function marketScanFromInput(input: unknown): { kind: "marketScan"; data: MarketScanData } | null {
+  const o = (input ?? {}) as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+  const title = str(o.title);
+  const read = str(o.read);
+  const field = (Array.isArray(o.field) ? o.field : [])
+    .map((f) => {
+      const obj = (f ?? {}) as Record<string, unknown>;
+      const name = typeof obj.name === "string" ? obj.name.trim() : "";
+      const sharePct = typeof obj.sharePct === "number" && isFinite(obj.sharePct) ? obj.sharePct : NaN;
+      return { name, sharePct, you: obj.you === true ? true : undefined };
+    })
+    .filter((f) => f.name.length > 0 && !Number.isNaN(f.sharePct))
+    .map((f) => ({ ...f, sharePct: Math.max(0, Math.min(100, Math.round(f.sharePct * 10) / 10)) }));
+  if (!title || !read || field.length < 2) return null;
+
+  const stats = (Array.isArray(o.stats) ? o.stats : [])
+    .map((s) => {
+      const obj = (s ?? {}) as Record<string, unknown>;
+      return { label: str(obj.label) ?? "", value: str(obj.value) ?? "", sub: str(obj.sub) };
+    })
+    .filter((s) => s.label && s.value);
+  const openings = (Array.isArray(o.openings) ? o.openings : [])
+    .filter((x): x is string => typeof x === "string" && x.trim().length > 0)
+    .map((x) => x.trim());
+  const mo = (o.momentum ?? null) as Record<string, unknown> | null;
+  const momentum =
+    mo && str(mo.you) && str(mo.market)
+      ? { label: str(mo.label) ?? "", you: str(mo.you)!, market: str(mo.market)! }
+      : undefined;
+
+  const data: MarketScanData = {
+    title,
+    read,
+    stats: stats.length ? stats : undefined,
+    field,
+    momentum,
+    openings: openings.length ? openings : undefined,
+    cta: str(o.cta),
+  };
+  return { kind: "marketScan", data };
+}
+
+/**
  * Coerce an `add_action_plan` tool input into a validated ActionPlanInput (intent
  * only — title, optional situation, ProposedStep[]). The loop hands this to
  * persistActionPlan, which is the trust boundary that computes execMode/approval.
@@ -345,6 +456,17 @@ export async function dispatchTool(
     const ok = briefFromInput(input) !== null;
     return {
       content: ok ? "Card rendered on the canvas." : "Card needs a title and at least one section.",
+      isError: !ok,
+    };
+  }
+
+  if (name === "add_market_scan") {
+    // The loop intercepts this to render the card; defensive fallback only.
+    const ok = marketScanFromInput(input) !== null;
+    return {
+      content: ok
+        ? "Market scan rendered on the canvas."
+        : "Market scan needs a title, a read, and at least two field rows.",
       isError: !ok,
     };
   }

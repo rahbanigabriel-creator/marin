@@ -25,8 +25,8 @@ import { emitConnectionConnected } from "@/lib/jobs/inngest";
  *
  * Graceful without keys (architecture §7, mirrors the provider/db/vault
  * pattern): if the platform is unknown → 404; if its OAuth client id/secret env
- * is absent → 503 JSON {error:"not_configured"} (NO throw, NO build dependency
- * on env). Otherwise we mint a CSRF `state` (+ PKCE verifier when the provider
+ * is absent → redirect back with ?connect=not_configured (NO throw, NO build
+ * dependency on env). Otherwise we mint a CSRF `state` (+ PKCE verifier when the provider
  * supports it), stash the transaction in a signed HttpOnly cookie, and redirect
  * the browser to the provider consent screen.
  *
@@ -51,12 +51,9 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Re
     return connectAppleSearchAds(req);
   }
 
-  // Feature-detect: no client id/secret → graceful 503, never a throw.
+  // Feature-detect: no client id/secret → bounce back to the app, never a throw.
   if (!isConnectorConfigured(config.id)) {
-    return NextResponse.json(
-      { error: "not_configured", platform: config.id, label: config.label },
-      { status: 503 },
-    );
+    return appRedirect(req, "not_configured", config.id);
   }
 
   // The signing key (derived from TOKEN_ENC_KEY) is required to persist the
@@ -66,10 +63,10 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Re
   const codeVerifier = config.usesPkce ? generateCodeVerifier() : undefined;
   const signedTx = signTransaction({ platform: config.id, state, codeVerifier });
   if (!signedTx) {
-    return NextResponse.json(
-      { error: "not_configured", platform: config.id, reason: "missing TOKEN_ENC_KEY" },
-      { status: 503 },
-    );
+    // Vault key (TOKEN_ENC_KEY) absent → bounce back like every other failure
+    // path instead of dumping raw JSON in the browser (this route is entered as
+    // a full-page navigation). Mirrors the Apple Search Ads flow.
+    return appRedirect(req, "vault_unconfigured", config.id);
   }
 
   const { clientId } = getConnectorCredentials(config.id);
@@ -105,7 +102,7 @@ function appRedirect(req: NextRequest, status: string, platform?: string): NextR
 async function connectAppleSearchAds(req: NextRequest): Promise<Response> {
   const platform = "apple_search_ads" as const;
   if (!isConnectorConfigured(platform)) {
-    return NextResponse.json({ error: "not_configured", platform }, { status: 503 });
+    return appRedirect(req, "not_configured", platform);
   }
   if (!isVaultConfigured()) return appRedirect(req, "vault_unconfigured", platform);
 

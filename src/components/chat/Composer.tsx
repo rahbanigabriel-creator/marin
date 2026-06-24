@@ -8,9 +8,27 @@ interface ComposerProps {
   variant: "split" | "thread";
   suggestions: string[];
   connectedCount: number;
+  placeholder?: string;
+  model?: string;
+  onModelChange?: (model: string) => void;
 }
 
-export function Composer({ onSend, onSuggest, variant, suggestions, connectedCount }: ComposerProps) {
+const MODEL_OPTIONS: Array<{ id: string; label: string; disabled?: boolean }> = [
+  { id: "auto", label: "Auto" },
+  { id: "claude-sonnet-4-6", label: "High (Claude Sonnet)" },
+  { id: "opus-disabled", label: "Extra (Opus 4.8) · Paid", disabled: true },
+];
+
+export function Composer({
+  onSend,
+  onSuggest,
+  variant,
+  suggestions,
+  connectedCount,
+  placeholder,
+  model = "auto",
+  onModelChange,
+}: ComposerProps) {
   const [input, setInput] = useState("");
 
   function send() {
@@ -42,6 +60,21 @@ export function Composer({ onSend, onSuggest, variant, suggestions, connectedCou
       ))}
     </div>
   );
+  const modelPicker = onModelChange ? (
+    <select
+      value={model}
+      onChange={(e) => onModelChange(e.target.value)}
+      aria-label="Model"
+      title="Choose response depth"
+      className="h-[30px] max-w-[174px] cursor-pointer rounded-[9px] border border-line-2 bg-surface-chip px-[8px] font-sans text-[11.5px] font-semibold text-ink-600 outline-none"
+    >
+      {MODEL_OPTIONS.map((option) => (
+        <option key={option.id} value={option.id} disabled={option.disabled}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  ) : null;
 
   if (variant === "thread") {
     return (
@@ -50,12 +83,13 @@ export function Composer({ onSend, onSuggest, variant, suggestions, connectedCou
         <div className="flex items-end gap-[10px] rounded-card border border-line-1 bg-surface-card p-[11px_14px] shadow-composer">
           <textarea
             rows={1}
-            placeholder="Ask a follow-up…"
+            placeholder={placeholder ?? "Ask a follow-up…"}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKey}
             className="flex-1 resize-none border-none bg-transparent font-sans text-[15px] leading-[1.5] text-ink-900 outline-none"
           />
+          {modelPicker}
           <button
             type="button"
             onClick={send}
@@ -75,7 +109,7 @@ export function Composer({ onSend, onSuggest, variant, suggestions, connectedCou
       <div className="rounded-input border border-line-1 bg-surface-card p-[10px_12px]">
         <textarea
           rows={2}
-          placeholder="Ask anything — strategy, competitors, campaigns, SEO, your website…"
+          placeholder={placeholder ?? "Ask anything — strategy, competitors, campaigns, SEO, your website…"}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKey}
@@ -87,14 +121,17 @@ export function Composer({ onSend, onSuggest, variant, suggestions, connectedCou
               ? "No sources connected"
               : `${connectedCount} source${connectedCount === 1 ? "" : "s"} connected`}
           </span>
-          <button
-            type="button"
-            onClick={send}
-            className="flex items-center justify-center rounded-chip text-[15px] text-white"
-            style={{ width: 30, height: 30, border: "none", background: "#9A3D63" }}
-          >
-            ↑
-          </button>
+          <div className="flex items-center gap-[8px]">
+            {modelPicker}
+            <button
+              type="button"
+              onClick={send}
+              className="flex items-center justify-center rounded-chip text-[15px] text-white"
+              style={{ width: 30, height: 30, border: "none", background: "#9A3D63" }}
+            >
+              ↑
+            </button>
+          </div>
         </div>
       </div>
     </div>

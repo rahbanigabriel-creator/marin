@@ -1,5 +1,5 @@
 import type { Scenario } from "@/types/scenario";
-import type { ChatTurn } from "@/types/views";
+import type { Channel, ChatTurn } from "@/types/views";
 import type { AgentStatusKey, ArtifactPayload, DataMode } from "@/lib/streaming/events";
 import type { ResultChip } from "@/types/artifacts";
 import { gatesForStep } from "@/lib/streaming/stepModel";
@@ -32,6 +32,10 @@ interface SplitViewProps {
   dataMode: DataMode;
   onOpenConnections: () => void;
   connectedCount: number;
+  channels: Channel[];
+  onConnect: (channel: Channel) => void;
+  model: string;
+  onModelChange: (model: string) => void;
 }
 
 export function SplitView({
@@ -53,6 +57,10 @@ export function SplitView({
   dataMode,
   onOpenConnections,
   connectedCount,
+  channels,
+  onConnect,
+  model,
+  onModelChange,
 }: SplitViewProps) {
   const g = gatesForStep(step, typed.length, scenario.lead.length);
 
@@ -81,6 +89,8 @@ export function SplitView({
           onSuggest={onSuggest}
           suggestions={suggestions}
           connectedCount={connectedCount}
+          model={model}
+          onModelChange={onModelChange}
         />
       </div>
 
@@ -113,7 +123,7 @@ export function SplitView({
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-[24px]">
           {g.canvasReady && artifacts.length > 0 ? (
-            <AnswerCanvas step={step} artifacts={artifacts} />
+            <AnswerCanvas step={step} artifacts={artifacts} channels={channels} onConnect={onConnect} />
           ) : g.canvasReady && dataMode === "empty" ? (
             <div className="flex h-full min-h-[340px] flex-col items-center justify-center gap-[10px] rounded-[8px] border border-dashed border-line-2 bg-surface-card p-[24px] text-center">
               <div className="font-serif text-[19px] font-medium text-ink-700">Your workspace</div>

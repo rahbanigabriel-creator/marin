@@ -1,5 +1,6 @@
 import { Fragment } from "react";
 import type { LeaksData, FunnelData } from "@/types/artifacts";
+import type { Channel } from "@/types/views";
 import { STEP_FOR_KIND, type ArtifactPayload } from "@/lib/streaming/events";
 import { ArtifactShell } from "./ArtifactShell";
 import { KpiRow } from "./KpiRow";
@@ -15,6 +16,7 @@ import { ForecastResult } from "./ForecastResult";
 import { PlanAllocation } from "./PlanAllocation";
 import { CanvasBrief } from "./CanvasBrief";
 import { CanvasActionPlan } from "./CanvasActionPlan";
+import { MarketScan } from "./MarketScan";
 
 /**
  * The visual answer — a vertical stack of artifacts revealed in sequence as
@@ -22,7 +24,7 @@ import { CanvasActionPlan } from "./CanvasActionPlan";
  * supply its own artifact sequence. Shared by all three views.
  */
 
-function renderArtifact(a: ArtifactPayload) {
+function renderArtifact(a: ArtifactPayload, channels: Channel[], onConnect: (channel: Channel) => void) {
   switch (a.kind) {
     case "kpis":
       return <KpiRow kpis={a.data} />;
@@ -46,8 +48,10 @@ function renderArtifact(a: ArtifactPayload) {
       return <PlanAllocation data={a.data} />;
     case "brief":
       return <CanvasBrief data={a.data} />;
+    case "marketScan":
+      return <MarketScan data={a.data} />;
     case "actionPlan":
-      return <CanvasActionPlan data={a.data} />;
+      return <CanvasActionPlan data={a.data} channels={channels} onConnect={onConnect} />;
     case "leaks":
       return (
         <ArtifactShell>
@@ -84,9 +88,13 @@ type Group =
 export function AnswerCanvas({
   step,
   artifacts,
+  channels,
+  onConnect,
 }: {
   step: number;
   artifacts: ArtifactPayload[];
+  channels: Channel[];
+  onConnect: (channel: Channel) => void;
 }) {
   const steps = revealSteps(artifacts);
   const visible = artifacts.filter((_, i) => step >= steps[i]);
@@ -113,7 +121,7 @@ export function AnswerCanvas({
             <FunnelCard data={g.funnel} />
           </ArtifactShell>
         ) : (
-          <Fragment key={i}>{renderArtifact(g.artifact)}</Fragment>
+          <Fragment key={i}>{renderArtifact(g.artifact, channels, onConnect)}</Fragment>
         ),
       )}
     </div>
