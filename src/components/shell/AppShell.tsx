@@ -83,7 +83,9 @@ export function AppShell() {
   const [activeChat, setActiveChat] = useState(0);
   const [activeClient, setActiveClient] = useState<string | null>(null);
   const [founderConfig, setFounderConfig] = useState<ForecastConfig>(DEFAULT_FORECAST);
-  const [model, setModel] = useState("claude-sonnet-4-6");
+  // "auto" = conservative router (Sonnet floor; Haiku for trivial lookups, Opus
+  // for deep strategy). Picking a specific model in the TopBar forces it.
+  const [model, setModel] = useState("auto");
   // Real product opens on a clean welcome, not a canned auto-answered question.
   // Flips true the first time the user actually asks something.
   const [hasAsked, setHasAsked] = useState(false);

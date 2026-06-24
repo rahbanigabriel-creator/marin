@@ -79,7 +79,7 @@ const WEB_SEARCH_TOOL = {
   type: "web_search_20260209" as const,
   name: "web_search" as const,
   allowed_callers: ["direct" as const],
-  max_uses: 5,
+  max_uses: 3,
 };
 
 /**
@@ -94,13 +94,41 @@ const WEB_FETCH_TOOL = {
   type: "web_fetch_20260209" as const,
   name: "web_fetch" as const,
   allowed_callers: ["direct" as const],
-  max_uses: 6,
+  max_uses: 3,
 };
 
 const AGENT_TOOLS = [...TOOLS, WEB_SEARCH_TOOL, WEB_FETCH_TOOL];
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const status = (key: AgentStatusKey): AgentEvent => ({ kind: "status", key, label: AGENT_STATUS_LABEL[key] });
+
+/**
+ * Incremental prompt caching for the agent loop. Every iteration re-sends the
+ * full, growing message history — which includes any web_fetch page content
+ * (large). Marking the LAST content block of the LAST message with cache_control
+ * caches the whole prefix up to there, so the next iteration re-reads it at ~10%
+ * of the input price instead of full. We keep exactly one moving breakpoint on
+ * the messages (the system prompt holds the other), well under the 4-breakpoint
+ * cap. No-op for tiny prefixes below the cache minimum — never harmful.
+ */
+function applyMessageCaching(messages: Anthropic.MessageParam[]): void {
+  for (const m of messages) {
+    if (Array.isArray(m.content)) {
+      for (const block of m.content) {
+        if (block && typeof block === "object" && "cache_control" in block) {
+          delete (block as { cache_control?: unknown }).cache_control;
+        }
+      }
+    }
+  }
+  const last = messages[messages.length - 1];
+  if (last && Array.isArray(last.content) && last.content.length > 0) {
+    const block = last.content[last.content.length - 1];
+    if (block && typeof block === "object") {
+      (block as { cache_control?: { type: "ephemeral" } }).cache_control = { type: "ephemeral" };
+    }
+  }
+}
 
 export async function* runAgentWithTools(opts: {
   model: string;
@@ -135,6 +163,10 @@ export async function* runAgentWithTools(opts: {
       // relevant). Extended thinking is on for non-Haiku tiers from turn 0.
       const useThinking = opts.model !== TIER_MODEL.low;
       if (i === 1) yield status("analyzing");
+
+      // Cache the growing message prefix (incl. large web_fetch content) so loop
+      // iterations re-read it at ~10% input cost instead of full price.
+      applyMessageCaching(messages);
 
       const params = {
         model: opts.model,

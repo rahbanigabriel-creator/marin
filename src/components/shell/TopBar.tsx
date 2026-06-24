@@ -26,6 +26,7 @@ interface TopBarProps {
 }
 
 const MODEL_OPTIONS: Array<{ id: string; label: string }> = [
+  { id: "auto", label: "Auto" },
   { id: "claude-haiku-4-5", label: "Haiku 4.5" },
   { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
   { id: "claude-opus-4-8", label: "Opus 4.8" },

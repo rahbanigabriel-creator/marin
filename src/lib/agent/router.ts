@@ -25,14 +25,22 @@ export interface RouteDecision {
   reason: string;
 }
 
-/** Deep, reasoning-heavy work that warrants Opus regardless of phrasing. */
+/**
+ * Segment 6 ONLY — deep, multi-source, long-horizon strategy that genuinely
+ * benefits from Opus. Kept deliberately TIGHT so standard diagnoses and analyses
+ * (segments 3–5, e.g. "why is my CPA up", "audit my landing page") stay on
+ * Sonnet rather than over-routing to the most expensive tier.
+ */
 const HIGH_RE =
-  /\b(forecast|projection|what[\s-]?if|simulate|budget plan|plan for|allocat\w*|strateg\w+|roadmap|next (quarter|year)|root cause|diagnos\w+|why (is|are|did|has|am|do|does))\b/i;
+  /\b(go[ -]?to[ -]?market|gtm|full (marketing |growth )?strategy|overall (marketing |growth )?strategy|complete (marketing |growth )?strategy|reallocat\w*|budget across|across (all|every|the) (channel|platform)s?|channel mix|\d+[ -]?(month|quarter|year)[ -]?(plan|roadmap|strategy)|growth roadmap|marketing roadmap|blended cac|whole funnel|entire funnel|multi[- ]channel)\b/i;
 
-/** Cheap, single-fact questions that Haiku handles well. */
-// Note: the char class covers both the ASCII ' and the curly ' (U+2019) that
-// iOS/macOS auto-substitution produces, so cheap lookups route to Haiku.
-const LOW_RE = /\b(what['’]?s my|what is my|show( me| my)?|list|how much|how many|status|current)\b/i;
+/**
+ * Segments 1–2 — facts, benchmarks, definitions, mechanics that Haiku handles
+ * well. Conservative: must ALSO be short (see length gate below), and anything
+ * ambiguous falls through to Sonnet. Char classes cover the ASCII ' and curly ’.
+ */
+const LOW_RE =
+  /\b(benchmark|average (cpc|cpm|ctr|cpa|cvr|cost|rate)|what['’]?s? (a |an |the )?(good|typical|average|normal|standard|ideal|recommended)|what does .{1,30} mean|definition of|character limit|how many .{1,40}(should|per|need)|how do i (set up|install|add|create|track))\b/i;
 
 /** Artifact kinds that are inherently a synthesis → always Opus. */
 const DEEP_KINDS: ReadonlySet<ArtifactKind> = new Set(["forecastResult", "planAllocation"]);
@@ -50,11 +58,11 @@ export function routeModel(input: {
       tier: "high",
       model: TIER_MODEL.high,
       effort: "high",
-      reason: hasDeepArtifact ? "forecast/plan synthesis" : "deep reasoning (forecast/why/strategy)",
+      reason: hasDeepArtifact ? "deep synthesis (forecast/plan)" : "deep multi-source strategy (segment 6)",
     };
   }
-  if (LOW_RE.test(q) && q.length <= 64) {
-    return { tier: "low", model: TIER_MODEL.low, effort: "low", reason: "simple lookup / status" };
+  if (LOW_RE.test(q) && q.length <= 90) {
+    return { tier: "low", model: TIER_MODEL.low, effort: "low", reason: "factual / benchmark / mechanical lookup" };
   }
-  return { tier: "medium", model: TIER_MODEL.medium, effort: "medium", reason: "standard analysis (default)" };
+  return { tier: "medium", model: TIER_MODEL.medium, effort: "medium", reason: "standard analysis (Sonnet floor)" };
 }
