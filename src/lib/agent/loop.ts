@@ -219,7 +219,7 @@ export async function* runAgentWithTools(opts: {
           // Surface the real activity per tool: the model only consults the
           // reference frameworks on hard strategic problems; an account read only
           // happens when it judges a real connection is relevant.
-          if (tu.name === "marketing_reference" && !ctx.doctrineRetrieved) yield status("consulting");
+          if (tu.name === "marketing_playbook" && !ctx.doctrineRetrieved) yield status("consulting");
           else if (tu.name === "get_account_metrics" && !ctx.internalReadDone) yield status("reading");
           const outcome = await dispatchTool(tu.name, tu.input, opts.source, ctx);
           if (tu.name === "get_account_metrics" && !outcome.isError) internalData = outcome.content;

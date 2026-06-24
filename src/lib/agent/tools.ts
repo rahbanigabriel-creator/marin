@@ -29,16 +29,16 @@ import type { BriefData } from "@/types/artifacts";
 export type ToolScope = "doctrine" | "internal" | "external";
 
 export const TOOL_SCOPE: Record<string, ToolScope> = {
-  marketing_reference: "doctrine",
+  marketing_playbook: "doctrine",
   get_account_metrics: "internal",
   add_canvas_card: "doctrine",
 };
 
 export const TOOLS: Anthropic.Tool[] = [
   {
-    name: "marketing_reference",
+    name: "marketing_playbook",
     description:
-      "Privately consult proven marketing frameworks to pressure-test your thinking on a genuinely HARD strategic problem — a full go-to-market strategy, a tricky multi-cause diagnosis, a major budget reallocation. SKIP it for quick, tactical, creative, conversational, or single-metric diagnostic asks; just answer from your own expertise. Reaching for it is never a reason to clarify or stall — if the answer is in your head, deliver it. When you do use it, reason from it silently and answer in your OWN voice — never mention this tool, frameworks, references, 'doctrine', or any ids/codes to the user. Does NOT require any connected account.",
+      "Optionally consult Marpin's digital marketing playbook — a curated set of growth frameworks — when a genuinely HARD strategic problem might benefit from it (a full go-to-market strategy, a tricky multi-cause diagnosis, a major budget reallocation). Using it is ENTIRELY your call: most of the time your own expertise is plenty, so skip it for quick, tactical, creative, conversational, or single-metric asks, and never let it be a reason to clarify or stall. If you do consult it and what comes back isn't actually relevant or better than what you already know, IGNORE it and answer from your own judgment — never force playbook content into an answer where it doesn't fit. Always answer in your OWN voice; never mention the playbook, this tool, or any ids/codes to the user. Needs no connected account.",
     input_schema: {
       type: "object",
       properties: {
@@ -98,7 +98,7 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: "get_account_metrics",
     description:
-      "Returns the user's CONNECTED marketing-account data (KPIs, spend, ROAS, CPA, campaigns, leaks, funnel) from Marpin's internal store. ONLY call this when the user has a real account connected AND the question is about their own data; ground every number you state in the result and never invent metrics. For generic strategy/competitor/SEO/measurement questions, do NOT call this — use retrieve_doctrine instead. If it returns 'no connected-account data', do not fabricate numbers — answer from doctrine and say what connecting an account would unlock.",
+      "Returns the user's CONNECTED marketing-account data (KPIs, spend, ROAS, CPA, campaigns, leaks, funnel) from Marpin's internal store. ONLY call this when the user has a real account connected AND the question is about their own data; ground every number you state in the result and never invent metrics. For generic strategy/competitor/SEO/measurement questions, do NOT call this — answer from your own expertise and live web research. If it returns 'no connected-account data', do not fabricate numbers — answer from your expertise and note what connecting an account would unlock.",
     input_schema: {
       type: "object",
       properties: {
@@ -183,11 +183,11 @@ export async function dispatchTool(
     return { content: `Unknown tool: ${name}`, isError: true };
   }
 
-  if (name === "marketing_reference") {
+  if (name === "marketing_playbook") {
     const { query, intent } = (input as { query?: string; intent?: string } | null) ?? {};
     const q = (query ?? "").trim();
     if (!q) {
-      return { content: "marketing_reference requires a non-empty 'query'.", isError: true };
+      return { content: "marketing_playbook requires a non-empty 'query'.", isError: true };
     }
     const docs = retrieveDoctrine(q, { intent });
     ctx.doctrineRetrieved = true;
