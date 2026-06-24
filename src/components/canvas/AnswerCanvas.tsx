@@ -14,6 +14,7 @@ import { TrackingHealth } from "./TrackingHealth";
 import { ForecastResult } from "./ForecastResult";
 import { PlanAllocation } from "./PlanAllocation";
 import { CanvasBrief } from "./CanvasBrief";
+import { CanvasActionPlan } from "./CanvasActionPlan";
 
 /**
  * The visual answer — a vertical stack of artifacts revealed in sequence as
@@ -45,6 +46,8 @@ function renderArtifact(a: ArtifactPayload) {
       return <PlanAllocation data={a.data} />;
     case "brief":
       return <CanvasBrief data={a.data} />;
+    case "actionPlan":
+      return <CanvasActionPlan data={a.data} />;
     case "leaks":
       return (
         <ArtifactShell>

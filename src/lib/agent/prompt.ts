@@ -33,7 +33,7 @@ PERFORMANCE QUESTIONS ARE EXPERTISE QUESTIONS FIRST. When someone asks about "my
 
 A BARE URL OR BUSINESS NAME = "analyze this and show me the biggest opportunities." When that's all they give you, do NOT ask which angle they want — deliver the full picture as canvas cards: what the business is and how it's positioned, the competitor landscape, the SEO / content / growth gaps you can see, and the strategy and first campaigns you'd run. Give them the comprehensive analysis and let them steer from there. Only ask a question if you genuinely cannot analyze it at all.
 
-THE CANVAS: beside the chat is a workspace. For anything worth seeing laid out — a strategy, competitor breakdown, audit, a ranked diagnosis (e.g. "6 reasons your CPA is rising"), channel or budget plan, campaign brief, roadmap — render it as clean cards with add_canvas_card (one to three), then write a short, punchy chat reply that leads with the headline. A genuinely quick factual answer or a one-off creative snippet (a few tweets) can stay in chat without a card.
+THE WORKSPACE — IT EXECUTES, NOT JUST DISPLAYS. Beside the chat is the working space. Use add_canvas_card (a brief) for analysis you want laid out — a situation summary, competitor breakdown, audit, a ranked diagnosis (e.g. "6 reasons your CPA is rising"). But the MOMENT there is something to DO — launch, post, create, fix, grow — use add_action_plan instead: a short situation summary, then prioritized steps the user runs with ONE CLICK, each with the full content ALREADY WRITTEN (the actual post copy, the ad brief, the page text, the SEO fix — ready to ship), tagged with the platform and kind. This is what makes Marpin an operator, not a chatbot. You PROPOSE the steps — the user's click is the approval; never claim you already did it. Lead the chat with the headline takeaway; a quick factual answer or a couple of tweets can stay in chat without a card.
 
 GUARDRAILS: anything that spends money or posts publicly is a PROPOSAL for the user to approve — never claim you already launched, paused, changed, or posted anything. Treat platform auto-recommendations as hypotheses, not orders. Be honest about uncertainty and never fabricate the user's data.`;
 
@@ -98,6 +98,11 @@ function serializeArtifact(a: ArtifactPayload): string {
         (a.data.subtitle ? ` — ${a.data.subtitle}` : "") +
         ": " +
         a.data.sections.map((s) => `${s.heading}: ${s.points.join("; ")}`).join(" | ")
+      );
+    case "actionPlan":
+      return (
+        `Action plan "${a.data.title}" — ` +
+        a.data.steps.map((s) => `${s.title} [${s.platform ?? "general"} · ${s.execMode}]`).join("; ")
       );
     default: {
       const _never: never = a;

@@ -1,6 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { retrieveDoctrine, formatRetrieved } from "@/lib/rag/retrieve";
-import type { BriefData } from "@/types/artifacts";
+import type { BriefData, ProposedStep } from "@/types/artifacts";
+import type { ActionPlanInput } from "@/lib/actions/persist";
 
 /**
  * The agent's tool catalog + dispatcher (architecture §4).
@@ -32,6 +33,7 @@ export const TOOL_SCOPE: Record<string, ToolScope> = {
   marketing_playbook: "doctrine",
   get_account_metrics: "internal",
   add_canvas_card: "doctrine",
+  add_action_plan: "doctrine",
   ask_questions: "doctrine",
 };
 
@@ -94,6 +96,46 @@ export const TOOLS: Anthropic.Tool[] = [
         },
       },
       required: ["title", "sections"],
+    },
+  },
+  {
+    name: "add_action_plan",
+    description:
+      "Render an EXECUTABLE action plan in the workspace — this is how Marpin ACTS, not just talks. Use it whenever the user wants to DO something (launch, post, create, fix, grow): a short situation summary, then a PRIORITIZED list of concrete steps the user can run with one click. For each step give: a clear title; the FULL pre-written content ready to ship (the actual post copy, the ad brief, the page description, the SEO fix); the platform key (x_ads, meta_ads, linkedin_ads, tiktok_ads, pinterest_ads, reddit_ads, snapchat_ads, google_ads — or OMIT for SEO/website/email/manual work); and a kind (tweet | post | ad_draft | page | pin | seo_meta | email | manual). Set needsAsset:true when a step needs an image/video. You propose intent ONLY — never claim a step is done; the user's click is the approval and the server decides what actually executes.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Plan title, e.g. 'Launch plan for Kromse'." },
+        subtitle: { type: "string", description: "Optional one-line framing." },
+        situation: {
+          type: "array",
+          description: "Optional current-situation summary (e.g. you vs competitors): 1–3 sections.",
+          items: {
+            type: "object",
+            properties: {
+              heading: { type: "string" },
+              points: { type: "array", items: { type: "string" } },
+            },
+            required: ["heading", "points"],
+          },
+        },
+        steps: {
+          type: "array",
+          description: "Prioritized, one-by-one executable steps.",
+          items: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+              description: { type: "string", description: "The full, ready-to-ship content for this step." },
+              platform: { type: "string", description: "Connector key, or omit for SEO/website/email/manual." },
+              kind: { type: "string", description: "tweet | post | ad_draft | page | pin | seo_meta | email | manual" },
+              needsAsset: { type: "boolean" },
+            },
+            required: ["title", "description", "kind"],
+          },
+        },
+      },
+      required: ["title", "steps"],
     },
   },
   {
@@ -184,6 +226,45 @@ export function briefFromInput(input: unknown): { kind: "brief"; data: BriefData
 }
 
 /**
+ * Coerce an `add_action_plan` tool input into a validated ActionPlanInput (intent
+ * only — title, optional situation, ProposedStep[]). The loop hands this to
+ * persistActionPlan, which is the trust boundary that computes execMode/approval.
+ */
+export function actionPlanInputFromTool(input: unknown): ActionPlanInput | null {
+  const o = (input ?? {}) as Record<string, unknown>;
+  const title = typeof o.title === "string" ? o.title.trim() : "";
+  const steps: ProposedStep[] = (Array.isArray(o.steps) ? o.steps : [])
+    .map((s) => {
+      const obj = (s ?? {}) as Record<string, unknown>;
+      return {
+        title: typeof obj.title === "string" ? obj.title.trim() : "",
+        description: typeof obj.description === "string" ? obj.description.trim() : "",
+        platform: typeof obj.platform === "string" && obj.platform.trim() ? obj.platform.trim() : undefined,
+        kind: typeof obj.kind === "string" && obj.kind.trim() ? obj.kind.trim() : "manual",
+        needsAsset: typeof obj.needsAsset === "boolean" ? obj.needsAsset : undefined,
+      };
+    })
+    .filter((s) => s.title.length > 0 && s.description.length > 0);
+  const situation = (Array.isArray(o.situation) ? o.situation : [])
+    .map((sec) => {
+      const obj = (sec ?? {}) as Record<string, unknown>;
+      const heading = typeof obj.heading === "string" ? obj.heading.trim() : "";
+      const points = Array.isArray(obj.points)
+        ? obj.points.filter((p): p is string => typeof p === "string" && p.trim().length > 0).map((p) => p.trim())
+        : [];
+      return { heading, points };
+    })
+    .filter((sec) => sec.heading.length > 0 || sec.points.length > 0);
+  if (!title || steps.length === 0) return null;
+  return {
+    title,
+    subtitle: typeof o.subtitle === "string" && o.subtitle.trim() ? o.subtitle.trim() : undefined,
+    situation: situation.length ? situation : undefined,
+    steps,
+  };
+}
+
+/**
  * Coerce an `ask_question` tool input into a validated question + clickable
  * options (the Claude-style multiple-choice prompt), or null if unusable.
  */
@@ -264,6 +345,17 @@ export async function dispatchTool(
     const ok = briefFromInput(input) !== null;
     return {
       content: ok ? "Card rendered on the canvas." : "Card needs a title and at least one section.",
+      isError: !ok,
+    };
+  }
+
+  if (name === "add_action_plan") {
+    // The loop intercepts this (it persists + renders the plan); defensive fallback.
+    const ok = actionPlanInputFromTool(input) !== null;
+    return {
+      content: ok
+        ? "Action plan rendered with executable steps."
+        : "Action plan needs a title and at least one step.",
       isError: !ok,
     };
   }

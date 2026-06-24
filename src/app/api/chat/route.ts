@@ -243,6 +243,7 @@ export async function POST(req: Request): Promise<Response> {
               userContent,
               source,
               history: body.history,
+              workspaceId,
               signal: ac.signal,
             })) {
               if (closed) return;

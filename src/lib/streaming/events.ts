@@ -14,6 +14,7 @@ import type {
   ForecastResultData,
   PlanAllocationData,
   BriefData,
+  ActionPlanData,
 } from "@/types/artifacts";
 
 /**
@@ -36,7 +37,8 @@ export type ArtifactKind =
   | "trackingHealth"
   | "forecastResult"
   | "planAllocation"
-  | "brief";
+  | "brief"
+  | "actionPlan";
 
 /** Base reveal step per artifact kind (the canvas enforces monotonic order on top). */
 export const STEP_FOR_KIND: Record<ArtifactKind, number> = {
@@ -53,6 +55,7 @@ export const STEP_FOR_KIND: Record<ArtifactKind, number> = {
   forecastResult: 4,
   planAllocation: 2,
   brief: 2,
+  actionPlan: 5,
 };
 
 export type ArtifactPayload =
@@ -68,7 +71,8 @@ export type ArtifactPayload =
   | { kind: "trackingHealth"; data: TrackingHealthData }
   | { kind: "forecastResult"; data: ForecastResultData }
   | { kind: "planAllocation"; data: PlanAllocationData }
-  | { kind: "brief"; data: BriefData };
+  | { kind: "brief"; data: BriefData }
+  | { kind: "actionPlan"; data: ActionPlanData };
 
 /**
  * Live agent-activity states, surfaced in the UI so "thinking" is dynamic and

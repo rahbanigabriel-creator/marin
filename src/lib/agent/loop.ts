@@ -3,7 +3,8 @@ import { AGENT_STATUS_LABEL, type AgentStatusKey, type ArtifactPayload } from "@
 import { getClient } from "./provider";
 import { TIER_MODEL, type ModelTier } from "./router";
 import { checkGroundedness } from "./oracle";
-import { dispatchTool, briefFromInput, questionsFromInput, TOOLS, type DispatchCtx, type MetricsSource } from "./tools";
+import { dispatchTool, briefFromInput, actionPlanInputFromTool, questionsFromInput, TOOLS, type DispatchCtx, type MetricsSource } from "./tools";
+import { persistActionPlan } from "@/lib/actions/persist";
 import { startLlmTrace, type LlmTrace } from "@/lib/observability/llm-trace";
 
 /**
@@ -139,6 +140,8 @@ export async function* runAgentWithTools(opts: {
   source: MetricsSource;
   /** Prior conversation turns (multi-turn memory), oldest-first. */
   history?: { role: "user" | "assistant"; content: string }[];
+  /** Current workspace — actions are persisted under it (null = not executable). */
+  workspaceId?: string | null;
   signal?: AbortSignal;
 }): AsyncGenerator<AgentEvent> {
   const client = getClient();
@@ -256,6 +259,24 @@ export async function* runAgentWithTools(opts: {
                 ? "Card rendered on the canvas."
                 : "Card needs a title and at least one section — try again.",
               is_error: !card,
+            });
+            continue;
+          }
+          // add_action_plan persists each step (server computes execMode/approval)
+          // and renders the clickable, executable action plan on the canvas.
+          if (tu.name === "add_action_plan") {
+            const planInput = actionPlanInputFromTool(tu.input);
+            if (planInput) {
+              const data = await persistActionPlan(opts.workspaceId ?? null, planInput);
+              yield { kind: "artifact", payload: { kind: "actionPlan", data } };
+            }
+            results.push({
+              type: "tool_result",
+              tool_use_id: tu.id,
+              content: planInput
+                ? "Action plan rendered with executable steps for the user to run."
+                : "Action plan needs a title and at least one step — try again.",
+              is_error: !planInput,
             });
             continue;
           }

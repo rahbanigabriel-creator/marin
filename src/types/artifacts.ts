@@ -193,6 +193,44 @@ export interface BriefData {
   cta?: string;
 }
 
+/* ── Action-OS: the executable action plan (clickable workspace) ───────────── */
+
+/** How a step executes: real API call · prepare-and-open-prefilled · guided/manual. */
+export type ExecMode = "api" | "prepare" | "guided";
+export type ActionStatus = "proposed" | "executing" | "succeeded" | "failed" | "manual";
+
+/** What the AGENT proposes (intent only — it never sets execMode/approval/id). */
+export interface ProposedStep {
+  title: string;
+  description: string; // the full pre-written post / ad brief / SEO fix
+  platform?: string; // ConnectorPlatform key, or omit for SEO/manual
+  kind: string; // post | tweet | ad_draft | page | pin | seo_meta | manual | ...
+  needsAsset?: boolean; // model hint; the server may override
+}
+
+/** What the CANVAS renders — server-enriched, one persisted Action row each. */
+export interface ActionStep {
+  actionId: string; // server-minted; the execute id + idempotency key
+  title: string;
+  description: string;
+  platform?: string;
+  kind: string;
+  execMode: ExecMode; // SERVER-computed from the capability table
+  ctaLabel: string; // "Post" | "Open in LinkedIn ▸" | "Copy brief"
+  requiresApproval: boolean; // SERVER-computed (money / public post)
+  needsAsset: boolean;
+  status: ActionStatus; // starts "proposed"
+}
+
+export interface ActionPlanData {
+  title: string;
+  subtitle?: string;
+  /** (a) current situation summary (e.g. you vs competitors). */
+  situation?: { heading: string; points: string[] }[];
+  /** (b) prioritized, one-by-one executable steps. */
+  steps: ActionStep[];
+}
+
 export interface PlanAllocationData {
   goal: string;
   business: string;

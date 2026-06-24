@@ -34,6 +34,8 @@ model Workspace {
   metricFacts  MetricFact[]
   subscription Subscription?
   usageEvents  UsageEvent[]
+  actions      Action[]
+  assets       Asset[]
 
   @@map("workspaces")
 }
@@ -142,4 +144,52 @@ model UsageEvent {
 
   @@index([workspaceId, createdAt])
   @@map("usage_events")
+}
+
+/// An executable marketing action proposed by the agent (Action-OS). Persisted at
+/// PROPOSE time so the execute endpoint can run by id alone — the click sends only
+/// { actionId }, never a client-trusted payload (prevents a confused-deputy that
+/// could smuggle an inflated budget or rewritten post). `execMode`/`requiresApproval`
+/// are SERVER-computed from the capability table, never the model. Doubles as the
+/// audit log; `id` is the idempotency key (a re-click on a non-"proposed" row
+/// returns the existing row, so one click never double-posts).
+model Action {
+  id               String    @id @default(cuid())
+  workspaceId      String    @map("workspace_id")
+  platform         String? // connector platform key, or null for SEO / manual steps
+  kind             String // post | tweet | ad_draft | page | pin | seo_meta | manual | ...
+  title            String
+  execMode         String    @map("exec_mode") // api | prepare | guided (server-computed)
+  requiresApproval Boolean   @default(true) @map("requires_approval")
+  status           String    @default("proposed") // proposed | executing | succeeded | failed | manual
+  payload          Json // validated action content (description, params) — server-owned
+  result           Json? // executor result (permalink / prepared content), sanitized
+  error            String? // sanitized error message (never tokens)
+  executedBy       String?   @map("executed_by") // clerk user id who clicked
+  executedAt       DateTime? @map("executed_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@map("actions")
+}
+
+/// An uploaded creative asset (image/video) a user attaches to an action. The
+/// bytes live in object storage (storageKey); we never store a public URL —
+/// reads go through an auth-checked route. Graceful without storage configured.
+model Asset {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  kind        String // image | video
+  mimeType    String   @map("mime_type")
+  bytes       Int
+  storageKey  String   @map("storage_key")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@map("assets")
 }
