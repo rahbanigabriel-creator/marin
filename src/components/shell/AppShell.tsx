@@ -19,7 +19,6 @@ import { ConnectionsModal } from "@/components/modals/ConnectionsModal";
 import { OnboardingScreen } from "@/components/screens/OnboardingScreen";
 import { ForecastScreen } from "@/components/screens/ForecastScreen";
 import { ClientsScreen } from "@/components/screens/ClientsScreen";
-import { FirstRunScreen } from "@/components/screens/FirstRunScreen";
 import { WelcomeScreen } from "@/components/screens/WelcomeScreen";
 
 type Screen = "chat" | "onboarding" | "forecast" | "clients";
@@ -73,6 +72,12 @@ function summarizeCards(artifacts: ArtifactPayload[]): string {
   return titles.length ? ` [Rendered canvas card(s): ${titles.join("; ")}]` : "";
 }
 
+function chatTitle(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return "New conversation";
+  return trimmed.length > 34 ? trimmed.slice(0, 32) + "…" : trimmed;
+}
+
 /**
  * Top-level orchestrator. Owns the active persona + dataset, the top-level
  * screen, view mode, the active question + resolved scenario, the agency's
@@ -89,8 +94,9 @@ export function AppShell() {
   const [activeChat, setActiveChat] = useState(0);
   const [activeClient, setActiveClient] = useState<string | null>(null);
   const [founderConfig, setFounderConfig] = useState<ForecastConfig>(DEFAULT_FORECAST);
-  // "auto" = conservative router (Sonnet floor; Haiku for trivial lookups, Opus
-  // for deep strategy). Picking a specific model in the TopBar forces it.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // "auto" = conservative router. Picking a specific model in the composer
+  // forces it; Extra/Opus stays disabled in the UI for now.
   const [model, setModel] = useState("auto");
   // Real product opens on a clean welcome, not a canned auto-answered question.
   // Flips true the first time the user actually asks something.
@@ -102,11 +108,21 @@ export function AppShell() {
   const realProductMode = !DEMO_MODE;
   const realChannels = channels;
   const connectedCount = realChannels.filter((channel) => channel.status === "connected").length;
-  const showFirstRun = realProductMode && connectedCount === 0 && screen === "chat";
-  const idle = realProductMode && screen === "chat" && !showFirstRun && !hasAsked;
+  const idle = realProductMode && screen === "chat" && !hasAsked;
   const sidebarAccount = realProductMode
     ? { name: workspaceName, sub: "Marpin workspace", initials: workspaceName.slice(0, 2).toUpperCase() }
     : dataset.account;
+  const realRecentChats = useMemo(
+    () => [
+      { title: hasAsked ? chatTitle(question) : "New conversation", question: hasAsked ? question : "" },
+      ...turns
+        .slice()
+        .reverse()
+        .map((turn) => ({ title: chatTitle(turn.question), question: turn.question })),
+    ],
+    [hasAsked, question, turns],
+  );
+  const sidebarChats = realProductMode ? realRecentChats : dataset.recentChats;
   // The staged-reveal surface is fed by a real SSE stream (/api/chat) through the
   // shared StreamEvent reducer. `status`/`thinking` carry the live agent activity.
   // Last ~10 turns become the agent's conversational memory (sent to /api/chat).
@@ -129,7 +145,7 @@ export function AppShell() {
     closing,
     dataMode,
   } = useStreamingChat(scenario, {
-    enabled: screen === "chat" && !showFirstRun && !idle,
+    enabled: screen === "chat" && !idle,
     model,
     history,
   });
@@ -176,6 +192,7 @@ export function AppShell() {
     (text: string) => {
       const trimmed = text.trim();
       if (!trimmed) return;
+      setActiveChat(0);
       setActiveClient(null);
       // Archive the just-finished answer into conversation memory before asking
       // the next question (real product = multi-turn; demo stays single-shot).
@@ -198,6 +215,7 @@ export function AppShell() {
   // "New conversation" returns the real product to the clean welcome state
   // rather than re-streaming the previous answer (demo keeps the replay).
   const newChat = useCallback(() => {
+    setActiveChat(0);
     setActiveClient(null);
     setTurns([]);
     if (realProductMode) {
@@ -209,15 +227,49 @@ export function AppShell() {
 
   const selectChat = useCallback(
     (index: number) => {
-      setActiveChat(index);
       setActiveClient(null);
+      if (realProductMode) {
+        // index 0 is the live conversation already on screen — keep it as-is so
+        // clicking it never discards the current answer.
+        if (index <= 0) {
+          setActiveChat(0);
+          return;
+        }
+        // index >= 1 maps into the reversed `turns` list (realRecentChats).
+        const turnIndex = turns.length - index;
+        const selected = turns[turnIndex];
+        if (!selected) {
+          setActiveChat(0);
+          return;
+        }
+        // Reopen the picked turn as the live conversation: archive the current
+        // answer (lossless) and lift the picked turn out of history so it isn't
+        // duplicated. Older turns stay as the agent's memory.
+        setTurns((prev) => {
+          const next = prev.filter((_, i) => i !== turnIndex);
+          if (hasAsked && typed.trim()) {
+            const askedQ = choices
+              ? ` (asked: ${choices.questions.map((qq) => qq.question).join("; ")})`
+              : "";
+            next.push({ question, answer: typed.trim() + askedQ + summarizeCards(artifacts) });
+          }
+          return next;
+        });
+        setActiveChat(0);
+        setQuestion(selected.question);
+        setScenario(liveScenario(selected.question, persona));
+        setHasAsked(true);
+        replay();
+        return;
+      }
+      setActiveChat(index);
       const q = PERSONAS[persona].recentChats[index].question;
       setQuestion(q);
       setScenario(resolveScenario(q, persona, SCENARIOS));
       setHasAsked(true);
       replay();
     },
-    [persona, replay],
+    [persona, realProductMode, replay, turns, hasAsked, typed, question, artifacts, choices],
   );
 
   // Switching persona swaps the dataset; the agency lands on its client roster.
@@ -252,7 +304,6 @@ export function AppShell() {
   const completeOnboarding = useCallback(
     (intake: OnboardingIntake) => {
       const sc = buildStarterPlan(intake);
-      const names = ["Google Ads", "Meta Ads", "GA4", "Search Console", "TikTok Ads", "LinkedIn Ads"];
       setPersona("founder");
       // A freshly-onboarded founder only has the channels they actually picked.
       if (!realProductMode) {
@@ -276,6 +327,10 @@ export function AppShell() {
   );
 
   const connectChannel = useCallback((channel: Channel) => {
+    if (channel.configured === false) {
+      setModalOpen(true);
+      return;
+    }
     if (channel.platform) {
       window.location.href = `/api/connect/${channel.platform}`;
       return;
@@ -294,22 +349,20 @@ export function AppShell() {
       <Sidebar
         activeChat={activeChat}
         onSelectChat={selectChat}
-        recentChats={dataset.recentChats}
-        channels={realChannels}
+        recentChats={sidebarChats}
         account={sidebarAccount}
         showClients={persona === "agency"}
         onViewClients={() => setScreen("clients")}
         onNewChat={newChat}
         onStartPlan={() => (realProductMode ? setModalOpen(true) : setScreen("onboarding"))}
         onOpenModal={() => setModalOpen(true)}
-        hideRecent={realProductMode}
-        primaryActionLabel={realProductMode ? "Connect data" : "New plan"}
+        primaryActionLabel={realProductMode ? "Manage connections" : "New plan"}
+        collapsed={sidebarCollapsed}
+        onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
       />
 
       <main className="flex min-w-0 flex-1 flex-col">
-        {showFirstRun ? (
-          <FirstRunScreen channels={realChannels} onConnect={connectChannel} />
-        ) : screen === "onboarding" ? (
+        {screen === "onboarding" ? (
           <OnboardingScreen onComplete={completeOnboarding} onCancel={() => setScreen("chat")} />
         ) : screen === "forecast" ? (
           <ForecastScreen
@@ -330,16 +383,18 @@ export function AppShell() {
               chatControls={screen === "chat"}
               activeClient={screen === "chat" ? activeClient : null}
               showPersonaSwitcher={!realProductMode}
-              model={model}
-              onModelChange={setModel}
             />
 
             {idle ? (
               <WelcomeScreen
                 onSend={ask}
                 onSuggest={ask}
-                suggestions={realProductMode ? liveSuggestions : dataset.suggestions}
+                // First-run is a clean URL prompt — no strategy chips fighting the
+                // "drop your website" intent. (Demo keeps its replay chips.)
+                suggestions={realProductMode ? [] : dataset.suggestions}
                 connectedCount={connectedCount}
+                model={model}
+                onModelChange={setModel}
               />
             ) : screen === "clients" ? (
               <ClientsScreen
@@ -367,6 +422,10 @@ export function AppShell() {
                 dataMode={dataMode}
                 onOpenConnections={() => setModalOpen(true)}
                 connectedCount={connectedCount}
+                channels={realChannels}
+                onConnect={connectChannel}
+                model={model}
+                onModelChange={setModel}
               />
             )}
           </>

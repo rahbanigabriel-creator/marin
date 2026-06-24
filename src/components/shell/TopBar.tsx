@@ -18,16 +18,7 @@ interface TopBarProps {
   /** agency: the client the workspace is currently scoped to */
   activeClient?: string | null;
   showPersonaSwitcher?: boolean;
-  /** selected model id + setter for the model picker (chat only). */
-  model?: string;
-  onModelChange?: (model: string) => void;
 }
-
-const MODEL_OPTIONS: Array<{ id: string; label: string }> = [
-  { id: "auto", label: "Auto" },
-  { id: "claude-haiku-4-5", label: "Haiku 4.5" },
-  { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
-];
 
 export function TopBar({
   onReplay,
@@ -39,8 +30,6 @@ export function TopBar({
   chatControls = true,
   activeClient = null,
   showPersonaSwitcher = true,
-  model,
-  onModelChange,
 }: TopBarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const connected = channels.filter((c) => c.status === "connected").map((c) => c.name);
@@ -131,22 +120,6 @@ export function TopBar({
       </div>
       {chatControls && (
       <div className="flex flex-none items-center gap-[10px]">
-        {onModelChange && (
-          <select
-            value={model}
-            onChange={(e) => onModelChange(e.target.value)}
-            aria-label="Model"
-            title="Choose the model for this conversation"
-            className="cursor-pointer rounded-[9px] border border-line-1 bg-surface-chip font-sans text-[12px] font-semibold text-ink-700"
-            style={{ padding: "7px 8px" }}
-          >
-            {MODEL_OPTIONS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-        )}
         <button
           type="button"
           onClick={onForecast}

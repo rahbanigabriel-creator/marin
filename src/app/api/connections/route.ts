@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getCurrentWorkspace, isAuthConfigured } from "@/lib/auth";
 import { isDatabaseConfigured, prisma } from "@/lib/db";
-import { CONNECTORS, CONNECTOR_PLATFORMS } from "@/lib/connectors/registry";
+import { CONNECTORS, CONNECTOR_PLATFORMS, isConnectorConfigured } from "@/lib/connectors/registry";
 import { hasLiveData } from "@/lib/metrics/source";
 
 export const runtime = "nodejs";
@@ -31,10 +31,12 @@ export async function GET(): Promise<Response> {
   const byPlatform = new Map(rows.map((row) => [row.platform, row]));
   const connections = CONNECTOR_PLATFORMS.map((platform) => {
     const row = byPlatform.get(platform);
+    const configured = isConnectorConfigured(platform);
     return {
       platform,
       name: CONNECTORS[platform].label,
       category: CONNECTORS[platform].category,
+      configured,
       status: row?.status ?? "disconnected",
       externalAccountId: row?.externalAccountId,
       displayName: row?.displayName,

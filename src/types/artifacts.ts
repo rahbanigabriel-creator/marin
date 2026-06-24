@@ -124,6 +124,28 @@ export interface PlatformComparisonData {
   }[];
 }
 
+/**
+ * Market scan / competitor landscape — the hero strategy card. Ranked share-of-
+ * market bars (the user's own row highlighted), a one-line "Marpin's read", and
+ * the concrete openings where they can win. The agent fills this from live
+ * research; it is the live-agent analogue of the mockup's Market Scan canvas.
+ */
+export interface MarketScanData {
+  title: string;
+  /** Marpin's one-line take, rendered as the dark callout. */
+  read: string;
+  /** Optional headline stats (market size, your share, growth). */
+  stats?: { label: string; value: string; sub?: string }[];
+  /** Ranked competitors by share of market; the user's row sets you:true. */
+  field: { name: string; sharePct: number; you?: boolean }[];
+  /** Optional momentum line — the user's growth vs the market's. */
+  momentum?: { label: string; you: string; market: string };
+  /** Concrete openings — where they can win. */
+  openings?: string[];
+  /** Optional closing next-step (phrased as a proposal if it spends/posts). */
+  cta?: string;
+}
+
 export type VerdictStatus = "healthy" | "at-risk" | "declining";
 
 export interface HealthVerdictData {

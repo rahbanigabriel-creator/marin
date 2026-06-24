@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { ActionPlanData, ActionStatus, ActionStep } from "@/types/artifacts";
+import type { Channel } from "@/types/views";
 import { ArtifactShell } from "./ArtifactShell";
 
 type StepState = {
@@ -11,7 +12,37 @@ type StepState = {
   assetUrl?: string;
   uploading?: boolean;
   uploadError?: string;
+  copied?: boolean;
 };
+
+const PLATFORM_LABELS: Record<string, string> = {
+  google_ads: "Google Ads",
+  meta_ads: "Meta",
+  tiktok_ads: "TikTok",
+  linkedin_ads: "LinkedIn",
+  microsoft_ads: "Microsoft Ads",
+  pinterest_ads: "Pinterest",
+  snapchat_ads: "Snapchat",
+  reddit_ads: "Reddit",
+  x_ads: "X",
+  amazon_ads: "Amazon Ads",
+  apple_search_ads: "Apple Search Ads",
+};
+
+function platformLabel(step: ActionStep, channel?: Channel): string {
+  return (channel?.name ?? (step.platform ? PLATFORM_LABELS[step.platform] : undefined) ?? "platform").replace(
+    /\s+Ads$/,
+    "",
+  );
+}
+
+function copyLabel(step: ActionStep): string {
+  const kind = step.kind.toLowerCase();
+  if (kind === "tweet") return "Copy tweet";
+  if (kind === "post" || kind === "video" || kind === "pin") return "Copy post";
+  if (kind === "page") return "Copy page";
+  return "Copy brief";
+}
 
 /**
  * The executable action plan — the operating surface. Situation summary, then
@@ -20,22 +51,41 @@ type StepState = {
  * api → run it via /api/actions/execute (server runs by actionId only). Owns its
  * own step state so status updates are local, decoupled from the answer stream.
  */
-export function CanvasActionPlan({ data }: { data: ActionPlanData }) {
+export function CanvasActionPlan({
+  data,
+  channels,
+  onConnect,
+}: {
+  data: ActionPlanData;
+  channels: Channel[];
+  onConnect: (channel: Channel) => void;
+}) {
   const [states, setStates] = useState<Record<string, StepState>>(() =>
     Object.fromEntries(data.steps.map((s) => [s.actionId, { status: s.status } as StepState])),
   );
 
   const patch = (id: string, s: StepState) => setStates((m) => ({ ...m, [id]: s }));
 
+  async function copy(step: ActionStep, markDone: boolean) {
+    try {
+      await navigator.clipboard.writeText(step.description);
+    } catch {
+      /* clipboard blocked — the text is on screen anyway */
+    }
+    if (markDone) {
+      patch(step.actionId, { status: "manual", copied: true });
+      return;
+    }
+    setStates((m) => ({
+      ...m,
+      [step.actionId]: { ...(m[step.actionId] ?? { status: step.status }), copied: true },
+    }));
+  }
+
   async function run(step: ActionStep) {
     // prepare → just copy the ready-made content; nothing leaves the browser.
     if (step.execMode === "prepare") {
-      try {
-        await navigator.clipboard.writeText(step.description);
-      } catch {
-        /* clipboard blocked — the text is on screen anyway */
-      }
-      patch(step.actionId, { status: "manual" });
+      await copy(step, true);
       return;
     }
     patch(step.actionId, { status: "executing" });
@@ -128,6 +178,12 @@ export function CanvasActionPlan({ data }: { data: ActionPlanData }) {
           const st = states[step.actionId] ?? { status: step.status };
           const done = st.status === "succeeded" || st.status === "manual";
           const running = st.status === "executing";
+          const channel = step.platform ? channels.find((c) => c.platform === step.platform) : undefined;
+          const platformStep = Boolean(step.platform);
+          const connected = Boolean(channel && channel.status === "connected");
+          const needsConnection = platformStep && !connected;
+          const canUseAsset = step.needsAsset && step.execMode === "api" && connected;
+          const label = platformLabel(step, channel);
           return (
             <div
               key={step.actionId}
@@ -139,7 +195,7 @@ export function CanvasActionPlan({ data }: { data: ActionPlanData }) {
                 <div className="mt-[3px] whitespace-pre-wrap font-sans text-[12.5px] leading-[1.5] text-ink-450">
                   {step.description}
                 </div>
-                {step.needsAsset && !done && (
+                {canUseAsset && !done && (
                   <div className="mt-[7px] flex items-center gap-[8px]">
                     {st.assetUrl ? (
                       <span className="font-sans text-[11.5px] font-medium text-pos-700">✓ asset attached</span>
@@ -191,19 +247,42 @@ export function CanvasActionPlan({ data }: { data: ActionPlanData }) {
                       className="rounded-chip font-sans text-[12px] font-semibold"
                       style={{ color: "#4C6B40", background: "#E7EEE0", padding: "6px 12px" }}
                     >
-                      ✓ {step.execMode === "prepare" ? "Copied" : "Done"}
+                      ✓ {st.copied || step.execMode === "prepare" ? "Copied" : "Done"}
                     </span>
                   )
                 ) : (
-                  <button
-                    type="button"
-                    disabled={running}
-                    onClick={() => run(step)}
-                    className="cursor-pointer whitespace-nowrap rounded-chip font-sans text-[12px] font-semibold disabled:opacity-60"
-                    style={{ border: "none", background: "#2B2722", color: "#F2F1EC", padding: "6px 13px" }}
-                  >
-                    {running ? "Working…" : step.ctaLabel}
-                  </button>
+                  <div className="flex flex-col items-end gap-[6px]">
+                    {needsConnection && channel ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => onConnect(channel)}
+                          className="cursor-pointer whitespace-nowrap rounded-chip font-sans text-[12px] font-semibold"
+                          style={{ border: "none", background: "#2B2722", color: "#F2F1EC", padding: "6px 13px" }}
+                        >
+                          Connect {label}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => copy(step, false)}
+                          className="cursor-pointer whitespace-nowrap rounded-chip border border-line-2 bg-surface-card font-sans text-[11.5px] font-semibold text-ink-500"
+                          style={{ padding: "5px 10px" }}
+                        >
+                          {st.copied ? "Copied" : copyLabel(step)}
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={running}
+                        onClick={() => run(step)}
+                        className="cursor-pointer whitespace-nowrap rounded-chip font-sans text-[12px] font-semibold disabled:opacity-60"
+                        style={{ border: "none", background: "#2B2722", color: "#F2F1EC", padding: "6px 13px" }}
+                      >
+                        {running ? "Working…" : step.execMode === "prepare" ? copyLabel(step) : step.ctaLabel}
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             </div>

@@ -8,6 +8,7 @@ export interface Channel {
   name: string;
   status: ChannelStatus;
   platform?: ConnectorPlatform;
+  configured?: boolean;
   /** Paid ads vs organic/SEO — drives the channel grouping in the sidebar. */
   category?: ConnectorCategory;
   externalAccountId?: string;

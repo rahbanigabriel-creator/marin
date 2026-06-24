@@ -3,7 +3,7 @@ import { AGENT_STATUS_LABEL, type AgentStatusKey, type ArtifactPayload } from "@
 import { getClient } from "./provider";
 import { TIER_MODEL, type ModelTier } from "./router";
 import { checkGroundedness } from "./oracle";
-import { dispatchTool, briefFromInput, actionPlanInputFromTool, questionsFromInput, TOOLS, type DispatchCtx, type MetricsSource } from "./tools";
+import { dispatchTool, briefFromInput, marketScanFromInput, actionPlanInputFromTool, questionsFromInput, TOOLS, type DispatchCtx, type MetricsSource } from "./tools";
 import { persistActionPlan } from "@/lib/actions/persist";
 import { startLlmTrace, type LlmTrace } from "@/lib/observability/llm-trace";
 
@@ -259,6 +259,21 @@ export async function* runAgentWithTools(opts: {
                 ? "Card rendered on the canvas."
                 : "Card needs a title and at least one section — try again.",
               is_error: !card,
+            });
+            continue;
+          }
+          // add_market_scan renders the hero competitor/market card — intercepted
+          // here (yield the artifact straight through) like add_canvas_card.
+          if (tu.name === "add_market_scan") {
+            const scan = marketScanFromInput(tu.input);
+            if (scan) yield { kind: "artifact", payload: scan };
+            results.push({
+              type: "tool_result",
+              tool_use_id: tu.id,
+              content: scan
+                ? "Market scan rendered on the canvas."
+                : "Market scan needs a title, a read, and at least two field rows — try again.",
+              is_error: !scan,
             });
             continue;
           }
