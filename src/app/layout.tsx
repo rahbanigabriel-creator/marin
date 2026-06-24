@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Hanken_Grotesk, Newsreader, JetBrains_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
@@ -30,10 +30,69 @@ const jetbrainsMono = JetBrains_Mono({
   display: "swap",
 });
 
+const SITE_URL = "https://www.marpin.ai";
+const TITLE = "Marpin — AI Marketing Copilot";
+const DESCRIPTION =
+  "Marpin is your AI marketing copilot. Drop your website and get a live market scan, competitor analysis, and a one-click campaign plan across Google Ads, Meta, TikTok, LinkedIn, GA4 and more.";
+
 export const metadata: Metadata = {
-  title: "Marpin — Marketing Copilot",
-  description:
-    "Marpin is an AI marketing copilot. Ask in natural language; get live, data-connected answers across Google Ads, Meta, GA4 and more.",
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: TITLE,
+    template: "%s · Marpin",
+  },
+  description: DESCRIPTION,
+  applicationName: "Marpin",
+  keywords: [
+    "AI marketing copilot",
+    "AI CMO",
+    "marketing operating system",
+    "competitor analysis tool",
+    "market research AI",
+    "campaign planning",
+    "Google Ads",
+    "Meta Ads",
+    "TikTok Ads",
+    "LinkedIn Ads",
+    "SEO",
+    "GA4",
+    "growth marketing",
+  ],
+  authors: [{ name: "Marpin" }],
+  creator: "Marpin",
+  publisher: "Marpin",
+  alternates: { canonical: "/" },
+  category: "technology",
+  openGraph: {
+    type: "website",
+    siteName: "Marpin",
+    url: SITE_URL,
+    title: TITLE,
+    description: DESCRIPTION,
+    locale: "en_US",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: TITLE,
+    description: DESCRIPTION,
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+      "max-video-preview": -1,
+    },
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#9a3d63",
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({

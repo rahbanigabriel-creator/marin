@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Channel, ChatTurn } from "@/types/views";
 import type { ArtifactPayload } from "@/lib/streaming/events";
 import type { Persona, Scenario } from "@/types/scenario";
@@ -211,6 +211,21 @@ export function AppShell() {
     },
     [persona, realProductMode, replay, hasAsked, typed, question, artifacts, choices],
   );
+
+  // Deep-link from the landing hero: /app?q=<website> auto-starts the analysis,
+  // then strips the param so a reload doesn't re-run it. Fires once.
+  const didDeepLink = useRef(false);
+  useEffect(() => {
+    if (didDeepLink.current) return;
+    const q = new URLSearchParams(window.location.search).get("q");
+    if (q && q.trim()) {
+      didDeepLink.current = true;
+      ask(q.trim());
+      const url = new URL(window.location.href);
+      url.searchParams.delete("q");
+      window.history.replaceState({}, "", url.pathname + url.search);
+    }
+  }, [ask]);
 
   // "New conversation" returns the real product to the clean welcome state
   // rather than re-streaming the previous answer (demo keeps the replay).

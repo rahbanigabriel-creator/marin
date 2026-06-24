@@ -36,6 +36,11 @@ function isClerkConfigured(): boolean {
  * Everything else requires a signed-in user.
  */
 const isPublicRoute = createRouteMatcher([
+  "/", // public marketing landing (signed-out) — crawlable for SEO
+  "/robots.txt",
+  "/sitemap.xml",
+  "/opengraph-image(.*)",
+  "/twitter-image(.*)",
   "/sign-in(.*)",
   "/sign-up(.*)",
   "/api/webhooks(.*)",

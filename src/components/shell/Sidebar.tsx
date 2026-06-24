@@ -52,12 +52,15 @@ export function Sidebar({
           collapsed ? "flex-col justify-center p-[4px_0_14px]" : "p-[4px_8px_16px]"
         }`}
       >
-        <div
-          className="flex items-center justify-center font-serif text-[16px] font-semibold"
-          style={{ width: 28, height: 28, borderRadius: 8, background: "#9A3D63", color: "#FBF6EE" }}
-        >
-          m
-        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/marpin-logo.png"
+          alt="Marpin"
+          width={30}
+          height={30}
+          className="flex-none object-contain"
+          style={{ width: 30, height: 30 }}
+        />
         {!collapsed && (
           <>
             <span className="font-serif text-[18px] font-semibold tracking-[0] text-ink-900">
