@@ -24,6 +24,7 @@
     "@stripe/stripe-js": "^9.8.0",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.0",
+    "@vercel/blob": "^2.4.1",
     "eslint-config-next": "^15.5.19",
     "inngest": "^3.54.2",
     "langfuse": "^3.38.20",

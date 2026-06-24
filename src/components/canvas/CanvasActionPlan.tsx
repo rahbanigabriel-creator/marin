@@ -4,7 +4,14 @@ import { useState } from "react";
 import type { ActionPlanData, ActionStatus, ActionStep } from "@/types/artifacts";
 import { ArtifactShell } from "./ArtifactShell";
 
-type StepState = { status: ActionStatus; resultUrl?: string; error?: string };
+type StepState = {
+  status: ActionStatus;
+  resultUrl?: string;
+  error?: string;
+  assetUrl?: string;
+  uploading?: boolean;
+  uploadError?: string;
+};
 
 /**
  * The executable action plan — the operating surface. Situation summary, then
@@ -58,6 +65,30 @@ export function CanvasActionPlan({ data }: { data: ActionPlanData }) {
     }
   }
 
+  async function uploadAsset(actionId: string, file: File) {
+    setStates((m) => ({
+      ...m,
+      [actionId]: { ...(m[actionId] ?? { status: "proposed" }), uploading: true, uploadError: undefined },
+    }));
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/assets", { method: "POST", body: fd });
+      const json = (await res.json()) as { ok?: boolean; url?: string; reason?: string };
+      setStates((m) => {
+        const prev = m[actionId] ?? { status: "proposed" as ActionStatus };
+        return json.ok
+          ? { ...m, [actionId]: { ...prev, uploading: false, assetUrl: json.url } }
+          : { ...m, [actionId]: { ...prev, uploading: false, uploadError: json.reason || "Upload failed." } };
+      });
+    } catch {
+      setStates((m) => ({
+        ...m,
+        [actionId]: { ...(m[actionId] ?? { status: "proposed" }), uploading: false, uploadError: "Upload failed." },
+      }));
+    }
+  }
+
   return (
     <ArtifactShell className="rounded-card border border-line-3 bg-surface-card p-[18px_20px]">
       <span
@@ -108,9 +139,33 @@ export function CanvasActionPlan({ data }: { data: ActionPlanData }) {
                 <div className="mt-[3px] whitespace-pre-wrap font-sans text-[12.5px] leading-[1.5] text-ink-450">
                   {step.description}
                 </div>
-                {step.needsAsset && (
-                  <div className="mt-[5px] font-sans text-[11.5px] text-ink-300">
-                    Needs an image/video — asset upload is coming; use the brief for now.
+                {step.needsAsset && !done && (
+                  <div className="mt-[7px] flex items-center gap-[8px]">
+                    {st.assetUrl ? (
+                      <span className="font-sans text-[11.5px] font-medium text-pos-700">✓ asset attached</span>
+                    ) : (
+                      <label
+                        className="inline-flex cursor-pointer items-center gap-[6px] rounded-chip border border-line-2 bg-surface-card font-sans text-[11.5px] font-medium text-ink-500"
+                        style={{ padding: "5px 10px" }}
+                      >
+                        {st.uploading ? "Uploading…" : "+ Attach image / video"}
+                        <input
+                          type="file"
+                          accept="image/*,video/*"
+                          className="hidden"
+                          disabled={st.uploading}
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) void uploadAsset(step.actionId, f);
+                          }}
+                        />
+                      </label>
+                    )}
+                    {st.uploadError && (
+                      <span className="font-sans text-[11.5px]" style={{ color: "#B23A4B" }}>
+                        {st.uploadError}
+                      </span>
+                    )}
                   </div>
                 )}
                 {st.error && (
