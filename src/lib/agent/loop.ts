@@ -3,7 +3,7 @@ import { AGENT_STATUS_LABEL, type AgentStatusKey, type ArtifactPayload } from "@
 import { getClient } from "./provider";
 import { TIER_MODEL, type ModelTier } from "./router";
 import { checkGroundedness } from "./oracle";
-import { dispatchTool, briefFromInput, choicesFromInput, TOOLS, type DispatchCtx, type MetricsSource } from "./tools";
+import { dispatchTool, briefFromInput, questionsFromInput, TOOLS, type DispatchCtx, type MetricsSource } from "./tools";
 import { startLlmTrace, type LlmTrace } from "@/lib/observability/llm-trace";
 
 /**
@@ -33,7 +33,7 @@ export type AgentEvent =
   | { kind: "status"; key: AgentStatusKey; label: string }
   | { kind: "thinking"; text: string }
   | { kind: "artifact"; payload: ArtifactPayload }
-  | { kind: "choices"; question: string; options: string[] }
+  | { kind: "choices"; questions: { question: string; options: string[] }[] }
   | { kind: "text"; text: string };
 
 // Headroom for a full zero-connector research turn: retrieve_doctrine (1) +
@@ -261,16 +261,16 @@ export async function* runAgentWithTools(opts: {
           }
           // ask_question renders clickable answer options in the chat — intercept
           // and yield them; the model should then write at most a one-line lead-in.
-          if (tu.name === "ask_question") {
-            const choices = choicesFromInput(tu.input);
-            if (choices) yield { kind: "choices", question: choices.question, options: choices.options };
+          if (tu.name === "ask_questions") {
+            const parsed = questionsFromInput(tu.input);
+            if (parsed) yield { kind: "choices", questions: parsed.questions };
             results.push({
               type: "tool_result",
               tool_use_id: tu.id,
-              content: choices
-                ? "Question shown to the user with clickable options. STOP now and wait for their reply — do not answer for them or call this again."
-                : "ask_question needs a question and at least one option — try again.",
-              is_error: !choices,
+              content: parsed
+                ? "Questions shown to the user with clickable options. STOP now and wait for their reply — do not answer for them or call this again."
+                : "ask_questions needs at least one question with options — try again.",
+              is_error: !parsed,
             });
             continue;
           }

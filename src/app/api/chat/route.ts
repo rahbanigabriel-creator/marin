@@ -255,9 +255,9 @@ export async function POST(req: Request): Promise<Response> {
                 send({ type: "artifact", payload: ev.payload });
                 liveArtifacts = true;
               } else if (ev.kind === "choices") {
-                // Clarifying question with clickable options — counts as output so
+                // Clarifying questions with clickable options — counts as output so
                 // the offline fallback lead never fires on a pure question turn.
-                send({ type: "choices", question: ev.question, options: ev.options });
+                send({ type: "choices", questions: ev.questions });
                 streamed = true;
               } else {
                 send({ type: "text-delta", text: ev.text });

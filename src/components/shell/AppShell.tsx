@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Channel, ChatTurn, Mode } from "@/types/views";
+import type { Channel, ChatTurn } from "@/types/views";
 import type { ArtifactPayload } from "@/lib/streaming/events";
 import type { Persona, Scenario } from "@/types/scenario";
 import { PERSONAS } from "@/lib/data/personas";
@@ -15,8 +15,6 @@ import { useStreamingChat } from "@/hooks/useStreamingChat";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { SplitView } from "@/components/views/SplitView";
-import { ThreadView } from "@/components/views/ThreadView";
-import { ReportView } from "@/components/views/ReportView";
 import { ConnectionsModal } from "@/components/modals/ConnectionsModal";
 import { OnboardingScreen } from "@/components/screens/OnboardingScreen";
 import { ForecastScreen } from "@/components/screens/ForecastScreen";
@@ -83,7 +81,6 @@ function summarizeCards(artifacts: ArtifactPayload[]): string {
 export function AppShell() {
   const [persona, setPersona] = useState<Persona>("founder");
   const [screen, setScreen] = useState<Screen>("chat");
-  const [mode, setMode] = useState<Mode>("split");
   const [scenario, setScenario] = useState<Scenario>(() => defaultScenarioFor("founder", SCENARIOS));
   const [question, setQuestion] = useState(scenario.question);
   const [channels, setChannels] = useState<Channel[]>(REAL_CONNECTOR_CHANNELS);
@@ -184,7 +181,7 @@ export function AppShell() {
       // the next question (real product = multi-turn; demo stays single-shot).
       if (realProductMode && hasAsked && typed.trim()) {
         const prevQ = question;
-        const askedQ = choices ? ` (asked: ${choices.question})` : "";
+        const askedQ = choices ? ` (asked: ${choices.questions.map((q) => q.question).join("; ")})` : "";
         const prevA = typed.trim() + askedQ + summarizeCards(artifacts);
         setTurns((prev) => [...prev, { question: prevQ, answer: prevA }]);
       }
@@ -245,7 +242,6 @@ export function AppShell() {
       setActiveClient(c.name);
       setQuestion(c.question);
       setScenario(buildClientScenario(c));
-      setMode("split");
       setScreen("chat");
       setHasAsked(true);
       replay();
@@ -325,8 +321,6 @@ export function AppShell() {
         ) : (
           <>
             <TopBar
-              mode={mode}
-              onSetMode={setMode}
               onReplay={replay}
               title={idle ? "New conversation" : screen === "clients" ? "Clients" : scenario.title}
               channels={realChannels}
@@ -353,7 +347,7 @@ export function AppShell() {
                 workspace={dataset.workspace}
                 onOpenClient={openClient}
               />
-            ) : mode === "split" ? (
+            ) : (
               <SplitView
                 step={step}
                 turns={turns}
@@ -373,44 +367,6 @@ export function AppShell() {
                 dataMode={dataMode}
                 onOpenConnections={() => setModalOpen(true)}
                 connectedCount={connectedCount}
-              />
-            ) : mode === "thread" ? (
-              <ThreadView
-                step={step}
-                turns={turns}
-                choices={choices}
-                onChoose={ask}
-                typed={typed}
-                status={status}
-                thinking={thinking}
-                question={question}
-                scenario={scenario}
-                artifacts={artifacts}
-                chips={chips}
-                closing={closing}
-                dataMode={dataMode}
-                onSend={ask}
-                onSuggest={ask}
-                suggestions={realProductMode ? liveSuggestions : dataset.suggestions}
-                connectedCount={connectedCount}
-              />
-            ) : (
-              <ReportView
-                step={step}
-                typed={typed}
-                question={question}
-                scenario={scenario}
-                workspace={
-                  realProductMode
-                    ? workspaceName
-                    : persona === "agency" && activeClient
-                      ? activeClient
-                      : dataset.workspace
-                }
-                artifacts={artifacts}
-                closing={closing}
-                dataMode={dataMode}
-                onOpenConnections={() => setModalOpen(true)}
               />
             )}
           </>

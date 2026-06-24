@@ -1,13 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import type { Channel, Mode } from "@/types/views";
+import type { Channel } from "@/types/views";
 import type { Persona } from "@/types/scenario";
 import { PERSONAS, PERSONA_ORDER } from "@/lib/data/personas";
 
 interface TopBarProps {
-  mode: Mode;
-  onSetMode: (mode: Mode) => void;
   onReplay: () => void;
   /** active conversation title */
   title: string;

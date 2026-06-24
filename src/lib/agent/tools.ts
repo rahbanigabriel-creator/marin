@@ -32,7 +32,7 @@ export const TOOL_SCOPE: Record<string, ToolScope> = {
   marketing_playbook: "doctrine",
   get_account_metrics: "internal",
   add_canvas_card: "doctrine",
-  ask_question: "doctrine",
+  ask_questions: "doctrine",
 };
 
 export const TOOLS: Anthropic.Tool[] = [
@@ -97,23 +97,33 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
-    name: "ask_question",
+    name: "ask_questions",
     description:
-      "When you genuinely need ONE quick piece of context before you can give a great answer, ask it with THIS instead of writing the question as prose — it renders your question with clickable answer buttons so the user can just tap. Give 2–4 short, concrete, distinct options that cover the likely answers (the user can also type their own). Use it only for a truly underspecified ask, never to stall and never when you can already act. After calling it, write at most a one-line lead-in and STOP — wait for their pick; do not answer for them.",
+      "Ask the user 1–3 quick multiple-choice questions IN ONE PANEL (clickable buttons, so they tap instead of typing). Use this for the PARAMETERS you need before acting — e.g. monthly budget, target market / geography, primary goal. ALWAYS make the LAST option 'Decide for me' so the user can offload the call. Do NOT use this to ask for their website or a free-text description — for that just ask in one plain sentence (no tool). Critically: you can NEVER build a real marketing strategy without budget + target market, so once the business is known and the user wants a strategy/plan, ask those here BEFORE producing it (in one panel, not one at a time). After calling it, write at most a one-line lead-in and STOP — wait for their answers.",
     input_schema: {
       type: "object",
       properties: {
-        question: {
-          type: "string",
-          description: "The single question to ask, in your own voice (e.g. 'What stage is the business at?').",
-        },
-        options: {
+        questions: {
           type: "array",
-          items: { type: "string" },
-          description: "2–4 short, distinct answer options the user can click.",
+          description: "1–3 questions, each with 2–4 short options. Always make the last option 'Decide for me'.",
+          items: {
+            type: "object",
+            properties: {
+              question: {
+                type: "string",
+                description: "The question in your own voice (e.g. \"What's your monthly budget?\").",
+              },
+              options: {
+                type: "array",
+                items: { type: "string" },
+                description: "2–4 short options; make the last one 'Decide for me'.",
+              },
+            },
+            required: ["question", "options"],
+          },
         },
       },
-      required: ["question", "options"],
+      required: ["questions"],
     },
   },
   {
@@ -177,17 +187,27 @@ export function briefFromInput(input: unknown): { kind: "brief"; data: BriefData
  * Coerce an `ask_question` tool input into a validated question + clickable
  * options (the Claude-style multiple-choice prompt), or null if unusable.
  */
-export function choicesFromInput(input: unknown): { question: string; options: string[] } | null {
+export function questionsFromInput(
+  input: unknown,
+): { questions: { question: string; options: string[] }[] } | null {
   const o = (input ?? {}) as Record<string, unknown>;
-  const question = typeof o.question === "string" ? o.question.trim() : "";
-  const options = Array.isArray(o.options)
-    ? o.options
-        .filter((x): x is string => typeof x === "string" && x.trim().length > 0)
-        .map((x) => x.trim())
-        .slice(0, 5)
-    : [];
-  if (!question || options.length === 0) return null;
-  return { question, options };
+  const raw = Array.isArray(o.questions) ? o.questions : [];
+  const questions = raw
+    .map((q) => {
+      const obj = (q ?? {}) as Record<string, unknown>;
+      const question = typeof obj.question === "string" ? obj.question.trim() : "";
+      const options = Array.isArray(obj.options)
+        ? obj.options
+            .filter((x): x is string => typeof x === "string" && x.trim().length > 0)
+            .map((x) => x.trim())
+            .slice(0, 5)
+        : [];
+      return { question, options };
+    })
+    .filter((q) => q.question.length > 0 && q.options.length > 0)
+    .slice(0, 3);
+  if (questions.length === 0) return null;
+  return { questions };
 }
 
 /** Per-turn dispatch state. Retained for tracing/telemetry; no longer gates tools. */
@@ -248,13 +268,13 @@ export async function dispatchTool(
     };
   }
 
-  if (name === "ask_question") {
+  if (name === "ask_questions") {
     // The loop intercepts this to render clickable options; defensive fallback.
-    const ok = choicesFromInput(input) !== null;
+    const ok = questionsFromInput(input) !== null;
     return {
       content: ok
-        ? "Question shown to the user with clickable options."
-        : "ask_question needs a question and at least one option.",
+        ? "Questions shown to the user with clickable options."
+        : "ask_questions needs at least one question with options.",
       isError: !ok,
     };
   }

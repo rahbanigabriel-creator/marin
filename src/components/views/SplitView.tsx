@@ -25,8 +25,8 @@ interface SplitViewProps {
   onSend: (text: string) => void;
   onSuggest: (text: string) => void;
   suggestions: string[];
-  /** a clarifying question + clickable options the agent is asking, if any */
-  choices: { question: string; options: string[] } | null;
+  /** clarifying questions + clickable options the agent is asking, if any */
+  choices: { questions: { question: string; options: string[] }[] } | null;
   onChoose: (text: string) => void;
   /** whether the workspace pane reflects live (DB-backed) or sample data */
   dataMode: DataMode;
@@ -73,9 +73,7 @@ export function SplitView({
             closing={closing}
             variant="split"
           />
-          {choices && (
-            <ChoiceChips question={choices.question} options={choices.options} onChoose={onChoose} />
-          )}
+          {choices && <ChoiceChips questions={choices.questions} onChoose={onChoose} />}
         </div>
         <Composer
           variant="split"

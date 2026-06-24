@@ -109,6 +109,12 @@ export const AGENT_STATUS_LABEL: Record<AgentStatusKey, string> = {
  */
 export type DataMode = "live" | "empty" | "sample";
 
+/** One clarifying question with clickable options (Claude-style; asked in a panel). */
+export interface AskQuestion {
+  question: string;
+  options: string[];
+}
+
 export type StreamEvent =
   | { type: "start"; question: string }
   | { type: "phase"; step: number }
@@ -118,7 +124,7 @@ export type StreamEvent =
   | { type: "text-delta"; text: string }
   | { type: "result-chips"; chips: ResultChip[] }
   | { type: "artifact"; payload: ArtifactPayload }
-  | { type: "choices"; question: string; options: string[] }
+  | { type: "choices"; questions: AskQuestion[] }
   | { type: "closing"; closing: AnswerData["closing"] }
   | { type: "done" }
   | { type: "error"; message: string };
