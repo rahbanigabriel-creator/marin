@@ -25,7 +25,7 @@ export function deepLinkFor(action: Action): string | undefined {
   const enc = encodeURIComponent(description(action).slice(0, 600));
   switch (action.platform) {
     case "x_ads":
-      return `https://twitter.com/intent/tweet?text=${encodeURIComponent(description(action).slice(0, 280))}`;
+      return `https://x.com/intent/tweet?text=${encodeURIComponent(description(action).slice(0, 280))}`;
     case "linkedin_ads":
       return `https://www.linkedin.com/feed/?shareActive=true&text=${enc}`;
     case "reddit_ads":
@@ -74,7 +74,7 @@ async function executeXPost(action: Action): Promise<ExecuteResult> {
   }
   const text = description(action).slice(0, 280);
   try {
-    const res = await fetch("https://api.twitter.com/2/tweets", {
+    const res = await fetch("https://api.x.com/2/tweets", {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ text }),

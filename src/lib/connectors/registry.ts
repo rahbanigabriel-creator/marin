@@ -206,8 +206,10 @@ export const CONNECTORS: Record<ConnectorPlatform, ConnectorConfig> = {
     // OAuth 2.0 (PKCE + Basic auth). NOTE: the X Ads API itself uses OAuth 1.0a +
     // elevated access; this connects the v2 OAuth2 surface — Ads reporting is
     // finalized against a live account.
-    authorizeUrl: "https://twitter.com/i/oauth2/authorize",
-    tokenUrl: "https://api.twitter.com/2/oauth2/token",
+    // X migrated to x.com / api.x.com (the legacy twitter.com hosts are no longer
+    // documented). Verified against current 2026 X docs by the connector audit.
+    authorizeUrl: "https://x.com/i/oauth2/authorize",
+    tokenUrl: "https://api.x.com/2/oauth2/token",
     scopes: ["tweet.read", "users.read", "offline.access"],
     clientIdEnv: "X_CLIENT_ID",
     clientSecretEnv: "X_CLIENT_SECRET",
