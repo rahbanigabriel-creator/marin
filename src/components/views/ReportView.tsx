@@ -144,16 +144,16 @@ export function ReportView({
             <AnswerCanvas step={step} artifacts={artifacts} />
           ) : g.canvasReady && dataMode === "empty" ? (
             <div className="rounded-[8px] border border-dashed border-line-2 bg-surface-card p-[22px] text-center">
-              <div className="font-serif text-[20px] font-medium text-ink-900">No connected data yet</div>
-              <div className="mx-auto mt-[6px] max-w-[380px] font-sans text-[13px] leading-[1.55] text-ink-400">
-                Connect accounts before exporting a real marketing report.
+              <div className="font-serif text-[19px] font-medium text-ink-700">Your report</div>
+              <div className="mx-auto mt-[6px] max-w-[380px] font-sans text-[13px] leading-[1.55] text-ink-300">
+                Cards and charts from Marpin&apos;s answers appear here, ready to export.
               </div>
               <button
                 type="button"
                 onClick={onOpenConnections}
-                className="mt-[12px] cursor-pointer rounded-btn border-none bg-plum px-[16px] py-[9px] font-sans text-[13px] font-semibold text-white"
+                className="mt-[12px] cursor-pointer rounded-btn border border-line-2 bg-surface-chip px-[16px] py-[9px] font-sans text-[13px] font-semibold text-ink-700"
               >
-                Connect accounts
+                Connect data
               </button>
             </div>
           ) : (

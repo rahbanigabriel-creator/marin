@@ -107,6 +107,7 @@ export function useStreamingChat(
     thinking: chat.thinking,
     artifacts: chat.artifacts,
     chips: chat.chips,
+    choices: chat.choices,
     closing: chat.closing,
     done: chat.done,
     error: chat.error,

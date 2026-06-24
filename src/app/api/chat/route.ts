@@ -80,10 +80,7 @@ function emptyResolution(workspaceId: string | null): {
     workspaceId,
     artifacts: [],
     chips: [],
-    closing: {
-      split: "Connect your accounts to see real metrics here.",
-      thread: "Connect your accounts and I will answer from your real marketing data.",
-    },
+    closing: { split: "", thread: "" },
   };
 }
 
@@ -257,6 +254,11 @@ export async function POST(req: Request): Promise<Response> {
                 // it even with zero connected data.
                 send({ type: "artifact", payload: ev.payload });
                 liveArtifacts = true;
+              } else if (ev.kind === "choices") {
+                // Clarifying question with clickable options — counts as output so
+                // the offline fallback lead never fires on a pure question turn.
+                send({ type: "choices", question: ev.question, options: ev.options });
+                streamed = true;
               } else {
                 send({ type: "text-delta", text: ev.text });
                 streamed = true;

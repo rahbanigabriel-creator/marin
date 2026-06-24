@@ -5,6 +5,7 @@ import type { ResultChip } from "@/types/artifacts";
 import { gatesForStep } from "@/lib/streaming/stepModel";
 import { UserBubble } from "@/components/chat/UserBubble";
 import { PriorTurns } from "@/components/chat/PriorTurns";
+import { ChoiceChips } from "@/components/chat/ChoiceChips";
 import { AssistantBlock } from "@/components/chat/AssistantBlock";
 import { Composer } from "@/components/chat/Composer";
 import { AnswerCanvas } from "@/components/canvas/AnswerCanvas";
@@ -24,6 +25,9 @@ interface SplitViewProps {
   onSend: (text: string) => void;
   onSuggest: (text: string) => void;
   suggestions: string[];
+  /** a clarifying question + clickable options the agent is asking, if any */
+  choices: { question: string; options: string[] } | null;
+  onChoose: (text: string) => void;
   /** whether the workspace pane reflects live (DB-backed) or sample data */
   dataMode: DataMode;
   onOpenConnections: () => void;
@@ -44,6 +48,8 @@ export function SplitView({
   onSend,
   onSuggest,
   suggestions,
+  choices,
+  onChoose,
   dataMode,
   onOpenConnections,
   connectedCount,
@@ -67,6 +73,9 @@ export function SplitView({
             closing={closing}
             variant="split"
           />
+          {choices && (
+            <ChoiceChips question={choices.question} options={choices.options} onChoose={onChoose} />
+          )}
         </div>
         <Composer
           variant="split"
@@ -108,19 +117,11 @@ export function SplitView({
           {g.canvasReady && artifacts.length > 0 ? (
             <AnswerCanvas step={step} artifacts={artifacts} />
           ) : g.canvasReady && dataMode === "empty" ? (
-            <div className="flex h-full min-h-[340px] flex-col items-center justify-center gap-[12px] rounded-[8px] border border-dashed border-line-2 bg-surface-card p-[24px] text-center">
-              <div className="font-serif text-[21px] font-medium text-ink-900">No connected data yet</div>
-              <div className="max-w-[360px] font-sans text-[13px] leading-[1.55] text-ink-400">
-                Connect any paid or organic channel — Google, Meta, TikTok, LinkedIn, GA4, Search
-                Console, and more — to render real KPIs and graphs.
+            <div className="flex h-full min-h-[340px] flex-col items-center justify-center gap-[10px] rounded-[8px] border border-dashed border-line-2 bg-surface-card p-[24px] text-center">
+              <div className="font-serif text-[19px] font-medium text-ink-700">Your workspace</div>
+              <div className="max-w-[360px] font-sans text-[13px] leading-[1.55] text-ink-300">
+                Strategy, competitor breakdowns, audits, and plans show up here as you chat.
               </div>
-              <button
-                type="button"
-                onClick={onOpenConnections}
-                className="mt-[4px] cursor-pointer rounded-btn border-none bg-plum px-[16px] py-[9px] font-sans text-[13px] font-semibold text-white"
-              >
-                Connect accounts
-              </button>
             </div>
           ) : (
             <div className="flex h-full min-h-[340px] flex-col items-center justify-center gap-[14px] text-ink-200">

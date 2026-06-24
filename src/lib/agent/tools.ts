@@ -32,6 +32,7 @@ export const TOOL_SCOPE: Record<string, ToolScope> = {
   marketing_playbook: "doctrine",
   get_account_metrics: "internal",
   add_canvas_card: "doctrine",
+  ask_question: "doctrine",
 };
 
 export const TOOLS: Anthropic.Tool[] = [
@@ -96,6 +97,26 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "ask_question",
+    description:
+      "When you genuinely need ONE quick piece of context before you can give a great answer, ask it with THIS instead of writing the question as prose — it renders your question with clickable answer buttons so the user can just tap. Give 2–4 short, concrete, distinct options that cover the likely answers (the user can also type their own). Use it only for a truly underspecified ask, never to stall and never when you can already act. After calling it, write at most a one-line lead-in and STOP — wait for their pick; do not answer for them.",
+    input_schema: {
+      type: "object",
+      properties: {
+        question: {
+          type: "string",
+          description: "The single question to ask, in your own voice (e.g. 'What stage is the business at?').",
+        },
+        options: {
+          type: "array",
+          items: { type: "string" },
+          description: "2–4 short, distinct answer options the user can click.",
+        },
+      },
+      required: ["question", "options"],
+    },
+  },
+  {
     name: "get_account_metrics",
     description:
       "Returns the user's CONNECTED marketing-account data (KPIs, spend, ROAS, CPA, campaigns, leaks, funnel) from Marpin's internal store. ONLY call this when the user has a real account connected AND the question is about their own data; ground every number you state in the result and never invent metrics. For generic strategy/competitor/SEO/measurement questions, do NOT call this — answer from your own expertise and live web research. If it returns 'no connected-account data', do not fabricate numbers — answer from your expertise and note what connecting an account would unlock.",
@@ -152,6 +173,23 @@ export function briefFromInput(input: unknown): { kind: "brief"; data: BriefData
   return { kind: "brief", data };
 }
 
+/**
+ * Coerce an `ask_question` tool input into a validated question + clickable
+ * options (the Claude-style multiple-choice prompt), or null if unusable.
+ */
+export function choicesFromInput(input: unknown): { question: string; options: string[] } | null {
+  const o = (input ?? {}) as Record<string, unknown>;
+  const question = typeof o.question === "string" ? o.question.trim() : "";
+  const options = Array.isArray(o.options)
+    ? o.options
+        .filter((x): x is string => typeof x === "string" && x.trim().length > 0)
+        .map((x) => x.trim())
+        .slice(0, 5)
+    : [];
+  if (!question || options.length === 0) return null;
+  return { question, options };
+}
+
 /** Per-turn dispatch state. Retained for tracing/telemetry; no longer gates tools. */
 export interface DispatchCtx {
   internalReadDone: boolean;
@@ -206,6 +244,17 @@ export async function dispatchTool(
     const ok = briefFromInput(input) !== null;
     return {
       content: ok ? "Card rendered on the canvas." : "Card needs a title and at least one section.",
+      isError: !ok,
+    };
+  }
+
+  if (name === "ask_question") {
+    // The loop intercepts this to render clickable options; defensive fallback.
+    const ok = choicesFromInput(input) !== null;
+    return {
+      content: ok
+        ? "Question shown to the user with clickable options."
+        : "ask_question needs a question and at least one option.",
       isError: !ok,
     };
   }

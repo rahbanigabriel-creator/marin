@@ -20,6 +20,8 @@ export interface ChatStreamState {
   artifacts: ArtifactPayload[];
   /** result chips for the chat column */
   chips: ResultChip[];
+  /** a clarifying question + clickable options the agent is asking, if any */
+  choices: { question: string; options: string[] } | null;
   /** closing line variants, once the answer is settling */
   closing: AnswerData["closing"] | null;
   /** the stream has signalled completion */
@@ -42,6 +44,7 @@ export const initialChatState: ChatStreamState = {
   thinking: "",
   artifacts: [],
   chips: [],
+  choices: null,
   closing: null,
   done: false,
   error: null,
@@ -68,6 +71,8 @@ export function streamReducer(state: ChatStreamState, event: StreamEvent): ChatS
       return { ...state, chips: event.chips };
     case "artifact":
       return { ...state, artifacts: [...state.artifacts, event.payload] };
+    case "choices":
+      return { ...state, choices: { question: event.question, options: event.options } };
     case "closing":
       return { ...state, closing: event.closing };
     case "done":

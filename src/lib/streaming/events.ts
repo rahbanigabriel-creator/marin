@@ -118,6 +118,7 @@ export type StreamEvent =
   | { type: "text-delta"; text: string }
   | { type: "result-chips"; chips: ResultChip[] }
   | { type: "artifact"; payload: ArtifactPayload }
+  | { type: "choices"; question: string; options: string[] }
   | { type: "closing"; closing: AnswerData["closing"] }
   | { type: "done" }
   | { type: "error"; message: string };

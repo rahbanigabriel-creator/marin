@@ -128,6 +128,7 @@ export function AppShell() {
     thinking,
     artifacts,
     chips,
+    choices,
     closing,
     dataMode,
   } = useStreamingChat(scenario, {
@@ -183,7 +184,8 @@ export function AppShell() {
       // the next question (real product = multi-turn; demo stays single-shot).
       if (realProductMode && hasAsked && typed.trim()) {
         const prevQ = question;
-        const prevA = typed.trim() + summarizeCards(artifacts);
+        const askedQ = choices ? ` (asked: ${choices.question})` : "";
+        const prevA = typed.trim() + askedQ + summarizeCards(artifacts);
         setTurns((prev) => [...prev, { question: prevQ, answer: prevA }]);
       }
       setQuestion(trimmed);
@@ -193,7 +195,7 @@ export function AppShell() {
       setHasAsked(true);
       replay();
     },
-    [persona, realProductMode, replay, hasAsked, typed, question, artifacts],
+    [persona, realProductMode, replay, hasAsked, typed, question, artifacts, choices],
   );
 
   // "New conversation" returns the real product to the clean welcome state
@@ -355,6 +357,8 @@ export function AppShell() {
               <SplitView
                 step={step}
                 turns={turns}
+                choices={choices}
+                onChoose={ask}
                 typed={typed}
                 status={status}
                 thinking={thinking}
@@ -374,6 +378,8 @@ export function AppShell() {
               <ThreadView
                 step={step}
                 turns={turns}
+                choices={choices}
+                onChoose={ask}
                 typed={typed}
                 status={status}
                 thinking={thinking}

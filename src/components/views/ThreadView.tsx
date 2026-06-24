@@ -5,6 +5,7 @@ import type { ResultChip } from "@/types/artifacts";
 import { gatesForStep } from "@/lib/streaming/stepModel";
 import { UserBubble } from "@/components/chat/UserBubble";
 import { PriorTurns } from "@/components/chat/PriorTurns";
+import { ChoiceChips } from "@/components/chat/ChoiceChips";
 import { AssistantBlock } from "@/components/chat/AssistantBlock";
 import { Composer } from "@/components/chat/Composer";
 import { AnswerCanvas } from "@/components/canvas/AnswerCanvas";
@@ -24,6 +25,8 @@ interface ThreadViewProps {
   onSend: (text: string) => void;
   onSuggest: (text: string) => void;
   suggestions: string[];
+  choices: { question: string; options: string[] } | null;
+  onChoose: (text: string) => void;
   connectedCount: number;
 }
 
@@ -42,6 +45,8 @@ export function ThreadView({
   onSend,
   onSuggest,
   suggestions,
+  choices,
+  onChoose,
   connectedCount,
 }: ThreadViewProps) {
   const g = gatesForStep(step, typed.length, scenario.lead.length);
@@ -62,9 +67,12 @@ export function ThreadView({
           variant="thread"
           inlineCanvas={g.canvasReady && artifacts.length > 0 ? <AnswerCanvas step={step} artifacts={artifacts} /> : null}
         />
-        {g.canvasReady && dataMode === "empty" && (
-          <div className="rounded-[8px] border border-dashed border-line-2 bg-surface-card p-[18px] font-sans text-[13px] text-ink-400">
-            Connect accounts to render real charts in this thread.
+        {choices && (
+          <ChoiceChips question={choices.question} options={choices.options} onChoose={onChoose} />
+        )}
+        {g.canvasReady && dataMode === "empty" && artifacts.length === 0 && (
+          <div className="rounded-[8px] border border-dashed border-line-2 bg-surface-card p-[16px] font-sans text-[13px] text-ink-300">
+            Marpin&apos;s strategy and plan cards appear here as you go deeper.
           </div>
         )}
       </div>
