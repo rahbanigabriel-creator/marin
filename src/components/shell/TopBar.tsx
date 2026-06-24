@@ -29,18 +29,9 @@ const MODEL_OPTIONS: Array<{ id: string; label: string }> = [
   { id: "auto", label: "Auto" },
   { id: "claude-haiku-4-5", label: "Haiku 4.5" },
   { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
-  { id: "claude-opus-4-8", label: "Opus 4.8" },
-];
-
-const TABS: Array<{ mode: Mode; label: string }> = [
-  { mode: "split", label: "Split canvas" },
-  { mode: "thread", label: "Thread" },
-  { mode: "report", label: "Report" },
 ];
 
 export function TopBar({
-  mode,
-  onSetMode,
   onReplay,
   title,
   channels,
@@ -142,27 +133,6 @@ export function TopBar({
       </div>
       {chatControls && (
       <div className="flex flex-none items-center gap-[10px]">
-        <div className="flex gap-[2px] rounded-btn bg-line-seg p-[3px]">
-          {TABS.map((t) => {
-            const active = mode === t.mode;
-            return (
-              <button
-                key={t.mode}
-                type="button"
-                onClick={() => onSetMode(t.mode)}
-                className="cursor-pointer whitespace-nowrap rounded-chip font-sans text-[12px] font-semibold transition-all duration-150"
-                style={{
-                  padding: "6px 13px",
-                  border: "none",
-                  background: active ? "#2B2722" : "transparent",
-                  color: active ? "#F2F1EC" : "#6B6359",
-                }}
-              >
-                {t.label}
-              </button>
-            );
-          })}
-        </div>
         {onModelChange && (
           <select
             value={model}

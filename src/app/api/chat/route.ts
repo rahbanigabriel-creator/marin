@@ -44,7 +44,7 @@ interface ChatRequest {
 const SELECTABLE_MODELS: Record<string, { tier: "low" | "medium" | "high"; effort: "low" | "medium" | "high" }> = {
   "claude-haiku-4-5": { tier: "low", effort: "low" },
   "claude-sonnet-4-6": { tier: "medium", effort: "medium" },
-  "claude-opus-4-8": { tier: "high", effort: "high" },
+  // Opus intentionally omitted — disabled for now; if forced it falls back to the router (Sonnet).
 };
 
 /** Phase reveal beats (step, delay-after-previous ms) once the lead is done. */

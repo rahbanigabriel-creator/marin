@@ -54,11 +54,13 @@ export function routeModel(input: {
   const hasDeepArtifact = (input.artifactKinds ?? []).some((k) => DEEP_KINDS.has(k));
 
   if (hasDeepArtifact || HIGH_RE.test(q)) {
+    // Opus is disabled for now — deep work runs on Sonnet at high effort. Sonnet
+    // + tools + the action layer is the brain; Opus stays off unless re-enabled.
     return {
-      tier: "high",
-      model: TIER_MODEL.high,
+      tier: "medium",
+      model: TIER_MODEL.medium,
       effort: "high",
-      reason: hasDeepArtifact ? "deep synthesis (forecast/plan)" : "deep multi-source strategy (segment 6)",
+      reason: hasDeepArtifact ? "deep synthesis (Sonnet · high effort)" : "deep strategy (Sonnet · high effort)",
     };
   }
   if (LOW_RE.test(q) && q.length <= 90) {
