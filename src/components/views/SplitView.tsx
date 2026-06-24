@@ -1,8 +1,10 @@
 import type { Scenario } from "@/types/scenario";
+import type { ChatTurn } from "@/types/views";
 import type { AgentStatusKey, ArtifactPayload, DataMode } from "@/lib/streaming/events";
 import type { ResultChip } from "@/types/artifacts";
 import { gatesForStep } from "@/lib/streaming/stepModel";
 import { UserBubble } from "@/components/chat/UserBubble";
+import { PriorTurns } from "@/components/chat/PriorTurns";
 import { AssistantBlock } from "@/components/chat/AssistantBlock";
 import { Composer } from "@/components/chat/Composer";
 import { AnswerCanvas } from "@/components/canvas/AnswerCanvas";
@@ -10,6 +12,7 @@ import { ThinkingDots } from "@/components/ui/ThinkingDots";
 
 interface SplitViewProps {
   step: number;
+  turns: ChatTurn[];
   typed: string;
   status: { key: AgentStatusKey; label: string } | null;
   thinking: string;
@@ -29,6 +32,7 @@ interface SplitViewProps {
 
 export function SplitView({
   step,
+  turns,
   typed,
   status,
   thinking,
@@ -51,6 +55,7 @@ export function SplitView({
       {/* chat column */}
       <div className="flex w-chat flex-none flex-col border-r border-line-2 bg-surface-panel min-h-0">
         <div className="flex min-h-0 flex-1 flex-col gap-[20px] overflow-y-auto p-[24px_22px]">
+          <PriorTurns turns={turns} variant="split" />
           <UserBubble text={question} variant="split" />
           <AssistantBlock
             step={step}

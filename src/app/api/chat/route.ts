@@ -36,6 +36,8 @@ interface ChatRequest {
   closing: AnswerData["closing"];
   /** Optional user-selected model id; overrides the auto-router when valid. */
   model?: string;
+  /** Prior conversation turns (multi-turn memory), oldest-first. */
+  history?: { role: "user" | "assistant"; content: string }[];
 }
 
 /** Models the user can pick in the UI, with the effort each runs at. */
@@ -243,6 +245,7 @@ export async function POST(req: Request): Promise<Response> {
               system,
               userContent,
               source,
+              history: body.history,
               signal: ac.signal,
             })) {
               if (closed) return;

@@ -29,11 +29,13 @@ interface UseStreamingChatOptions {
   enabled?: boolean;
   /** User-selected model id; forwarded to /api/chat to override the auto-router. */
   model?: string;
+  /** Prior conversation turns (multi-turn memory), oldest-first. */
+  history?: { role: "user" | "assistant"; content: string }[];
 }
 
 export function useStreamingChat(
   scenario: Scenario,
-  { enabled = true, model }: UseStreamingChatOptions = {},
+  { enabled = true, model, history }: UseStreamingChatOptions = {},
 ) {
   const [chat, setChat] = useState<ChatStreamState>(initialChatState);
   const [nonce, setNonce] = useState(0);
@@ -63,6 +65,7 @@ export function useStreamingChat(
             artifacts: scenario.artifacts,
             closing: scenario.closing,
             model,
+            history,
           }),
           signal: ac.signal,
         });

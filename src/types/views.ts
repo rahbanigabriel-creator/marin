@@ -14,6 +14,13 @@ export interface Channel {
   displayName?: string | null;
 }
 
+/** One completed exchange in a multi-turn conversation (the agent's memory). */
+export interface ChatTurn {
+  question: string;
+  /** the assistant's final answer text (+ a note of any canvas cards rendered) */
+  answer: string;
+}
+
 /** A saved conversation in the sidebar's Recent list. */
 export interface RecentChat {
   /** short conversation name shown in the sidebar and the top bar */

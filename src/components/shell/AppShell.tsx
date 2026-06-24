@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Channel, Mode } from "@/types/views";
+import type { Channel, ChatTurn, Mode } from "@/types/views";
+import type { ArtifactPayload } from "@/lib/streaming/events";
 import type { Persona, Scenario } from "@/types/scenario";
 import { PERSONAS } from "@/lib/data/personas";
 import { AGENCY_CLIENTS, type ClientAccount } from "@/lib/data/clients";
@@ -66,6 +67,14 @@ function liveScenario(text: string, persona: Persona): Scenario {
   };
 }
 
+/** Compact note of the canvas cards an answer rendered, for conversation memory. */
+function summarizeCards(artifacts: ArtifactPayload[]): string {
+  const titles = artifacts
+    .map((a) => (a.kind === "brief" ? a.data.title : a.kind))
+    .filter(Boolean);
+  return titles.length ? ` [Rendered canvas card(s): ${titles.join("; ")}]` : "";
+}
+
 /**
  * Top-level orchestrator. Owns the active persona + dataset, the top-level
  * screen, view mode, the active question + resolved scenario, the agency's
@@ -89,6 +98,8 @@ export function AppShell() {
   // Real product opens on a clean welcome, not a canned auto-answered question.
   // Flips true the first time the user actually asks something.
   const [hasAsked, setHasAsked] = useState(false);
+  // Completed conversation turns (multi-turn memory); reset on a new conversation.
+  const [turns, setTurns] = useState<ChatTurn[]>([]);
 
   const dataset = PERSONAS[persona];
   const realProductMode = !DEMO_MODE;
@@ -101,6 +112,15 @@ export function AppShell() {
     : dataset.account;
   // The staged-reveal surface is fed by a real SSE stream (/api/chat) through the
   // shared StreamEvent reducer. `status`/`thinking` carry the live agent activity.
+  // Last ~10 turns become the agent's conversational memory (sent to /api/chat).
+  const history = useMemo(
+    () =>
+      turns.slice(-10).flatMap((t) => [
+        { role: "user" as const, content: t.question },
+        { role: "assistant" as const, content: t.answer },
+      ]),
+    [turns],
+  );
   const {
     state,
     replay,
@@ -110,7 +130,11 @@ export function AppShell() {
     chips,
     closing,
     dataMode,
-  } = useStreamingChat(scenario, { enabled: screen === "chat" && !showFirstRun && !idle, model });
+  } = useStreamingChat(scenario, {
+    enabled: screen === "chat" && !showFirstRun && !idle,
+    model,
+    history,
+  });
   const { step, typed } = state;
   const liveSuggestions = useMemo(
     () => [
@@ -155,6 +179,13 @@ export function AppShell() {
       const trimmed = text.trim();
       if (!trimmed) return;
       setActiveClient(null);
+      // Archive the just-finished answer into conversation memory before asking
+      // the next question (real product = multi-turn; demo stays single-shot).
+      if (realProductMode && hasAsked && typed.trim()) {
+        const prevQ = question;
+        const prevA = typed.trim() + summarizeCards(artifacts);
+        setTurns((prev) => [...prev, { question: prevQ, answer: prevA }]);
+      }
       setQuestion(trimmed);
       setScenario(
         realProductMode ? liveScenario(trimmed, persona) : resolveScenario(trimmed, persona, SCENARIOS),
@@ -162,13 +193,14 @@ export function AppShell() {
       setHasAsked(true);
       replay();
     },
-    [persona, realProductMode, replay],
+    [persona, realProductMode, replay, hasAsked, typed, question, artifacts],
   );
 
   // "New conversation" returns the real product to the clean welcome state
   // rather than re-streaming the previous answer (demo keeps the replay).
   const newChat = useCallback(() => {
     setActiveClient(null);
+    setTurns([]);
     if (realProductMode) {
       setHasAsked(false);
       return;
@@ -322,6 +354,7 @@ export function AppShell() {
             ) : mode === "split" ? (
               <SplitView
                 step={step}
+                turns={turns}
                 typed={typed}
                 status={status}
                 thinking={thinking}
@@ -340,6 +373,7 @@ export function AppShell() {
             ) : mode === "thread" ? (
               <ThreadView
                 step={step}
+                turns={turns}
                 typed={typed}
                 status={status}
                 thinking={thinking}

@@ -136,11 +136,21 @@ export async function* runAgentWithTools(opts: {
   system: string;
   userContent: string;
   source: MetricsSource;
+  /** Prior conversation turns (multi-turn memory), oldest-first. */
+  history?: { role: "user" | "assistant"; content: string }[];
   signal?: AbortSignal;
 }): AsyncGenerator<AgentEvent> {
   const client = getClient();
   const ctx: DispatchCtx = { internalReadDone: false, doctrineRetrieved: false, searchedWeb: false };
-  const messages: Anthropic.MessageParam[] = [{ role: "user", content: opts.userContent }];
+  // Seed with prior turns so the agent has conversational memory, then the new
+  // (instruction-wrapped) question as the final user turn.
+  const priorTurns: Anthropic.MessageParam[] = (opts.history ?? [])
+    .filter((m) => typeof m.content === "string" && m.content.trim().length > 0)
+    .map((m) => ({ role: m.role, content: m.content }));
+  const messages: Anthropic.MessageParam[] = [
+    ...priorTurns,
+    { role: "user", content: opts.userContent },
+  ];
   let internalData = "";
   let finalText = "";
 

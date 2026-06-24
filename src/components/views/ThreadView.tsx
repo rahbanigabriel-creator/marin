@@ -1,14 +1,17 @@
 import type { Scenario } from "@/types/scenario";
+import type { ChatTurn } from "@/types/views";
 import type { AgentStatusKey, ArtifactPayload, DataMode } from "@/lib/streaming/events";
 import type { ResultChip } from "@/types/artifacts";
 import { gatesForStep } from "@/lib/streaming/stepModel";
 import { UserBubble } from "@/components/chat/UserBubble";
+import { PriorTurns } from "@/components/chat/PriorTurns";
 import { AssistantBlock } from "@/components/chat/AssistantBlock";
 import { Composer } from "@/components/chat/Composer";
 import { AnswerCanvas } from "@/components/canvas/AnswerCanvas";
 
 interface ThreadViewProps {
   step: number;
+  turns: ChatTurn[];
   typed: string;
   status: { key: AgentStatusKey; label: string } | null;
   thinking: string;
@@ -26,6 +29,7 @@ interface ThreadViewProps {
 
 export function ThreadView({
   step,
+  turns,
   typed,
   status,
   thinking,
@@ -45,6 +49,7 @@ export function ThreadView({
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-surface-page">
       <div className="mx-auto flex w-full max-w-thread flex-1 flex-col gap-[22px] p-[30px_28px_18px]">
+        <PriorTurns turns={turns} variant="thread" />
         <UserBubble text={question} variant="thread" />
         <AssistantBlock
           step={step}
