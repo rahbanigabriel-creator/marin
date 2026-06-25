@@ -19,9 +19,10 @@ import { ConnectionsModal } from "@/components/modals/ConnectionsModal";
 import { OnboardingScreen } from "@/components/screens/OnboardingScreen";
 import { ForecastScreen } from "@/components/screens/ForecastScreen";
 import { ClientsScreen } from "@/components/screens/ClientsScreen";
+import { CampaignsScreen } from "@/components/screens/CampaignsScreen";
 import { WelcomeScreen } from "@/components/screens/WelcomeScreen";
 
-type Screen = "chat" | "onboarding" | "forecast" | "clients";
+type Screen = "chat" | "onboarding" | "forecast" | "clients" | "dashboard";
 
 const REAL_CONNECTOR_CHANNELS: Channel[] = [
   // Paid ads
@@ -192,6 +193,7 @@ export function AppShell() {
     (text: string) => {
       const trimmed = text.trim();
       if (!trimmed) return;
+      setScreen("chat");
       setActiveChat(0);
       setActiveClient(null);
       // Archive the just-finished answer into conversation memory before asking
@@ -230,6 +232,7 @@ export function AppShell() {
   // "New conversation" returns the real product to the clean welcome state
   // rather than re-streaming the previous answer (demo keeps the replay).
   const newChat = useCallback(() => {
+    setScreen("chat");
     setActiveChat(0);
     setActiveClient(null);
     setTurns([]);
@@ -242,6 +245,7 @@ export function AppShell() {
 
   const selectChat = useCallback(
     (index: number) => {
+      setScreen("chat");
       setActiveClient(null);
       if (realProductMode) {
         // index 0 is the live conversation already on screen — keep it as-is so
@@ -368,6 +372,8 @@ export function AppShell() {
         account={sidebarAccount}
         showClients={persona === "agency"}
         onViewClients={() => setScreen("clients")}
+        onViewDashboard={realProductMode ? () => setScreen("dashboard") : undefined}
+        dashboardActive={screen === "dashboard"}
         onNewChat={newChat}
         onStartPlan={() => (realProductMode ? setModalOpen(true) : setScreen("onboarding"))}
         onOpenModal={() => setModalOpen(true)}
@@ -390,7 +396,15 @@ export function AppShell() {
           <>
             <TopBar
               onReplay={replay}
-              title={idle ? "New conversation" : screen === "clients" ? "Clients" : scenario.title}
+              title={
+                idle
+                  ? "New conversation"
+                  : screen === "clients"
+                    ? "Clients"
+                    : screen === "dashboard"
+                      ? "Campaigns"
+                      : scenario.title
+              }
               channels={realChannels}
               persona={persona}
               onSwitchPersona={switchPersona}
@@ -417,6 +431,8 @@ export function AppShell() {
                 workspace={dataset.workspace}
                 onOpenClient={openClient}
               />
+            ) : screen === "dashboard" ? (
+              <CampaignsScreen onOpenConnections={() => setModalOpen(true)} />
             ) : (
               <SplitView
                 step={step}

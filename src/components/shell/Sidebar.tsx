@@ -14,6 +14,9 @@ interface SidebarProps {
   onOpenModal: () => void;
   showClients: boolean;
   onViewClients: () => void;
+  /** real-product: open the unified campaigns dashboard. */
+  onViewDashboard?: () => void;
+  dashboardActive?: boolean;
   hideRecent?: boolean;
   primaryActionLabel?: string;
   collapsed: boolean;
@@ -30,6 +33,8 @@ export function Sidebar({
   onOpenModal,
   showClients,
   onViewClients,
+  onViewDashboard,
+  dashboardActive = false,
   hideRecent = false,
   primaryActionLabel = "New plan",
   collapsed,
@@ -98,6 +103,24 @@ export function Sidebar({
         <span className="text-[16px] leading-none text-plum">＋</span>
         {!collapsed && <span>New conversation</span>}
       </button>
+      {onViewDashboard && (
+        <button
+          type="button"
+          onClick={onViewDashboard}
+          title="Campaigns"
+          className={`${buttonBase} ${collapsed ? "justify-center" : ""}`}
+          style={{
+            padding: collapsed ? "10px 0" : "10px 12px",
+            cursor: "pointer",
+            border: "none",
+            background: dashboardActive ? "#F2E2EA" : "transparent",
+            color: dashboardActive ? "#9A3D63" : "#4A443B",
+          }}
+        >
+          <span className="text-[14px] leading-none">▦</span>
+          {!collapsed && <span>Campaigns</span>}
+        </button>
+      )}
       {showClients ? (
         <button
           type="button"
