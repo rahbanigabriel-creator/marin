@@ -133,5 +133,14 @@ export default function RootLayout({
   // missing publishable key, breaking the validated mockup. The provider is
   // imported statically (safe; it only fails when actually mounted without a
   // key), and mounted conditionally here.
-  return isAuthConfigured() ? <ClerkProvider>{tree}</ClerkProvider> : tree;
+  // Deterministic post-auth landing: after sign-in/up, go to the app (/app),
+  // not back through the conditional `/` — avoids any redirect ambiguity that
+  // can present as a loop. fallback* defers to an explicit redirect_url first.
+  return isAuthConfigured() ? (
+    <ClerkProvider signInFallbackRedirectUrl="/app" signUpFallbackRedirectUrl="/app">
+      {tree}
+    </ClerkProvider>
+  ) : (
+    tree
+  );
 }
