@@ -157,6 +157,10 @@ export async function* runAgentWithTools(opts: {
   ];
   let internalData = "";
   let finalText = "";
+  // Set once the agent renders a visual card (market scan / brief / action plan).
+  // When it has, the canvas carries the detail, so the chat lead is capped to a
+  // short headline — the model tends to over-write the chat otherwise.
+  let renderedCard = false;
 
   // LLM cost tracing (Langfuse). Transparent no-op without keys — observe() is an
   // identity function on the stream and flush() does nothing, so the loop's
@@ -251,7 +255,10 @@ export async function* runAgentWithTools(opts: {
           // through) rather than routing it through the text dispatch path.
           if (tu.name === "add_canvas_card") {
             const card = briefFromInput(tu.input);
-            if (card) yield { kind: "artifact", payload: card };
+            if (card) {
+              renderedCard = true;
+              yield { kind: "artifact", payload: card };
+            }
             results.push({
               type: "tool_result",
               tool_use_id: tu.id,
@@ -266,7 +273,10 @@ export async function* runAgentWithTools(opts: {
           // here (yield the artifact straight through) like add_canvas_card.
           if (tu.name === "add_market_scan") {
             const scan = marketScanFromInput(tu.input);
-            if (scan) yield { kind: "artifact", payload: scan };
+            if (scan) {
+              renderedCard = true;
+              yield { kind: "artifact", payload: scan };
+            }
             results.push({
               type: "tool_result",
               tool_use_id: tu.id,
@@ -282,6 +292,7 @@ export async function* runAgentWithTools(opts: {
           if (tu.name === "add_action_plan") {
             const planInput = actionPlanInputFromTool(tu.input);
             if (planInput) {
+              renderedCard = true;
               const data = await persistActionPlan(opts.workspaceId ?? null, planInput);
               yield { kind: "artifact", payload: { kind: "actionPlan", data } };
             }
@@ -342,6 +353,13 @@ export async function* runAgentWithTools(opts: {
 
     if (!finalText) return; // nothing produced → route falls back to canned lead
 
+    // ── Cap the chat lead when the canvas carries the answer ──
+    // The model tends to write a full essay in chat even after rendering cards.
+    // When a card was rendered, the chat is just a short headline — trim to the
+    // first sentence or two so the detail lives on the canvas, not in a wall of
+    // chat text. (No-op when no card was rendered, e.g. a quick factual answer.)
+    if (renderedCard) finalText = leadHeadline(finalText);
+
     // ── Groundedness oracle (deterministic, outside the model trust boundary) ──
     // Only meaningful when REAL account data was read this turn: it checks that
     // every figure in the lead is supported by that data. A pure-doctrine answer
@@ -393,6 +411,30 @@ function usedWebSearch(content: Anthropic.Message["content"]): boolean {
       t === "web_fetch_tool_result"
     );
   });
+}
+
+/**
+ * Trim a chat lead to a short headline — the canvas carries the detail, so the
+ * chat is just the takeaway. Keeps whole sentences up to ~maxChars, falling back
+ * to a word-boundary cut. Only applied when the agent rendered a card.
+ */
+function leadHeadline(text: string, maxChars = 360): string {
+  const t = text.trim();
+  if (t.length <= maxChars) return t;
+  const sentences = t.match(/[^.!?]+[.!?]+(?:\s|$)/g);
+  if (sentences && sentences.length > 0) {
+    let out = "";
+    for (const s of sentences) {
+      const next = out + s;
+      if (out && next.length > maxChars) break;
+      out = next;
+      if (out.length >= maxChars) break;
+    }
+    if (out.trim()) return out.trim();
+  }
+  const cut = t.slice(0, maxChars);
+  const lastSpace = cut.lastIndexOf(" ");
+  return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trim() + "…";
 }
 
 /** Map a concrete model id back to its router tier (for trace/cost labelling). */
