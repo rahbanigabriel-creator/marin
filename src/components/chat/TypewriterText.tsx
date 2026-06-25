@@ -1,4 +1,6 @@
-/** Typed lead text with a blinking caret while still streaming. */
+import { RichText } from "./RichText";
+
+/** Typed lead text (inline-markdown rendered) with a blinking caret while streaming. */
 export function TypewriterText({
   typed,
   caretOn,
@@ -9,14 +11,16 @@ export function TypewriterText({
   caretHeight?: number;
 }) {
   return (
-    <>
-      {typed}
-      {caretOn && (
-        <span
-          className="animate-blink ml-px inline-block align-[-2px]"
-          style={{ width: 7, height: caretHeight, background: "#9A3D63" }}
-        />
-      )}
-    </>
+    <RichText
+      text={typed}
+      trailing={
+        caretOn ? (
+          <span
+            className="animate-blink ml-px inline-block align-[-2px]"
+            style={{ width: 7, height: caretHeight, background: "#9A3D63" }}
+          />
+        ) : null
+      }
+    />
   );
 }

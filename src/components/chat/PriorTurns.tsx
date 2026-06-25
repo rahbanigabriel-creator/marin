@@ -2,6 +2,7 @@
 
 import type { ChatTurn } from "@/types/views";
 import { UserBubble } from "./UserBubble";
+import { RichText } from "./RichText";
 
 /**
  * Read-only render of completed conversation turns above the live one, so the
@@ -22,9 +23,10 @@ export function PriorTurns({ turns, variant }: { turns: ChatTurn[]; variant: "sp
             >
               m
             </div>
-            <div className="min-w-0 flex-1 whitespace-pre-wrap font-sans text-[14px] leading-[1.62] text-ink-700">
-              {t.answer}
-            </div>
+            <RichText
+              text={t.answer}
+              className="min-w-0 flex-1 font-sans text-[14px] leading-[1.62] text-ink-700"
+            />
           </div>
         </div>
       ))}
