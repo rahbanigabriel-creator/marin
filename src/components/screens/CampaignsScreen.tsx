@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { DashboardData, DashCampaign } from "@/lib/metrics/dashboard";
 
 /**
@@ -34,24 +34,66 @@ export function CampaignsScreen({ onOpenConnections }: { onOpenConnections: () =
   const [data, setData] = useState<DashboardData>(EMPTY);
   const [mode, setMode] = useState<"live" | "sample" | "empty" | "loading">("loading");
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({ key: "spend", dir: "desc" });
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch("/api/dashboard", { cache: "no-store" });
+      const payload = (await res.json()) as { mode: "live" | "sample" | "empty"; data: DashboardData };
+      setData(payload.data ?? EMPTY);
+      setMode(payload.mode ?? "empty");
+    } catch {
+      setMode("empty");
+    }
+  }, []);
 
   useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const res = await fetch("/api/dashboard", { cache: "no-store" });
-        const payload = (await res.json()) as { mode: "live" | "sample" | "empty"; data: DashboardData };
-        if (!active) return;
-        setData(payload.data ?? EMPTY);
-        setMode(payload.mode ?? "empty");
-      } catch {
-        if (active) setMode("empty");
+    void load();
+  }, [load]);
+
+  const sync = useCallback(async () => {
+    setSyncing(true);
+    setSyncMsg(null);
+    try {
+      const res = await fetch("/api/sync", { method: "POST" });
+      const j = (await res.json()) as { ok: boolean; connections?: number; metrics?: number; error?: string };
+      if (j.ok) {
+        setSyncMsg(
+          j.metrics
+            ? `Synced ${j.connections ?? 0} source${j.connections === 1 ? "" : "s"} · ${j.metrics} data points`
+            : "Synced — no new data returned by the connected source(s) yet.",
+        );
+        await load();
+      } else {
+        setSyncMsg(
+          j.error === "database_not_configured"
+            ? "Storage isn't configured yet."
+            : `Sync failed: ${j.error ?? "unknown error"}`,
+        );
       }
-    })();
-    return () => {
-      active = false;
-    };
-  }, []);
+    } catch {
+      setSyncMsg("Sync failed — please try again.");
+    } finally {
+      setSyncing(false);
+    }
+  }, [load]);
+
+  const SyncButton = ({ subtle }: { subtle?: boolean }) => (
+    <button
+      type="button"
+      onClick={sync}
+      disabled={syncing}
+      className="cursor-pointer rounded-[9px] font-sans text-[13px] font-semibold disabled:opacity-60"
+      style={
+        subtle
+          ? { border: "1px solid #DEDDD4", background: "transparent", color: "#5A544A", padding: "8px 14px" }
+          : { border: "none", background: "#9A3D63", color: "#fff", padding: "8px 14px" }
+      }
+    >
+      {syncing ? "Syncing…" : "↻ Sync now"}
+    </button>
+  );
 
   const campaigns = useMemo(() => {
     const rows = [...data.campaigns];
@@ -73,22 +115,26 @@ export function CampaignsScreen({ onOpenConnections }: { onOpenConnections: () =
     return <div className="flex flex-1 items-center justify-center font-sans text-[13px] text-ink-300">Loading…</div>;
   }
 
-  if (mode === "empty" || data.campaigns.length === 0) {
+  if (mode === "empty" || (data.platforms.length === 0 && data.campaigns.length === 0)) {
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center bg-surface-page p-[24px] text-center">
         <div className="font-serif text-[22px] font-medium text-ink-900">No campaign data yet</div>
-        <p className="mx-auto mt-[10px] max-w-[420px] font-sans text-[14px] leading-[1.6] text-ink-400">
-          Connect Google Ads, Meta, TikTok, LinkedIn and more — Marpin syncs your campaigns and they all
-          show up here, side by side.
+        <p className="mx-auto mt-[10px] max-w-[440px] font-sans text-[14px] leading-[1.6] text-ink-400">
+          Connect a platform, then sync — Marpin pulls your campaigns and they all show up here, side by side.
+          If you just connected one, hit <strong>Sync now</strong> to pull the data.
         </p>
-        <button
-          type="button"
-          onClick={onOpenConnections}
-          className="mt-[18px] cursor-pointer rounded-[10px] font-sans text-[14px] font-semibold text-white"
-          style={{ border: "none", background: "#9A3D63", padding: "10px 18px" }}
-        >
-          Connect a platform →
-        </button>
+        <div className="mt-[18px] flex items-center gap-[10px]">
+          <SyncButton subtle />
+          <button
+            type="button"
+            onClick={onOpenConnections}
+            className="cursor-pointer rounded-[10px] font-sans text-[14px] font-semibold text-white"
+            style={{ border: "none", background: "#9A3D63", padding: "10px 18px" }}
+          >
+            Connect a platform →
+          </button>
+        </div>
+        {syncMsg ? <p className="mt-[12px] font-sans text-[12.5px] text-ink-400">{syncMsg}</p> : null}
       </div>
     );
   }
@@ -107,20 +153,24 @@ export function CampaignsScreen({ onOpenConnections }: { onOpenConnections: () =
   return (
     <div className="min-h-0 flex-1 overflow-y-auto bg-surface-page p-[24px]">
       <div className="mx-auto max-w-[1080px]">
-        <div className="mb-[6px] flex items-center justify-between">
+        <div className="mb-[6px] flex items-center justify-between gap-[12px]">
           <h1 className="font-serif text-[24px] font-medium text-ink-900">Campaigns</h1>
-          {mode === "sample" ? (
-            <span className="rounded-pill font-mono text-[10px] font-semibold text-ink-300" style={{ background: "#EFEEE7", padding: "3px 9px" }}>
-              ● Sample data
-            </span>
-          ) : (
-            <span className="rounded-pill font-mono text-[10px] font-semibold text-pos-700" style={{ background: "#E7EEE0", padding: "3px 9px" }}>
-              ● Live from your data
-            </span>
-          )}
+          <div className="flex items-center gap-[10px]">
+            {mode === "sample" ? (
+              <span className="rounded-pill font-mono text-[10px] font-semibold text-ink-300" style={{ background: "#EFEEE7", padding: "3px 9px" }}>
+                ● Sample data
+              </span>
+            ) : (
+              <span className="rounded-pill font-mono text-[10px] font-semibold text-pos-700" style={{ background: "#E7EEE0", padding: "3px 9px" }}>
+                ● Live from your data
+              </span>
+            )}
+            <SyncButton subtle />
+          </div>
         </div>
         <p className="mb-[18px] font-sans text-[13px] text-ink-400">
           Every campaign across every connected platform — last 30 days.
+          {syncMsg ? <span className="ml-[6px] text-ink-300">· {syncMsg}</span> : null}
         </p>
 
         {/* Totals */}
@@ -183,6 +233,14 @@ export function CampaignsScreen({ onOpenConnections }: { onOpenConnections: () =
                 </tr>
               </thead>
               <tbody>
+                {campaigns.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="p-[18px] text-center font-sans text-[12.5px] text-ink-300">
+                      No per-campaign breakdown from the connected source(s) yet — the platform totals above
+                      are live.
+                    </td>
+                  </tr>
+                ) : null}
                 {campaigns.map((c: DashCampaign) => (
                   <tr key={`${c.platform}-${c.campaign}`} className="border-b border-line-3 last:border-0">
                     <td className="p-[10px]">
