@@ -1,4 +1,16 @@
 import Link from "next/link";
+import type { IconType } from "react-icons";
+import {
+  SiGoogleads,
+  SiMeta,
+  SiTiktok,
+  SiGoogleanalytics,
+  SiGooglesearchconsole,
+  SiPinterest,
+  SiReddit,
+  SiX,
+} from "react-icons/si";
+import { FaLinkedin } from "react-icons/fa6";
 import { HeroUrlInput } from "./HeroUrlInput";
 
 /**
@@ -8,16 +20,16 @@ import { HeroUrlInput } from "./HeroUrlInput";
  * positioning) and structured data. Signed-in users get the app instead (page.tsx).
  */
 
-const CONNECTORS = [
-  "Google Ads",
-  "Meta",
-  "TikTok",
-  "LinkedIn",
-  "GA4",
-  "Search Console",
-  "Pinterest",
-  "Reddit",
-  "X",
+const CONNECTORS: { name: string; Icon: IconType; color: string }[] = [
+  { name: "Google Ads", Icon: SiGoogleads, color: "#4285F4" },
+  { name: "Meta", Icon: SiMeta, color: "#0467DF" },
+  { name: "TikTok", Icon: SiTiktok, color: "#111111" },
+  { name: "LinkedIn", Icon: FaLinkedin, color: "#0A66C2" },
+  { name: "Google Analytics 4", Icon: SiGoogleanalytics, color: "#E37400" },
+  { name: "Google Search Console", Icon: SiGooglesearchconsole, color: "#4285F4" },
+  { name: "Pinterest", Icon: SiPinterest, color: "#BD081C" },
+  { name: "Reddit", Icon: SiReddit, color: "#FF4500" },
+  { name: "X", Icon: SiX, color: "#111111" },
 ];
 
 // The three lead cards carry the operator story as a funnel: free hook →
@@ -231,14 +243,14 @@ export function Landing() {
         <p className="mb-[14px] text-center font-mono text-[10.5px] font-semibold uppercase tracking-[0.12em] text-ink-300">
           Plugs into your marketing stack
         </p>
-        <div className="flex flex-wrap items-center justify-center gap-[10px]">
-          {CONNECTORS.map((c) => (
+        <div className="flex flex-wrap items-center justify-center gap-x-[30px] gap-y-[16px]">
+          {CONNECTORS.map(({ name, Icon, color }) => (
             <span
-              key={c}
-              className="rounded-pill border border-line-2 bg-surface-card font-sans text-[13px] font-medium text-ink-600"
-              style={{ padding: "7px 14px" }}
+              key={name}
+              className="flex items-center gap-[8px] font-sans text-[14px] font-medium text-ink-700"
             >
-              {c}
+              <Icon size={20} color={color} aria-hidden />
+              {name}
             </span>
           ))}
         </div>
