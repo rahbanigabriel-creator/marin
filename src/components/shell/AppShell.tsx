@@ -186,6 +186,13 @@ export function AppShell() {
     const params = new URLSearchParams(window.location.search);
     if (!params.has("connect")) return;
     void refreshConnections();
+    // A platform just connected → pull its data now rather than waiting for the
+    // 6-hourly Inngest cron, then refresh the connection list again.
+    if (params.get("connect") === "connected") {
+      void fetch("/api/sync", { method: "POST" })
+        .then(() => refreshConnections())
+        .catch(() => {});
+    }
     window.history.replaceState({}, "", window.location.pathname);
   }, [realProductMode, refreshConnections]);
 

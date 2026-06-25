@@ -114,7 +114,7 @@ function recentRange(days: number): { from: Date; to: Date } {
  * stays light and import-safe; they are only pulled in when a sync actually runs
  * (and only after the DB gate has passed).
  */
-async function syncWorkspace(
+export async function syncWorkspace(
   workspaceId: string,
   platformFilter?: string,
 ): Promise<{ connections: number; metrics: number }> {
