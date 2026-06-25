@@ -3,7 +3,7 @@ import { AGENT_STATUS_LABEL, type AgentStatusKey, type ArtifactPayload } from "@
 import { getClient } from "./provider";
 import { TIER_MODEL, type ModelTier } from "./router";
 import { checkGroundedness } from "./oracle";
-import { dispatchTool, briefFromInput, marketScanFromInput, actionPlanInputFromTool, questionsFromInput, TOOLS, type DispatchCtx, type MetricsSource } from "./tools";
+import { dispatchTool, briefFromInput, marketScanFromInput, diagnosisFromInput, auditFromInput, actionPlanInputFromTool, questionsFromInput, TOOLS, type DispatchCtx, type MetricsSource } from "./tools";
 import { persistActionPlan } from "@/lib/actions/persist";
 import { startLlmTrace, type LlmTrace } from "@/lib/observability/llm-trace";
 
@@ -284,6 +284,40 @@ export async function* runAgentWithTools(opts: {
                 ? "Market scan rendered on the canvas."
                 : "Market scan needs a title, a read, and at least two field rows — try again.",
               is_error: !scan,
+            });
+            continue;
+          }
+          // add_diagnosis renders the ranked root-cause cascade for a performance
+          // question; add_audit renders the prioritized list of fixes.
+          if (tu.name === "add_diagnosis") {
+            const diag = diagnosisFromInput(tu.input);
+            if (diag) {
+              renderedCard = true;
+              yield { kind: "artifact", payload: diag };
+            }
+            results.push({
+              type: "tool_result",
+              tool_use_id: tu.id,
+              content: diag
+                ? "Diagnosis rendered on the canvas."
+                : "Diagnosis needs a metric, a change, a summary, and at least one cause — try again.",
+              is_error: !diag,
+            });
+            continue;
+          }
+          if (tu.name === "add_audit") {
+            const audit = auditFromInput(tu.input);
+            if (audit) {
+              renderedCard = true;
+              yield { kind: "artifact", payload: audit };
+            }
+            results.push({
+              type: "tool_result",
+              tool_use_id: tu.id,
+              content: audit
+                ? "Audit rendered on the canvas."
+                : "Audit needs at least one fix with a title and body — try again.",
+              is_error: !audit,
             });
             continue;
           }

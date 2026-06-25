@@ -1,6 +1,14 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { retrieveDoctrine, formatRetrieved } from "@/lib/rag/retrieve";
-import type { BriefData, MarketScanData, ProposedStep } from "@/types/artifacts";
+import type {
+  BriefData,
+  MarketScanData,
+  ProposedStep,
+  RootCauseData,
+  RecommendationsData,
+  RecommendationTag,
+  Tone,
+} from "@/types/artifacts";
 import type { ActionPlanInput } from "@/lib/actions/persist";
 
 /**
@@ -34,6 +42,8 @@ export const TOOL_SCOPE: Record<string, ToolScope> = {
   get_account_metrics: "internal",
   add_canvas_card: "doctrine",
   add_market_scan: "doctrine",
+  add_diagnosis: "doctrine",
+  add_audit: "doctrine",
   add_action_plan: "doctrine",
   ask_questions: "doctrine",
 };
@@ -159,6 +169,74 @@ export const TOOLS: Anthropic.Tool[] = [
         },
       },
       required: ["title", "read", "field"],
+    },
+  },
+  {
+    name: "add_diagnosis",
+    description:
+      "Render a DIAGNOSIS card — the designed template for performance questions ('why is my CPA up?', 'my ROAS dropped', 'my funnel is leaking'). Give the metric that moved, the direction of the change, a one-line summary, and a RANKED cause cascade (most-likely first) — each cause with how to confirm it and its likely impact. Use this over a plain card for any 'why is my X happening' answer. With zero connected data, diagnose from expertise: name the metric and describe the change qualitatively ('trending up'); never invent the user's exact numbers.",
+    input_schema: {
+      type: "object",
+      properties: {
+        metric: { type: "string", description: "The metric that moved, e.g. 'CPA', 'ROAS', 'conversion rate'." },
+        change: {
+          type: "string",
+          description:
+            "The change, described QUALITATIVELY ('rising', 'down sharply', 'roughly doubled'). Only use a specific figure if the USER stated it — never invent the user's numbers.",
+        },
+        direction: {
+          type: "string",
+          description: "Is the change bad, good, or neutral for the user? one of: bad | good | neutral.",
+        },
+        summary: { type: "string", description: "One-line framing of what's going on." },
+        drivers: {
+          type: "array",
+          description: "Ranked causes, most-likely first (2–6). Each: the cause, how to confirm it, and its likely impact.",
+          items: {
+            type: "object",
+            properties: {
+              label: { type: "string", description: "The cause, e.g. 'Auction competition rose'." },
+              detail: { type: "string", description: "How to confirm it / what to look at." },
+              impact: {
+                type: "string",
+                description:
+                  "Likely impact, QUALITATIVE — e.g. 'High', 'Biggest lever', 'Minor'. Don't attach invented percentages; only use a figure if the user gave it.",
+              },
+            },
+            required: ["label", "detail"],
+          },
+        },
+      },
+      required: ["metric", "change", "summary", "drivers"],
+    },
+  },
+  {
+    name: "add_audit",
+    description:
+      "Render an AUDIT card — the designed template for 'audit my website / funnel / SEO / account': a prioritized list of the highest-leverage fixes, each tagged by type and with its expected impact. Use this over a plain card whenever you've reviewed a site/funnel and have concrete fixes. You actually fetched and read the page, so ground each fix in what you found.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Optional audit title, e.g. 'Website & funnel audit'." },
+        items: {
+          type: "array",
+          description: "3–6 prioritized fixes, highest-leverage first.",
+          items: {
+            type: "object",
+            properties: {
+              tag: {
+                type: "string",
+                description: "One of: Quick win | Growth | Cleanup.",
+              },
+              title: { type: "string", description: "The fix, e.g. 'Add a clear above-the-fold CTA'." },
+              body: { type: "string", description: "What's wrong and what to do about it." },
+              impact: { type: "string", description: "Expected impact, e.g. 'High', '+conversion'." },
+            },
+            required: ["tag", "title", "body"],
+          },
+        },
+      },
+      required: ["items"],
     },
   },
   {
@@ -337,6 +415,60 @@ export function marketScanFromInput(input: unknown): { kind: "marketScan"; data:
 }
 
 /**
+ * Coerce an `add_diagnosis` tool input into a validated `rootCause` artifact (the
+ * ranked cause cascade for a performance question), or null if unusable.
+ */
+export function diagnosisFromInput(input: unknown): { kind: "rootCause"; data: RootCauseData } | null {
+  const o = (input ?? {}) as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+  const metric = str(o.metric);
+  const change = str(o.change);
+  const summary = str(o.summary);
+  const drivers = (Array.isArray(o.drivers) ? o.drivers : [])
+    .map((d) => {
+      const obj = (d ?? {}) as Record<string, unknown>;
+      return {
+        label: str(obj.label) ?? "",
+        detail: str(obj.detail) ?? "",
+        impact: str(obj.impact) ?? "",
+      };
+    })
+    .filter((d) => d.label.length > 0);
+  if (!metric || !change || !summary || drivers.length === 0) return null;
+  const dir = str(o.direction)?.toLowerCase();
+  const tone: Tone = dir === "good" ? "good" : dir === "neutral" ? "neutral" : "bad";
+  return { kind: "rootCause", data: { metric, change, tone, summary, drivers } };
+}
+
+const REC_TAGS: RecommendationTag[] = ["Quick win", "Growth", "Cleanup"];
+
+/**
+ * Coerce an `add_audit` tool input into a validated `recommendations` artifact (a
+ * prioritized list of tagged fixes), or null if it has no usable items.
+ */
+export function auditFromInput(input: unknown): { kind: "recommendations"; data: RecommendationsData } | null {
+  const o = (input ?? {}) as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+  const items = (Array.isArray(o.items) ? o.items : [])
+    .map((it, i) => {
+      const obj = (it ?? {}) as Record<string, unknown>;
+      const rawTag = str(obj.tag);
+      const tag: RecommendationTag =
+        (REC_TAGS.find((t) => t.toLowerCase() === rawTag?.toLowerCase()) as RecommendationTag) ?? "Quick win";
+      return {
+        id: `rec-${i}`,
+        tag,
+        title: str(obj.title) ?? "",
+        body: str(obj.body) ?? "",
+        impact: str(obj.impact) ?? "",
+      };
+    })
+    .filter((it) => it.title.length > 0 && it.body.length > 0);
+  if (items.length === 0) return null;
+  return { kind: "recommendations", data: { items } };
+}
+
+/**
  * Coerce an `add_action_plan` tool input into a validated ActionPlanInput (intent
  * only — title, optional situation, ProposedStep[]). The loop hands this to
  * persistActionPlan, which is the trust boundary that computes execMode/approval.
@@ -467,6 +599,24 @@ export async function dispatchTool(
       content: ok
         ? "Market scan rendered on the canvas."
         : "Market scan needs a title, a read, and at least two field rows.",
+      isError: !ok,
+    };
+  }
+
+  if (name === "add_diagnosis") {
+    const ok = diagnosisFromInput(input) !== null;
+    return {
+      content: ok
+        ? "Diagnosis rendered on the canvas."
+        : "Diagnosis needs a metric, a change, a summary, and at least one cause.",
+      isError: !ok,
+    };
+  }
+
+  if (name === "add_audit") {
+    const ok = auditFromInput(input) !== null;
+    return {
+      content: ok ? "Audit rendered on the canvas." : "Audit needs at least one fix with a title and body.",
       isError: !ok,
     };
   }
