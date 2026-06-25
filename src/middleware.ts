@@ -37,6 +37,9 @@ function isClerkConfigured(): boolean {
  */
 const isPublicRoute = createRouteMatcher([
   "/", // public marketing landing (signed-out) — crawlable for SEO
+  "/privacy",
+  "/terms",
+  "/data-deletion",
   "/robots.txt",
   "/sitemap.xml",
   "/opengraph-image(.*)",
