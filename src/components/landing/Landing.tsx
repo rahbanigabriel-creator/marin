@@ -314,12 +314,15 @@ export function Landing() {
             <span className="font-serif text-[15px] font-semibold text-ink-900">Marpin</span>
             <span className="font-sans text-[12.5px] text-ink-300">· AI marketing copilot</span>
           </div>
-          <div className="flex items-center gap-[18px] font-sans text-[13px] text-ink-500">
+          <div className="flex flex-wrap items-center gap-[16px] font-sans text-[13px] text-ink-500">
             <Link href="/app" className="hover:text-ink-900">
               Open app
             </Link>
-            <Link href="/sign-in" className="hover:text-ink-900">
-              Sign in
+            <Link href="/privacy" className="hover:text-ink-900">
+              Privacy
+            </Link>
+            <Link href="/terms" className="hover:text-ink-900">
+              Terms
             </Link>
             <span className="text-ink-300">© {new Date().getFullYear()} Marpin</span>
           </div>
