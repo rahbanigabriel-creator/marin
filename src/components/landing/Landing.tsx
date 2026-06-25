@@ -20,44 +20,32 @@ const CONNECTORS = [
   "X",
 ];
 
-const STEPS = [
+// The three lead cards carry the operator story as a funnel: free hook →
+// builds & ships → diagnoses & fixes. Each previews its real template (a graph /
+// mini card) — the visual output is the differentiator: any chat can send text.
+const LEAD_CARDS = [
   {
-    n: "1",
-    title: "Drop your website",
-    body: "Marpin reads your site and researches your market live — competitors, pricing, positioning, and the channels that matter for you.",
+    kind: "scan" as const,
+    title: "Market & competitor scan",
+    body: "Your market size, your share, and exactly how you stack up against every competitor — researched live from your URL, not guessed. This one's free.",
   },
   {
-    n: "2",
-    title: "See where you stand",
-    body: "Get a market scan on a working canvas: share of market, where you rank, your momentum, and the specific openings to win.",
+    kind: "campaign" as const,
+    title: "Campaigns, built — not suggested",
+    body: "Marpin writes the actual ad copy and briefs, tagged by platform, and ships them to Google, Meta, or TikTok in one click. You approve; it executes.",
   },
   {
-    n: "3",
-    title: "Ship the plan",
-    body: "Turn it into an executable plan — campaigns, post copy, and SEO fixes ready to run. You approve each step; Marpin does the work.",
+    kind: "diagnosis" as const,
+    title: "Performance diagnosis",
+    body: "“Why is my CPA up?” gets a ranked root-cause answer from a top-1% operator — connect your accounts and Marpin pinpoints the leak, then drafts the fix.",
   },
 ];
 
-const CAPABILITIES = [
-  {
-    title: "Market & competitor scan",
-    body: "Know your market size, your share, and exactly how you stack up against every competitor — researched live, not guessed.",
-  },
-  {
-    title: "Campaign planning",
-    body: "Get a prioritized plan with the actual ad copy and briefs written, tagged by platform, ready to launch in one click.",
-  },
+// De-emphasized second row — still indexable, but the three above lead.
+const SECONDARY_CARDS = [
   {
     title: "SEO & content",
     body: "Site and funnel audits, content gaps, and the highest-leverage fixes — with the page copy and meta already drafted.",
-  },
-  {
-    title: "Paid media",
-    body: "Strategy and creative across Google Ads, Meta, TikTok, LinkedIn and more — with budgets and targeting that make sense.",
-  },
-  {
-    title: "Performance diagnosis",
-    body: "“Why is my CPA up?” gets a ranked root-cause answer from a top-1% operator — connect your data to pinpoint the cause.",
   },
   {
     title: "Always-on copilot",
@@ -81,7 +69,7 @@ function JsonLd() {
         applicationCategory: "BusinessApplication",
         operatingSystem: "Web",
         description:
-          "AI marketing copilot — drop your website and get a live market scan, competitor analysis, and a one-click campaign plan across Google Ads, Meta, TikTok, LinkedIn, GA4 and more.",
+          "AI marketing operator — drop your website for a free market scan and competitor analysis, then connect your accounts and Marpin builds the campaigns, writes the copy, and ships the fixes across Google Ads, Meta, TikTok, LinkedIn, GA4 and more.",
         url: "https://www.marpin.ai",
         offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
       },
@@ -93,6 +81,97 @@ function JsonLd() {
       // eslint-disable-next-line react/no-danger
       dangerouslySetInnerHTML={{ __html: JSON.stringify(data) }}
     />
+  );
+}
+
+/**
+ * A small, illustrative preview of each lead card's real template — a graph or a
+ * mini card, not text. This is the "show, not tell": any chat can send text; the
+ * designed visual output is what makes Marpin different. Decorative only.
+ */
+function LeadTeaser({ kind }: { kind: "scan" | "campaign" | "diagnosis" }) {
+  if (kind === "scan") {
+    const bars = [
+      { w: 100, you: false },
+      { w: 68, you: false },
+      { w: 52, you: true },
+      { w: 36, you: false },
+    ];
+    return (
+      <div className="mb-[16px] rounded-[10px] border border-line-2 bg-surface-page p-[12px_13px]">
+        <div className="mb-[9px] flex items-center justify-between">
+          <span className="font-mono text-[8px] font-semibold uppercase tracking-[0.09em] text-ink-300">
+            By market share
+          </span>
+          <span className="font-mono text-[8px] font-semibold text-pos-700">+58% you</span>
+        </div>
+        <div className="flex flex-col gap-[7px]">
+          {bars.map((b, i) => (
+            <div key={i} className="flex items-center gap-[7px]">
+              <div className="h-[7px] flex-1 overflow-hidden rounded-[4px] bg-track-1">
+                <div
+                  className="h-full rounded-[4px]"
+                  style={{
+                    width: `${b.w}%`,
+                    background: b.you ? "linear-gradient(90deg,#9A3D63,#C57E9C)" : "#C9C3B6",
+                  }}
+                />
+              </div>
+              {b.you ? <span className="font-mono text-[8px] font-semibold text-plum">you</span> : null}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  if (kind === "campaign") {
+    return (
+      <div className="mb-[16px] rounded-[10px] border border-line-2 bg-surface-card p-[11px_12px]">
+        <div className="flex items-center justify-between">
+          <span
+            className="rounded-pill font-sans text-[9px] font-semibold"
+            style={{ background: "#F2E2EA", color: "#9A3D63", padding: "2px 8px" }}
+          >
+            TikTok · post
+          </span>
+          <span
+            className="rounded-chip font-sans text-[9px] font-semibold text-white"
+            style={{ background: "#2B2722", padding: "3px 10px" }}
+          >
+            Post ▸
+          </span>
+        </div>
+        <div className="mt-[9px] font-sans text-[10.5px] italic leading-[1.45] text-ink-450">
+          “Stop guessing your budget — here&apos;s the 60-second teardown of what&apos;s actually working.”
+        </div>
+      </div>
+    );
+  }
+  // diagnosis
+  return (
+    <div className="mb-[16px] rounded-[10px] border border-line-2 bg-surface-page p-[11px_12px]">
+      <div className="flex items-baseline justify-between">
+        <span className="font-sans text-[10px] font-medium text-ink-500">CPA · last 14 days</span>
+        <span className="font-mono text-[12px] font-semibold" style={{ color: "#B23A4B" }}>
+          ▲ 18%
+        </span>
+      </div>
+      <svg viewBox="0 0 120 26" preserveAspectRatio="none" className="mt-[7px] w-full" style={{ height: 22 }}>
+        <polyline
+          points="0,21 20,19 40,20 60,15 80,13 100,7 120,4"
+          fill="none"
+          stroke="#B23A4B"
+          strokeWidth="2"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+      </svg>
+      <div className="mt-[7px] font-sans text-[9.5px] text-ink-400">
+        <span className="font-semibold text-ink-600">1</span> Audience overlap
+        <span className="mx-[6px] text-ink-200">·</span>
+        <span className="font-semibold text-ink-600">2</span> CPC inflation
+      </div>
+    </div>
   );
 }
 
@@ -131,15 +210,15 @@ export function Landing() {
       {/* Hero */}
       <section className="mx-auto max-w-[1080px] px-[24px] pb-[40px] pt-[44px] text-center">
         <div className="mx-auto mb-[16px] inline-block rounded-pill border border-plum-border font-mono text-[11px] font-semibold uppercase tracking-[0.1em] text-plum" style={{ padding: "5px 12px" }}>
-          AI marketing copilot
+          The AI marketing operator
         </div>
         <h1 className="mx-auto max-w-[760px] font-serif text-[clamp(34px,6vw,58px)] font-medium leading-[1.08] tracking-[-0.01em] text-ink-900">
-          Drop your website. Get your next 10 growth moves.
+          Tell Marpin what to grow. It does the work.
         </h1>
-        <p className="mx-auto mt-[18px] max-w-[600px] font-sans text-[clamp(15px,2.2vw,18px)] leading-[1.6] text-ink-500">
-          Marpin researches your market, sizes up your competitors, and hands you an executable plan —
-          campaigns, copy, and SEO fixes you can ship in one click. Across Google Ads, Meta, TikTok,
-          LinkedIn, GA4 and more.
+        <p className="mx-auto mt-[18px] max-w-[620px] font-sans text-[clamp(15px,2.2vw,18px)] leading-[1.6] text-ink-500">
+          Free market scan from just your URL — competitors, openings, and your next moves. Connect your
+          accounts and Marpin builds the campaigns, writes the copy, and ships the fixes. Nothing goes live
+          without your approval.
         </p>
         <div className="mt-[26px]">
           <HeroUrlInput />
@@ -165,46 +244,32 @@ export function Landing() {
         </div>
       </section>
 
-      {/* How it works */}
+      {/* Capabilities — the three operator cards lead; two more, de-emphasized */}
       <section className="border-t border-line-2 bg-surface-panel py-[56px]">
-        <div className="mx-auto max-w-[1080px] px-[24px]">
-          <h2 className="text-center font-serif text-[clamp(26px,4vw,38px)] font-medium tracking-[-0.01em] text-ink-900">
-            From URL to a plan you can ship
-          </h2>
-          <div className="mt-[36px] grid gap-[20px] md:grid-cols-3">
-            {STEPS.map((s) => (
-              <div key={s.n} className="rounded-card border border-line-1 bg-surface-card p-[22px]">
-                <div
-                  className="flex items-center justify-center rounded-[10px] font-serif text-[16px] font-semibold"
-                  style={{ width: 34, height: 34, background: "#F2E2EA", color: "#9A3D63" }}
-                >
-                  {s.n}
-                </div>
-                <h3 className="mt-[14px] font-serif text-[19px] font-medium text-ink-900">{s.title}</h3>
-                <p className="mt-[8px] font-sans text-[14px] leading-[1.6] text-ink-500">{s.body}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Capabilities */}
-      <section className="py-[56px]">
         <div className="mx-auto max-w-[1080px] px-[24px]">
           <div className="text-center">
             <h2 className="font-serif text-[clamp(26px,4vw,38px)] font-medium tracking-[-0.01em] text-ink-900">
               A whole marketing team, in one chat
             </h2>
             <p className="mx-auto mt-[12px] max-w-[600px] font-sans text-[16px] leading-[1.6] text-ink-500">
-              Strategy, research, paid, SEO, and creative — Marpin does the entire marketing job and shows
-              its work as designed cards, not walls of text.
+              Research, paid, SEO, and creative — Marpin does the work and shows it as designed cards, not
+              walls of text.
             </p>
           </div>
-          <div className="mt-[36px] grid gap-[18px] md:grid-cols-2 lg:grid-cols-3">
-            {CAPABILITIES.map((c) => (
-              <div key={c.title} className="rounded-card border border-line-1 bg-surface-card p-[20px]">
+          <div className="mt-[36px] grid gap-[18px] md:grid-cols-3">
+            {LEAD_CARDS.map((c) => (
+              <div key={c.title} className="rounded-card border border-line-1 bg-surface-card p-[18px]">
+                <LeadTeaser kind={c.kind} />
                 <h3 className="font-serif text-[18px] font-medium text-ink-900">{c.title}</h3>
                 <p className="mt-[7px] font-sans text-[13.5px] leading-[1.6] text-ink-500">{c.body}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mx-auto mt-[16px] grid max-w-[760px] gap-[14px] sm:grid-cols-2">
+            {SECONDARY_CARDS.map((c) => (
+              <div key={c.title} className="rounded-card border border-line-2 bg-surface-card/60 p-[16px_18px]">
+                <h3 className="font-serif text-[15.5px] font-medium text-ink-800">{c.title}</h3>
+                <p className="mt-[5px] font-sans text-[12.5px] leading-[1.55] text-ink-400">{c.body}</p>
               </div>
             ))}
           </div>

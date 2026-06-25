@@ -31,9 +31,9 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 const SITE_URL = "https://www.marpin.ai";
-const TITLE = "Marpin — AI Marketing Copilot";
+const TITLE = "Marpin — The AI Marketing Operator";
 const DESCRIPTION =
-  "Marpin is your AI marketing copilot. Drop your website and get a live market scan, competitor analysis, and a one-click campaign plan across Google Ads, Meta, TikTok, LinkedIn, GA4 and more.";
+  "Marpin is your AI marketing operator. Drop your website for a free market scan and competitor analysis, then connect your accounts and Marpin builds the campaigns, writes the copy, and ships the fixes — across Google Ads, Meta, TikTok, LinkedIn, GA4 and more.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -44,6 +44,7 @@ export const metadata: Metadata = {
   description: DESCRIPTION,
   applicationName: "Marpin",
   keywords: [
+    "AI marketing operator",
     "AI marketing copilot",
     "AI CMO",
     "marketing operating system",
