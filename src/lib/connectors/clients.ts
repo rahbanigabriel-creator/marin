@@ -341,15 +341,17 @@ export class MetaAdsClient implements ConnectorClient {
   private normalize(payload: MetaInsights): CanonicalMetric[] {
     return (payload.data ?? []).flatMap((row) => {
       const spend = n(row.spend);
-      const conversions = actionValue(row.actions, [
-        "purchase",
-        "offsite_conversion.fb_pixel_purchase",
-        "onsite_conversion.purchase",
-      ]);
+      // The campaign's RESULT — count the dominant conversion event (installs,
+      // registrations, leads, purchases…), not just purchases. Each category
+      // de-dupes the omni_* / specific variants (Meta reports both with the same
+      // value), and we take the largest category as the optimization result so
+      // an app-install campaign reads its installs, an e-commerce one its sales.
+      const conversions = metaConversions(row.actions);
       const actionRevenue = actionValue(row.action_values, [
         "purchase",
         "offsite_conversion.fb_pixel_purchase",
         "onsite_conversion.purchase",
+        "omni_purchase",
       ]);
       const revenue = actionRevenue || spend * n(row.purchase_roas?.[0]?.value);
       return rowsFor({
@@ -370,6 +372,44 @@ function actionValue(actions: Array<{ action_type?: string; value?: string }> | 
   return (actions ?? [])
     .filter((action) => action.action_type && names.includes(action.action_type))
     .reduce((sum, action) => sum + n(action.value), 0);
+}
+
+// Conversion categories for Meta "results". Each category lists equivalent
+// action_types (the omni_* aggregate duplicates the specific event with the
+// same value), so we count ONE per category. We then take the largest category
+// as the campaign's optimization result.
+const META_CONVERSION_CATEGORIES: ReadonlyArray<ReadonlyArray<string>> = [
+  ["purchase", "offsite_conversion.fb_pixel_purchase", "onsite_conversion.purchase", "omni_purchase"],
+  ["mobile_app_install", "app_install", "omni_app_install"],
+  ["lead", "offsite_conversion.fb_pixel_lead", "onsite_conversion.lead_grouped", "omni_lead"],
+  ["complete_registration", "offsite_conversion.fb_pixel_complete_registration", "omni_complete_registration"],
+  ["subscribe", "omni_subscribe"],
+  ["start_trial", "omni_start_trial"],
+  ["add_to_cart", "offsite_conversion.fb_pixel_add_to_cart", "omni_add_to_cart"],
+];
+
+/**
+ * Meta's `actions` array reports every tracked event, and omni_* duplicates the
+ * specific event with the same value — so naively summing double-counts. We take
+ * the dominant conversion CATEGORY (de-duped within category, largest across
+ * categories) as the campaign's result: an app-install campaign reads its
+ * installs, an e-commerce one its purchases.
+ */
+function metaConversions(actions: Array<{ action_type?: string; value?: string }> | undefined): number {
+  if (!actions || actions.length === 0) return 0;
+  const byType = new Map<string, number>();
+  for (const a of actions) if (a.action_type) byType.set(a.action_type, n(a.value));
+  let best = 0;
+  for (const category of META_CONVERSION_CATEGORIES) {
+    for (const type of category) {
+      const v = byType.get(type);
+      if (v !== undefined) {
+        best = Math.max(best, v); // first present type per category — no omni_* double-count
+        break;
+      }
+    }
+  }
+  return best;
 }
 
 interface LinkedInAnalytics {
