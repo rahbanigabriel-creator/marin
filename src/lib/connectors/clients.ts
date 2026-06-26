@@ -7,6 +7,7 @@ import { decryptToken, encryptToken, isVaultConfigured, tokenAad } from "@/lib/s
 import { refreshAccessToken } from "@/lib/connectors/oauth";
 import {
   ConnectorNotReadyError,
+  type CampaignConfig,
   type CanonicalMetric,
   type ConnectorClient,
   type ConnectorPlatform,
@@ -233,6 +234,82 @@ export class GoogleAdsClient implements ConnectorClient {
       }),
     );
   }
+
+  async fetchCampaigns(connection: Connection): Promise<CampaignConfig[]> {
+    const accessToken = await accessTokenFor(connection, this.platform);
+    const customerId = connection.externalAccountId.replace(/-/g, "");
+    if (!customerId) {
+      throw new ConnectorNotReadyError(this.platform, "connection has no Google Ads customer id");
+    }
+    const url = `https://googleads.googleapis.com/${GOOGLE_ADS_API_VERSION}/customers/${customerId}/googleAds:searchStream`;
+    const query = [
+      "SELECT campaign.id, campaign.name, campaign.status,",
+      "campaign.advertising_channel_type, campaign_budget.amount_micros,",
+      "campaign_budget.period, customer.currency_code",
+      "FROM campaign",
+      "WHERE campaign.status != 'REMOVED'",
+    ].join(" ");
+    const res = await fetch(url, {
+      method: "POST",
+      headers: googleAdsHeaders(accessToken),
+      body: JSON.stringify({ query }),
+    });
+    if (!res.ok) {
+      throw new ConnectorNotReadyError(this.platform, `Google Ads campaigns API responded ${res.status}`);
+    }
+    const batches = (await res.json()) as GoogleAdsCampaignBatch[];
+    const out: CampaignConfig[] = [];
+    for (const batch of Array.isArray(batches) ? batches : []) {
+      for (const row of batch.results ?? []) {
+        const id = row.campaign?.id;
+        const name = row.campaign?.name;
+        if (id == null || !name) continue;
+        const micros = n(row.campaignBudget?.amountMicros);
+        // amount_micros is per-day only for a DAILY budget period; a custom/total
+        // period reports a total, so label it lifetime rather than mislabel daily.
+        const period = (row.campaignBudget?.period ?? "").toUpperCase();
+        out.push({
+          platform: this.platform,
+          externalId: String(id),
+          name,
+          status: googleStatus(row.campaign?.status),
+          objective: prettyToken(row.campaign?.advertisingChannelType),
+          budget: micros > 0 ? micros / 1_000_000 : null,
+          budgetType: micros > 0 ? (period === "" || period.includes("DAILY") ? "daily" : "lifetime") : null,
+          currency: row.customer?.currencyCode ?? null,
+        });
+      }
+    }
+    return out;
+  }
+}
+
+interface GoogleAdsCampaignBatch {
+  results?: Array<{
+    campaign?: { id?: string | number; name?: string; status?: string; advertisingChannelType?: string };
+    campaignBudget?: { amountMicros?: string | number; period?: string };
+    customer?: { currencyCode?: string };
+  }>;
+}
+
+/** ENABLED/PAUSED/REMOVED → normalized lower-case status. */
+function googleStatus(s: string | undefined): string | null {
+  if (!s) return null;
+  const v = s.toUpperCase();
+  if (v === "ENABLED") return "active";
+  if (v === "PAUSED") return "paused";
+  if (v === "REMOVED") return "removed";
+  return s.toLowerCase();
+}
+
+/** SCREAMING_SNAKE platform token → Title Case label (channel type, objective). */
+function prettyToken(t: string | undefined): string | null {
+  if (!t) return null;
+  return t
+    .replace(/^OUTCOME_/, "")
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
 interface Ga4Report {
@@ -366,6 +443,108 @@ export class MetaAdsClient implements ConnectorClient {
       });
     });
   }
+
+  async fetchCampaigns(connection: Connection): Promise<CampaignConfig[]> {
+    const accessToken = await accessTokenFor(connection, this.platform);
+    const accountId = connection.externalAccountId.startsWith("act_")
+      ? connection.externalAccountId
+      : `act_${connection.externalAccountId}`;
+
+    // Resolve the account currency once so budget minor-units convert correctly:
+    // most currencies use 1/100, but zero-decimal (JPY, KRW…) use 1/1.
+    const currency = await metaAccountCurrency(accountId, accessToken);
+    const divisor = minorUnitDivisor(currency);
+
+    const url = new URL(`https://graph.facebook.com/${META_GRAPH_VERSION}/${accountId}/campaigns`);
+    url.searchParams.set("fields", "id,name,status,effective_status,objective,daily_budget,lifetime_budget");
+    url.searchParams.set("limit", "200");
+    url.searchParams.set("access_token", accessToken);
+
+    const out: CampaignConfig[] = [];
+    let next: string | undefined = url.toString();
+    while (next) {
+      const res = await fetch(next, { method: "GET", headers: { Accept: "application/json" } });
+      if (!res.ok) {
+        throw new ConnectorNotReadyError(this.platform, `Meta campaigns API responded ${res.status}`);
+      }
+      const payload = (await res.json()) as MetaCampaignsResponse;
+      for (const c of payload.data ?? []) {
+        if (!c.id || !c.name) continue;
+        // Meta budgets are MINOR units as strings; null when budget is set at the
+        // ad-set level (campaign-level budget absent).
+        const daily = n(c.daily_budget);
+        const lifetime = n(c.lifetime_budget);
+        const budget = daily > 0 ? daily / divisor : lifetime > 0 ? lifetime / divisor : null;
+        out.push({
+          platform: this.platform,
+          externalId: c.id,
+          name: c.name,
+          status: metaStatus(c.status ?? c.effective_status),
+          objective: prettyToken(c.objective),
+          budget,
+          budgetType: daily > 0 ? "daily" : lifetime > 0 ? "lifetime" : null,
+          currency,
+        });
+      }
+      next = payload.paging?.next;
+    }
+    return out;
+  }
+}
+
+/** Read a Meta ad account's reporting currency (best-effort; null on failure). */
+async function metaAccountCurrency(accountId: string, accessToken: string): Promise<string | null> {
+  try {
+    const url = new URL(`https://graph.facebook.com/${META_GRAPH_VERSION}/${accountId}`);
+    url.searchParams.set("fields", "currency");
+    url.searchParams.set("access_token", accessToken);
+    const res = await fetch(url.toString(), { headers: { Accept: "application/json" } });
+    if (!res.ok) return null;
+    const j = (await res.json()) as { currency?: string };
+    return j.currency ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Zero-decimal currencies (amounts already in major units — no /100). */
+const ZERO_DECIMAL_CURRENCIES = new Set([
+  "JPY", "KRW", "VND", "CLP", "ISK", "UGX", "PYG", "GNF", "RWF", "VUV",
+  "XAF", "XOF", "XPF", "BIF", "DJF", "KMF", "MGA",
+]);
+/** Three-decimal currencies (minor unit is 1/1000). */
+const THREE_DECIMAL_CURRENCIES = new Set(["BHD", "IQD", "JOD", "KWD", "LYD", "OMR", "TND"]);
+
+/** Minor-unit → major-unit divisor for a currency (default 100). */
+function minorUnitDivisor(currency: string | null): number {
+  if (!currency) return 100;
+  const c = currency.toUpperCase();
+  if (ZERO_DECIMAL_CURRENCIES.has(c)) return 1;
+  if (THREE_DECIMAL_CURRENCIES.has(c)) return 1000;
+  return 100;
+}
+
+interface MetaCampaignsResponse {
+  data?: Array<{
+    id?: string;
+    name?: string;
+    status?: string;
+    effective_status?: string;
+    objective?: string;
+    daily_budget?: string;
+    lifetime_budget?: string;
+  }>;
+  paging?: { next?: string };
+}
+
+/** Meta (effective_)status → normalized lower-case (active | paused | archived). */
+function metaStatus(s: string | undefined): string | null {
+  if (!s) return null;
+  const v = s.toLowerCase();
+  if (v.includes("active")) return "active";
+  if (v.includes("paused")) return "paused";
+  if (v.includes("archived") || v.includes("deleted")) return "archived";
+  return v;
 }
 
 function actionValue(actions: Array<{ action_type?: string; value?: string }> | undefined, names: string[]): number {

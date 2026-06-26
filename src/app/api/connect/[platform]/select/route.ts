@@ -12,7 +12,7 @@ import {
   type OAuthTokens,
 } from "@/lib/connectors/oauth";
 import { decryptToken, isVaultConfigured, tokenAad } from "@/lib/security/vault";
-import { emitConnectionConnected } from "@/lib/jobs/inngest";
+import { emitConnectionBackfill, emitConnectionConnected } from "@/lib/jobs/inngest";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -117,5 +117,7 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<R
   }
 
   await emitConnectionConnected({ workspaceId: workspace.id, platform: oauthPlatform });
+  // Background deep-history backfill (no-op until Inngest is configured).
+  await emitConnectionBackfill({ workspaceId: workspace.id, platform: oauthPlatform });
   return appRedirect(req, "connected", config.id);
 }
