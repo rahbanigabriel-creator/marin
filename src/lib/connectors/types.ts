@@ -64,9 +64,36 @@ export interface CanonicalMetric {
  * inside fetchMetrics, and only after feature-detecting config/tokens — so the
  * module graph stays import-safe and the build is green with no keys.
  */
+/**
+ * Campaign CONFIGURATION (not performance) — status, budget, objective for the
+ * command center. Emitted by `fetchCampaigns` and upserted into the Campaign
+ * entity (prisma `campaigns`). All config fields are optional: a platform may
+ * not expose budget/objective, and metrics-only platforms implement no
+ * `fetchCampaigns` at all. `name`/`externalId` let the dashboard join config
+ * onto MetricFact rows (which key performance by campaign name or id).
+ */
+export interface CampaignConfig {
+  platform: ConnectorPlatform;
+  externalId: string;
+  name: string;
+  status?: string | null;
+  objective?: string | null;
+  /** Budget in account-currency MAJOR units (e.g. euros), or null. */
+  budget?: number | null;
+  budgetType?: "daily" | "lifetime" | null;
+  currency?: string | null;
+}
+
 export interface ConnectorClient {
   readonly platform: ConnectorPlatform;
   fetchMetrics(connection: Connection, range: MetricRange): Promise<CanonicalMetric[]>;
+  /**
+   * Optional config read: campaign status/budget/objective. Implemented only by
+   * platforms with a campaigns endpoint (Meta, Google Ads today). Like
+   * fetchMetrics, it MUST NOT touch the network at construction — only when
+   * called, after feature-detecting config/tokens.
+   */
+  fetchCampaigns?(connection: Connection): Promise<CampaignConfig[]>;
 }
 
 /**

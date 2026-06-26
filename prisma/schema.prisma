@@ -32,6 +32,7 @@ model Workspace {
   memberships  Membership[]
   connections  Connection[]
   metricFacts  MetricFact[]
+  campaigns    Campaign[]
   subscription Subscription?
   usageEvents  UsageEvent[]
   actions      Action[]
@@ -112,6 +113,35 @@ model MetricFact {
   @@index([workspaceId, platform, date])
   @@index([workspaceId, metric])
   @@map("metric_facts")
+}
+
+/// Campaign CONFIGURATION (not performance) — the entity behind a Google/Meta-
+/// Ads-style command center: status, budget, objective. Distinct from MetricFact
+/// (which is per-day performance): a campaign has ONE current config row, fetched
+/// from each platform's campaigns endpoint and upserted on the natural key
+/// (workspace, platform, externalId). `name` is stored so the dashboard can join
+/// config onto MetricFact rows (which key performance by campaign name/id). All
+/// config fields are nullable: a platform may not expose budget/objective, and a
+/// metrics-only platform writes no Campaign rows at all (config stays null).
+model Campaign {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  platform    String // google_ads | meta_ads | ...
+  externalId  String   @map("external_id") // the platform's campaign id
+  name        String // human label; joins to MetricFact.campaign for Google/Meta
+  status      String? // active | paused | removed | ... (platform-normalized lower-case)
+  objective   String? // e.g. OUTCOME_SALES, Search, Lead gen
+  budget      Float? // amount in account currency major units (e.g. €), or null
+  budgetType  String?  @map("budget_type") // daily | lifetime
+  currency    String? // ISO currency code when known
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, platform, externalId])
+  @@index([workspaceId, platform])
+  @@map("campaigns")
 }
 
 /// Stripe-backed billing state for a workspace (one per tenant).

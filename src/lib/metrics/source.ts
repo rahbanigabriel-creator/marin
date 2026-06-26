@@ -1,4 +1,4 @@
-import type { MetricFact } from "@prisma/client";
+import type { Campaign, MetricFact } from "@prisma/client";
 
 import { prisma, isDatabaseConfigured } from "@/lib/db";
 import type { MetricsSource } from "@/lib/agent/tools";
@@ -239,6 +239,50 @@ export async function readRecentMetricFacts(
   windowDays = RECENT_WINDOW_DAYS,
 ): Promise<MetricFactRow[]> {
   return query(workspaceId, windowStart(windowDays));
+}
+
+/**
+ * Read this workspace's MetricFact rows for an explicit [from, to] window
+ * (inclusive, UTC). Powers the dashboard's date-range picker. A direct prisma
+ * read — the MetricFactQuery seam above exists for the agent's recent-window
+ * source; the dashboard needs both bounds, so it reads directly.
+ */
+export async function readMetricFactsRange(
+  workspaceId: string,
+  from: Date,
+  to: Date,
+): Promise<MetricFactRow[]> {
+  return prisma.metricFact.findMany({
+    where: { workspaceId, date: { gte: from, lte: to } },
+    select: { platform: true, campaign: true, metric: true, value: true, date: true },
+    orderBy: { date: "asc" },
+  });
+}
+
+/** Per-campaign config (status/budget/objective) for the dashboard join. */
+export type CampaignConfigRow = Pick<
+  Campaign,
+  "platform" | "externalId" | "name" | "status" | "objective" | "budget" | "budgetType"
+>;
+
+/**
+ * Read this workspace's campaign config rows (Phase 3). Used by the dashboard to
+ * decorate performance rows with status/budget/objective. Separate from
+ * MetricFact: config is the campaign entity, performance is per-day facts.
+ */
+export async function readCampaignConfig(workspaceId: string): Promise<CampaignConfigRow[]> {
+  return prisma.campaign.findMany({
+    where: { workspaceId },
+    select: {
+      platform: true,
+      externalId: true,
+      name: true,
+      status: true,
+      objective: true,
+      budget: true,
+      budgetType: true,
+    },
+  });
 }
 
 /**

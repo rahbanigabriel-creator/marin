@@ -21,7 +21,7 @@ import {
 } from "@/lib/connectors/oauth";
 import { listOAuthAccounts, type AccountSelection } from "@/lib/connectors/clients";
 import { persistOAuthConnection } from "@/lib/connectors/persist";
-import { emitConnectionConnected } from "@/lib/jobs/inngest";
+import { emitConnectionBackfill, emitConnectionConnected } from "@/lib/jobs/inngest";
 
 /**
  * GET /api/connect/[platform]/callback — finish a connector OAuth flow.
@@ -286,6 +286,9 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Re
   }
 
   await emitConnectionConnected({ workspaceId: workspace.id, platform: config.id });
+  // Also pull deep history in the background so the dashboard's date picker has
+  // depth, not just the trailing 30 days. No-op until Inngest is configured.
+  await emitConnectionBackfill({ workspaceId: workspace.id, platform: config.id });
 
   return appRedirect(req, "connected", config.id);
 }
