@@ -1,4 +1,4 @@
-import type { Campaign, MetricFact } from "@prisma/client";
+import type { Ad, Campaign, MetricFact } from "@prisma/client";
 
 import { prisma, isDatabaseConfigured } from "@/lib/db";
 import type { MetricsSource } from "@/lib/agent/tools";
@@ -225,11 +225,102 @@ export async function createDbMetricsSource(
 ): Promise<MetricsSource> {
   const since = windowStart(windowDays);
   const rows = await query(workspaceId, since);
+  // Ads/creatives give the agent access to what's actually RUNNING (copy +
+  // performance), not just aggregate numbers. Best-effort: a missing table or a
+  // workspace with no ads simply yields no creatives block.
+  let ads: AdRow[] = [];
+  try {
+    ads = await readAds(workspaceId);
+  } catch {
+    ads = [];
+  }
   return {
     getAccountMetrics(sections?: string[]): string {
-      return serializeMetricFacts(rows, sections, windowDays);
+      const metrics = serializeMetricFacts(rows, sections, windowDays);
+      const creatives = serializeAds(ads);
+      return creatives ? `${metrics}\n\n${creatives}` : metrics;
     },
   };
+}
+
+/** Per-ad row (config + creative + perf snapshot) for the dashboard + agent. */
+export type AdRow = Pick<
+  Ad,
+  | "platform"
+  | "externalId"
+  | "campaignExternalId"
+  | "campaignName"
+  | "adsetName"
+  | "name"
+  | "status"
+  | "creativeType"
+  | "thumbnailUrl"
+  | "title"
+  | "body"
+  | "callToAction"
+  | "linkUrl"
+  | "spend"
+  | "impressions"
+  | "clicks"
+  | "conversions"
+>;
+
+/** Read this workspace's ads (with creative + perf snapshot), most-spend first. */
+export async function readAds(workspaceId: string): Promise<AdRow[]> {
+  return prisma.ad.findMany({
+    where: { workspaceId },
+    select: {
+      platform: true,
+      externalId: true,
+      campaignExternalId: true,
+      campaignName: true,
+      adsetName: true,
+      name: true,
+      status: true,
+      creativeType: true,
+      thumbnailUrl: true,
+      title: true,
+      body: true,
+      callToAction: true,
+      linkUrl: true,
+      spend: true,
+      impressions: true,
+      clicks: true,
+      conversions: true,
+    },
+    orderBy: { spend: "desc" },
+  });
+}
+
+/** A compact, model-readable creatives block grouped by campaign (agent access). */
+function serializeAds(ads: AdRow[]): string {
+  if (ads.length === 0) return "";
+  const byCampaign = new Map<string, AdRow[]>();
+  for (const a of ads) {
+    const key = a.campaignName ?? "(no campaign)";
+    const list = byCampaign.get(key) ?? [];
+    list.push(a);
+    byCampaign.set(key, list);
+  }
+  const lines: string[] = ["Running ads & creatives (last-30-day snapshot, independent of any selected range):"];
+  for (const [campaign, list] of byCampaign) {
+    lines.push(`${campaign}:`);
+    for (const a of list.slice(0, 12)) {
+      const perf = [
+        a.spend != null ? `€${round(a.spend, 2)} spend` : null,
+        a.impressions != null ? `${round(a.impressions, 0)} impr` : null,
+        a.clicks != null ? `${round(a.clicks, 0)} clicks` : null,
+        a.conversions != null ? `${round(a.conversions, 0)} results` : null,
+      ]
+        .filter(Boolean)
+        .join(", ");
+      const copy = a.title || a.body ? ` — "${[a.title, a.body].filter(Boolean).join(" / ")}"` : "";
+      const cta = a.callToAction ? ` [${a.callToAction}]` : "";
+      const status = a.status ? ` (${a.status})` : "";
+      lines.push(`  • ${a.name}${status}${copy}${cta}${perf ? ` — ${perf}` : ""}`);
+    }
+  }
+  return lines.join("\n");
 }
 
 /** Read the same recent MetricFact rows used by the agent for visual artifacts. */

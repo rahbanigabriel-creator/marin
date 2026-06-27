@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { DashCampaign } from "@/lib/metrics/dashboard";
-import { campaignValue, COLUMNS, roasColor, type MetricKey } from "./format";
+import { campaignValue, COLUMNS, resultLabel, roasColor, type MetricKey } from "./format";
 
 /**
  * The browsable, sortable campaign table — the spreadsheet at the heart of the
@@ -108,6 +108,17 @@ export function CampaignsTable({ campaigns, columns, onRowClick }: CampaignsTabl
                 {columns.map((key) => {
                   const col = COLUMNS[key];
                   const v = campaignValue(c, key);
+                  if (key === "conversions") {
+                    // Show the count AND what it actually is (installs/leads/…).
+                    return (
+                      <td key={key} className="whitespace-nowrap p-[10px_12px] text-right">
+                        <div className="font-mono text-[12.5px] text-[#3A352E]">{col.fmt(v)}</div>
+                        {c.objective ? (
+                          <div className="font-sans text-[10px] text-ink-300">{resultLabel(c.objective)}</div>
+                        ) : null}
+                      </td>
+                    );
+                  }
                   return (
                     <td
                       key={key}

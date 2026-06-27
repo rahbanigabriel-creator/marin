@@ -7,6 +7,7 @@ import { decryptToken, encryptToken, isVaultConfigured, tokenAad } from "@/lib/s
 import { refreshAccessToken } from "@/lib/connectors/oauth";
 import {
   ConnectorNotReadyError,
+  type AdCreative,
   type CampaignConfig,
   type CanonicalMetric,
   type ConnectorClient,
@@ -479,7 +480,7 @@ export class MetaAdsClient implements ConnectorClient {
           platform: this.platform,
           externalId: c.id,
           name: c.name,
-          status: metaStatus(c.status ?? c.effective_status),
+          status: metaStatus(c.effective_status ?? c.status),
           objective: prettyToken(c.objective),
           budget,
           budgetType: daily > 0 ? "daily" : lifetime > 0 ? "lifetime" : null,
@@ -490,6 +491,188 @@ export class MetaAdsClient implements ConnectorClient {
     }
     return out;
   }
+
+  async fetchAds(connection: Connection, range: MetricRange): Promise<AdCreative[]> {
+    const accessToken = await accessTokenFor(connection, this.platform);
+    const accountId = connection.externalAccountId.startsWith("act_")
+      ? connection.externalAccountId
+      : `act_${connection.externalAccountId}`;
+
+    // 1) Per-ad performance over the window (one aggregate row per ad).
+    const perf = await this.fetchAdInsights(accountId, accessToken, range);
+
+    // 2) Ads + their creative (config). Paginated.
+    const url = new URL(`https://graph.facebook.com/${META_GRAPH_VERSION}/${accountId}/ads`);
+    url.searchParams.set(
+      "fields",
+      [
+        "id,name,status,effective_status,campaign_id,adset{name}",
+        "campaign{name}",
+        "creative{thumbnail_url,image_url,title,body,object_type,call_to_action_type," +
+          "object_story_spec{link_data{message,name,link,call_to_action{type},child_attachments{link}}," +
+          "video_data{message,title,call_to_action{type}}}}",
+      ].join(","),
+    );
+    url.searchParams.set("limit", "100");
+    url.searchParams.set("access_token", accessToken);
+
+    const out: AdCreative[] = [];
+    let next: string | undefined = url.toString();
+    while (next) {
+      const res = await fetch(next, { method: "GET", headers: { Accept: "application/json" } });
+      if (!res.ok) {
+        throw new ConnectorNotReadyError(this.platform, `Meta ads API responded ${res.status}`);
+      }
+      const payload = (await res.json()) as MetaAdsResponse;
+      for (const ad of payload.data ?? []) {
+        if (!ad.id || !ad.name) continue;
+        const creative = extractMetaCreative(ad.creative);
+        const p = perf.get(ad.id);
+        out.push({
+          platform: this.platform,
+          externalId: ad.id,
+          campaignExternalId: ad.campaign_id ?? null,
+          campaignName: ad.campaign?.name ?? null,
+          adsetName: ad.adset?.name ?? null,
+          name: ad.name,
+          // effective_status is the REAL delivery state (carries CAMPAIGN_PAUSED /
+          // ADSET_PAUSED / DISAPPROVED that the configured `status` hides).
+          status: metaStatus(ad.effective_status ?? ad.status),
+          creativeType: creative.creativeType,
+          thumbnailUrl: creative.thumbnailUrl,
+          title: creative.title,
+          body: creative.body,
+          callToAction: prettyToken(creative.callToAction ?? undefined),
+          linkUrl: creative.linkUrl,
+          spend: p?.spend ?? null,
+          impressions: p?.impressions ?? null,
+          clicks: p?.clicks ?? null,
+          conversions: p?.conversions ?? null,
+        });
+      }
+      next = payload.paging?.next;
+    }
+    return out;
+  }
+
+  /** Aggregate per-ad insights over the window → map keyed by ad id. */
+  private async fetchAdInsights(
+    accountId: string,
+    accessToken: string,
+    range: MetricRange,
+  ): Promise<Map<string, { spend: number; impressions: number; clicks: number; conversions: number }>> {
+    const map = new Map<string, { spend: number; impressions: number; clicks: number; conversions: number }>();
+    const url = new URL(`https://graph.facebook.com/${META_GRAPH_VERSION}/${accountId}/insights`);
+    url.searchParams.set("level", "ad");
+    url.searchParams.set("fields", "ad_id,spend,impressions,clicks,actions");
+    url.searchParams.set("time_range", JSON.stringify({ since: isoDate(range.from), until: isoDate(range.to) }));
+    url.searchParams.set("limit", "300");
+    url.searchParams.set("access_token", accessToken);
+
+    let next: string | undefined = url.toString();
+    while (next) {
+      const res = await fetch(next, { method: "GET", headers: { Accept: "application/json" } });
+      if (!res.ok) {
+        // Best-effort: ads still render without perf. Log so a token/permission
+        // failure (which would leave every ad at €0) is diagnosable, not silent.
+        console.warn(`[meta] ad insights responded ${res.status}; ads will show without a performance snapshot`);
+        break;
+      }
+      const payload = (await res.json()) as MetaAdInsightsResponse;
+      for (const row of payload.data ?? []) {
+        if (!row.ad_id) continue;
+        map.set(row.ad_id, {
+          spend: n(row.spend),
+          impressions: n(row.impressions),
+          clicks: n(row.clicks),
+          conversions: metaConversions(row.actions),
+        });
+      }
+      next = payload.paging?.next;
+    }
+    return map;
+  }
+}
+
+interface MetaAdsResponse {
+  data?: Array<{
+    id?: string;
+    name?: string;
+    status?: string;
+    effective_status?: string;
+    campaign_id?: string;
+    campaign?: { name?: string };
+    adset?: { name?: string };
+    creative?: MetaCreative;
+  }>;
+  paging?: { next?: string };
+}
+
+interface MetaCreative {
+  thumbnail_url?: string;
+  image_url?: string;
+  title?: string;
+  body?: string;
+  object_type?: string;
+  call_to_action_type?: string;
+  object_story_spec?: {
+    link_data?: {
+      message?: string;
+      name?: string;
+      link?: string;
+      call_to_action?: { type?: string };
+      child_attachments?: Array<{ link?: string }>;
+    };
+    video_data?: { message?: string; title?: string; call_to_action?: { type?: string } };
+  };
+}
+
+interface MetaAdInsightsResponse {
+  data?: Array<{
+    ad_id?: string;
+    spend?: string;
+    impressions?: string;
+    clicks?: string;
+    actions?: Array<{ action_type?: string; value?: string }>;
+  }>;
+  paging?: { next?: string };
+}
+
+/** Pull headline/body/CTA/thumbnail out of Meta's nested creative shape. */
+function extractMetaCreative(c: MetaCreative | undefined): {
+  creativeType: string | null;
+  thumbnailUrl: string | null;
+  title: string | null;
+  body: string | null;
+  callToAction: string | null;
+  linkUrl: string | null;
+} {
+  if (!c) {
+    return { creativeType: null, thumbnailUrl: null, title: null, body: null, callToAction: null, linkUrl: null };
+  }
+  const link = c.object_story_spec?.link_data;
+  const video = c.object_story_spec?.video_data;
+  const objType = (c.object_type ?? "").toUpperCase();
+  const childCount = link?.child_attachments?.length ?? 0;
+  // object_type=SHARE is Meta's generic container (link/carousel/dynamic), NOT a
+  // photo signal — classify by concrete evidence: video_data → video, multi-card
+  // child_attachments → carousel, else a thumbnail/image → image, else text.
+  const creativeType =
+    objType.includes("VIDEO") || video
+      ? "video"
+      : childCount > 1
+        ? "carousel"
+        : c.thumbnail_url || c.image_url
+          ? "image"
+          : "text";
+  return {
+    creativeType,
+    thumbnailUrl: c.thumbnail_url ?? c.image_url ?? null,
+    title: c.title ?? link?.name ?? video?.title ?? null,
+    body: c.body ?? link?.message ?? video?.message ?? null,
+    callToAction: c.call_to_action_type ?? link?.call_to_action?.type ?? video?.call_to_action?.type ?? null,
+    linkUrl: link?.link ?? null,
+  };
 }
 
 /** Read a Meta ad account's reporting currency (best-effort; null on failure). */
@@ -537,13 +720,20 @@ interface MetaCampaignsResponse {
   paging?: { next?: string };
 }
 
-/** Meta (effective_)status → normalized lower-case (active | paused | archived). */
+/**
+ * Meta (effective_)status → normalized state. Handles the delivery-blocking
+ * effective_status values (CAMPAIGN_PAUSED / ADSET_PAUSED → paused, DISAPPROVED /
+ * WITH_ISSUES → rejected, PENDING_REVIEW / IN_PROCESS → in review) so the UI pill
+ * and agent text reflect whether the ad is actually running.
+ */
 function metaStatus(s: string | undefined): string | null {
   if (!s) return null;
   const v = s.toLowerCase();
   if (v.includes("active")) return "active";
   if (v.includes("paused")) return "paused";
   if (v.includes("archived") || v.includes("deleted")) return "archived";
+  if (v.includes("disapprov") || v.includes("with_issue")) return "rejected";
+  if (v.includes("pending") || v.includes("in_process") || v.includes("review")) return "in review";
   return v;
 }
 
