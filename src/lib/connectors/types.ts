@@ -84,6 +84,40 @@ export interface CampaignConfig {
   currency?: string | null;
 }
 
+/**
+ * An individual AD with its CREATIVE and a performance snapshot over the
+ * requested window — the level below CampaignConfig. Emitted by `fetchAds` and
+ * upserted into the Ad entity so the workspace (and the agent) can see the
+ * actual running creatives, their copy, and how each performs. Joined to a
+ * campaign by `campaignExternalId`/`campaignName`. All fields beyond id/name are
+ * optional: a platform may not expose creatives or per-ad metrics.
+ */
+export interface AdCreative {
+  platform: ConnectorPlatform;
+  externalId: string; // the platform's ad id
+  campaignExternalId?: string | null;
+  campaignName?: string | null;
+  adsetName?: string | null;
+  name: string;
+  status?: string | null;
+  /** image | video | carousel | text */
+  creativeType?: string | null;
+  /** Platform CDN preview URL (best-effort; may expire). */
+  thumbnailUrl?: string | null;
+  /** Creative headline. */
+  title?: string | null;
+  /** Creative primary text / body copy. */
+  body?: string | null;
+  /** Human-readable call-to-action label, e.g. "Install Now", "Shop Now". */
+  callToAction?: string | null;
+  linkUrl?: string | null;
+  // Performance snapshot over the requested window:
+  spend?: number | null;
+  impressions?: number | null;
+  clicks?: number | null;
+  conversions?: number | null;
+}
+
 export interface ConnectorClient {
   readonly platform: ConnectorPlatform;
   fetchMetrics(connection: Connection, range: MetricRange): Promise<CanonicalMetric[]>;
@@ -94,6 +128,12 @@ export interface ConnectorClient {
    * called, after feature-detecting config/tokens.
    */
   fetchCampaigns?(connection: Connection): Promise<CampaignConfig[]>;
+  /**
+   * Optional ad + creative read with a per-ad performance snapshot over `range`.
+   * Implemented by platforms with an ads/creative endpoint (Meta today). Same
+   * import-safety rule as fetchMetrics: no network at construction.
+   */
+  fetchAds?(connection: Connection, range: MetricRange): Promise<AdCreative[]>;
 }
 
 /**

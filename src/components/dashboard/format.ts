@@ -86,7 +86,7 @@ export const COLUMNS: Record<MetricKey, ColumnDef> = {
   revenue: { key: "revenue", label: "Revenue", full: "Revenue", betterWhen: "up", fmt: euro0, axisFmt: euroCompact },
   roas: { key: "roas", label: "ROAS", full: "ROAS (revenue ÷ spend)", betterWhen: "up", fmt: roasX, axisFmt: roasX, roasColored: true },
   cpa: { key: "cpa", label: "CPA", full: "Cost per acquisition", betterWhen: "down", fmt: euro2, axisFmt: euroCompact },
-  conversions: { key: "conversions", label: "Conv.", full: "Conversions", betterWhen: "up", fmt: num0, axisFmt: compact },
+  conversions: { key: "conversions", label: "Results", full: "Results (conversions)", betterWhen: "up", fmt: num0, axisFmt: compact },
   clicks: { key: "clicks", label: "Clicks", full: "Clicks", betterWhen: "up", fmt: num0, axisFmt: compact },
   impressions: { key: "impressions", label: "Impr.", full: "Impressions", betterWhen: "up", fmt: num0, axisFmt: compact },
   ctr: { key: "ctr", label: "CTR", full: "Click-through rate", betterWhen: "up", fmt: pct, axisFmt: pct },
@@ -171,4 +171,27 @@ export function dayLabel(iso: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
   if (!m) return iso;
   return `${MONTHS[Number(m[2]) - 1]} ${Number(m[3])}`;
+}
+
+/**
+ * What a campaign's "conversions" actually COUNT, derived from its objective, so
+ * an app-install campaign reads "Installs" not a generic "Conversions". Falls
+ * back to "Conversions" when the objective is unknown or unmapped (e.g. a
+ * config-less platform). Mirrors the Meta connector's dominant-result logic.
+ */
+export function resultLabel(objective: string | null | undefined): string {
+  if (!objective) return "Conversions";
+  const o = objective.toLowerCase();
+  if (o.includes("install") || o.includes("app promotion")) return "Installs";
+  if (o.includes("lead")) return "Leads";
+  if (o.includes("registration") || o.includes("sign")) return "Sign-ups";
+  if (o.includes("subscrib")) return "Subscriptions";
+  if (o.includes("cart")) return "Adds to cart";
+  if (o.includes("sale") || o.includes("purchase") || o.includes("catalog") || o.includes("commerce")) return "Purchases";
+  if (o.includes("traffic") || o.includes("link click")) return "Link clicks";
+  if (o.includes("engagement") || o.includes("post")) return "Engagements";
+  if (o.includes("awareness") || o.includes("reach") || o.includes("brand")) return "Reach";
+  if (o.includes("video")) return "Video views";
+  if (o.includes("message") || o.includes("conversation")) return "Conversations";
+  return "Conversions";
 }

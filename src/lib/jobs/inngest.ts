@@ -217,14 +217,19 @@ function isoDay(d: Date): string {
 export async function syncWorkspace(
   workspaceId: string,
   platformFilter?: string,
-): Promise<{ connections: number; metrics: number; campaigns: number }> {
+): Promise<{ connections: number; metrics: number; campaigns: number; ads: number }> {
   const result = await runSync(workspaceId, [recentRange(SYNC_WINDOW_DAYS)], platformFilter);
-  // Refresh campaign config alongside performance — best-effort, never fatal.
+  // Refresh campaign config + the ad/creative layer alongside performance —
+  // both best-effort, never fatal to the metric sync.
   const campaigns = await syncCampaignConfig(workspaceId, platformFilter).catch((err) => {
     console.warn(`[inngest] campaign-config refresh failed: ${err instanceof Error ? err.message : String(err)}`);
     return 0;
   });
-  return { ...result, campaigns };
+  const ads = await syncAds(workspaceId, platformFilter).catch((err) => {
+    console.warn(`[inngest] ad-sync failed: ${err instanceof Error ? err.message : String(err)}`);
+    return 0;
+  });
+  return { ...result, campaigns, ads };
 }
 
 /**
@@ -285,6 +290,66 @@ export async function syncCampaignConfig(
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.warn(`[inngest] campaign-config skipped ${connection.platform}: ${message}`);
+    }
+  }
+  return upserted;
+}
+
+/**
+ * Refresh the AD + CREATIVE layer (status/copy/thumbnail + a performance snapshot
+ * over the recent window) into the Ad entity. Best-effort + idempotent (upsert on
+ * the natural key); a platform without an ads endpoint (no fetchAds) or a failing
+ * call is skipped without aborting. Returns the number of ads upserted.
+ */
+export async function syncAds(
+  workspaceId: string,
+  platformFilter?: string,
+): Promise<number> {
+  const { prisma } = await import("@/lib/db");
+  const { getConnectorClient, isConnectorPlatform } = await import("@/lib/connectors/registry");
+
+  const range = recentRange(SYNC_WINDOW_DAYS);
+  const connections = await prisma.connection.findMany({
+    where: { workspaceId, status: "connected", ...(platformFilter ? { platform: platformFilter } : {}) },
+  });
+
+  let upserted = 0;
+  for (const connection of connections) {
+    if (!isConnectorPlatform(connection.platform)) continue;
+    const client = getConnectorClient(connection.platform);
+    if (!client.fetchAds) continue;
+    try {
+      const ads = await client.fetchAds(connection, range);
+      for (const a of ads) {
+        const data = {
+          campaignExternalId: a.campaignExternalId ?? null,
+          campaignName: a.campaignName ?? null,
+          adsetName: a.adsetName ?? null,
+          name: a.name,
+          status: a.status ?? null,
+          creativeType: a.creativeType ?? null,
+          thumbnailUrl: a.thumbnailUrl ?? null,
+          title: a.title ?? null,
+          body: a.body ?? null,
+          callToAction: a.callToAction ?? null,
+          linkUrl: a.linkUrl ?? null,
+          spend: a.spend ?? null,
+          impressions: a.impressions ?? null,
+          clicks: a.clicks ?? null,
+          conversions: a.conversions ?? null,
+        };
+        await prisma.ad.upsert({
+          where: {
+            workspaceId_platform_externalId: { workspaceId, platform: a.platform, externalId: a.externalId },
+          },
+          create: { workspaceId, platform: a.platform, externalId: a.externalId, ...data },
+          update: data,
+        });
+        upserted += 1;
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[inngest] ad-sync skipped ${connection.platform}: ${message}`);
     }
   }
   return upserted;

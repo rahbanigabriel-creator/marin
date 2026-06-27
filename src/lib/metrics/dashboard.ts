@@ -77,6 +77,28 @@ export interface DashCampaign {
   budgetType: string | null;
   /** This campaign's own daily series across the range (for the drill-down). */
   series: DashDailyPoint[];
+  /** This campaign's ads + creatives (last sync window) — empty until ad-sync runs. */
+  ads: DashAd[];
+}
+
+/** One ad + its creative + a recent performance snapshot (for the drill-down). */
+export interface DashAd {
+  externalId: string;
+  name: string;
+  status: string | null;
+  creativeType: string | null;
+  thumbnailUrl: string | null;
+  title: string | null;
+  body: string | null;
+  callToAction: string | null;
+  linkUrl: string | null;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  conversions: number;
+  ctr: number;
+  cpc: number;
+  cpa: number;
 }
 
 /** The window the payload covers, echoed so the UI never hardcodes "30 days". */
@@ -269,6 +291,7 @@ export function buildDashboard(
   rows: MetricFactRow[],
   range: { from: Date; to: Date },
   meta?: Map<string, CampaignMeta>,
+  adsByCampaign?: Map<string, DashAd[]>,
 ): DashboardData {
   const axis = dateAxis(range.from, range.to);
   const axisSet = new Set(axis);
@@ -351,6 +374,7 @@ export function buildDashboard(
         budget: m?.budget ?? null,
         budgetType: m?.budgetType ?? null,
         series: axis.map((day) => pointFrom(byDay.get(day) ?? newAgg(), day)),
+        ads: adsByCampaign?.get(campaignKey(platform, campaign)) ?? [],
       };
     })
     .sort((x, y) => y.spend - x.spend);
@@ -400,6 +424,7 @@ export function sampleDashboard(): DashboardData {
 
   const rows: MetricFactRow[] = [];
   const meta = new Map<string, CampaignMeta>();
+  const adsByCampaign = new Map<string, DashAd[]>();
   for (const s of seeds) {
     meta.set(campaignKey(s.platform, s.campaign), {
       status: s.status,
@@ -419,9 +444,38 @@ export function sampleDashboard(): DashboardData {
       add("clicks", s.clicks);
       add("impressions", s.impressions);
     }
+    // Two illustrative creatives per campaign (60/40 split) for the demo.
+    const ad = (suffix: string, share: number, title: string, body: string, cta: string, status: string): DashAd => {
+      const spend = round(s.spend * share, 2);
+      const impressions = round(s.impressions * share, 0);
+      const clicks = round(s.clicks * share, 0);
+      const conversions = round(s.conversions * share, 0);
+      return {
+        externalId: `${s.campaign}-${suffix}`,
+        name: `${s.campaign} · ${suffix}`,
+        status,
+        creativeType: suffix === "Video" ? "video" : "image",
+        thumbnailUrl: null,
+        title,
+        body,
+        callToAction: cta,
+        linkUrl: null,
+        spend,
+        impressions,
+        clicks,
+        conversions,
+        ctr: impressions > 0 ? round((clicks / impressions) * 100, 2) : 0,
+        cpc: clicks > 0 ? round(spend / clicks, 2) : 0,
+        cpa: conversions > 0 ? round(spend / conversions, 2) : 0,
+      };
+    };
+    adsByCampaign.set(campaignKey(s.platform, s.campaign), [
+      ad("Static A", 0.6, "Your best month yet", "See why 10k teams switched this quarter.", "Learn More", s.status),
+      ad("Video", 0.4, "30s product tour", "Watch how it works in under a minute.", "Sign Up", "active"),
+    ]);
   }
 
-  const data = buildDashboard(rows, { from, to }, meta);
+  const data = buildDashboard(rows, { from, to }, meta, adsByCampaign);
   // Show a believable prior-period delta on the sample KPIs (≈ +9% spend).
   const prev = newAgg();
   prev.spend = data.totals.spend * 0.915;

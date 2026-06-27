@@ -33,6 +33,7 @@ model Workspace {
   connections  Connection[]
   metricFacts  MetricFact[]
   campaigns    Campaign[]
+  ads          Ad[]
   subscription Subscription?
   usageEvents  UsageEvent[]
   actions      Action[]
@@ -142,6 +143,46 @@ model Campaign {
   @@unique([workspaceId, platform, externalId])
   @@index([workspaceId, platform])
   @@map("campaigns")
+}
+
+/// An individual AD with its CREATIVE + a recent performance snapshot — the level
+/// below Campaign, so the workspace (and the agent) can see the actual running
+/// creatives, their copy, and how each is doing. Config + creative come from the
+/// platform's ads endpoint; the spend/impressions/clicks/conversions snapshot is
+/// the last sync window (≈30 days), refreshed on each sync. Joined to a campaign
+/// by `campaignExternalId`/`campaignName` (mirrors the MetricFact join). Nullable
+/// throughout: a platform may not expose creatives, and a metrics-only platform
+/// writes no Ad rows. `thumbnailUrl` is the platform CDN preview (best-effort).
+model Ad {
+  id                 String  @id @default(cuid())
+  workspaceId        String  @map("workspace_id")
+  platform           String
+  externalId         String  @map("external_id") // the platform's ad id
+  campaignExternalId String? @map("campaign_external_id")
+  campaignName       String? @map("campaign_name") // joins to MetricFact.campaign
+  adsetName          String? @map("adset_name")
+  name               String
+  status             String? // active | paused | ... (platform-normalized)
+  creativeType       String? @map("creative_type") // image | video | carousel | text
+  thumbnailUrl       String? @map("thumbnail_url") // platform CDN preview (may expire)
+  title              String? // creative headline
+  body               String? // creative primary text
+  callToAction       String? @map("call_to_action") // human-readable label, e.g. "Install Now"
+  linkUrl            String? @map("link_url")
+  // Performance snapshot over the last sync window (refreshed each sync):
+  spend       Float?
+  impressions Float?
+  clicks      Float?
+  conversions Float?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, platform, externalId])
+  @@index([workspaceId, platform, campaignExternalId])
+  @@index([workspaceId, campaignName])
+  @@map("ads")
 }
 
 /// Stripe-backed billing state for a workspace (one per tenant).

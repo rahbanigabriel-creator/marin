@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentWorkspace } from "@/lib/auth";
-import { hasLiveData, readCampaignConfig, readMetricFactsRange } from "@/lib/metrics/source";
+import { hasLiveData, readAds, readCampaignConfig, readMetricFactsRange } from "@/lib/metrics/source";
 import {
   aggregateTotals,
   buildDashboard,
   campaignKey,
   sampleDashboard,
   type CampaignMeta,
+  type DashAd,
   type DashboardData,
   type DashTotals,
 } from "@/lib/metrics/dashboard";
@@ -108,6 +109,61 @@ async function loadCampaignMeta(workspaceId: string): Promise<Map<string, Campai
   }
 }
 
+/**
+ * Load this workspace's ads grouped by campaign. The dashboard joins ads onto
+ * campaigns via the value MetricFact stores in `campaign` — for Meta (the only
+ * platform with fetchAds today) that's the campaign NAME, so the name key is the
+ * one that actually fires. We also index by campaignExternalId as forward-compat
+ * for a future platform that stores the id on MetricFact. Best-effort: a missing
+ * table / no ads yields no creatives, never an error.
+ */
+async function loadAds(workspaceId: string): Promise<Map<string, DashAd[]> | undefined> {
+  try {
+    const rows = await readAds(workspaceId);
+    if (rows.length === 0) return undefined;
+    const map = new Map<string, DashAd[]>();
+    for (const r of rows) {
+      const ad: DashAd = {
+        externalId: r.externalId,
+        name: r.name,
+        status: r.status,
+        creativeType: r.creativeType,
+        thumbnailUrl: r.thumbnailUrl,
+        title: r.title,
+        body: r.body,
+        callToAction: r.callToAction,
+        linkUrl: r.linkUrl,
+        spend: r.spend ?? 0,
+        impressions: r.impressions ?? 0,
+        clicks: r.clicks ?? 0,
+        conversions: r.conversions ?? 0,
+        ctr: r.impressions && r.impressions > 0 ? round2(((r.clicks ?? 0) / r.impressions) * 100) : 0,
+        cpc: r.clicks && r.clicks > 0 ? round2((r.spend ?? 0) / r.clicks) : 0,
+        cpa: r.conversions && r.conversions > 0 ? round2((r.spend ?? 0) / r.conversions) : 0,
+      };
+      for (const key of [
+        r.campaignName ? campaignKey(r.platform, r.campaignName) : null,
+        r.campaignExternalId ? campaignKey(r.platform, r.campaignExternalId) : null,
+      ]) {
+        if (!key) continue;
+        const list = map.get(key) ?? [];
+        list.push(ad);
+        map.set(key, list);
+      }
+    }
+    // Highest-spend creative first within each campaign.
+    for (const list of map.values()) list.sort((a, b) => b.spend - a.spend);
+    return map;
+  } catch (err) {
+    console.warn("[dashboard] ads unavailable, rendering without creatives", err);
+    return undefined;
+  }
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 /** The same-length window immediately preceding [from, to]. */
 function previousRange(from: Date, to: Date): { from: Date; to: Date } {
   const len = daysBetween(from, to);
@@ -140,7 +196,8 @@ export async function GET(request: Request): Promise<Response> {
     if (workspace && (await hasLiveData(workspace.id))) {
       const rows = await readMetricFactsRange(workspace.id, from, to);
       const meta = await loadCampaignMeta(workspace.id);
-      const data = buildDashboard(rows, { from, to }, meta);
+      const ads = await loadAds(workspace.id);
+      const data = buildDashboard(rows, { from, to }, meta, ads);
 
       // Previous same-length window → deltas. Cheap totals-only aggregate.
       const prev = previousRange(from, to);
