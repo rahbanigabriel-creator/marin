@@ -171,10 +171,70 @@ function googleAdsHeaders(accessToken: string): HeadersInit {
   return headers;
 }
 
+interface GoogleAdsErrorPayload {
+  message?: string;
+  status?: string;
+  details?: Array<{
+    "@type"?: string;
+    errors?: Array<{ errorCode?: Record<string, string>; message?: string }>;
+  }>;
+}
+
+/**
+ * Turn a Google Ads error response into a DIAGNOSABLE message. Google returns a
+ * googleAdsFailure with a specific errorCode (DEVELOPER_TOKEN_NOT_APPROVED,
+ * CUSTOMER_NOT_ENABLED, USER_PERMISSION_DENIED, …) that tells the user exactly
+ * what to fix — surfacing it beats a generic "responded 403". Best-effort: falls
+ * back to the status when the body isn't the expected shape.
+ */
+async function googleAdsError(res: Response): Promise<string> {
+  let detail = `responded ${res.status}`;
+  try {
+    const body = JSON.parse(await res.text()) as unknown;
+    const errObj = (Array.isArray(body) ? (body[0] as { error?: GoogleAdsErrorPayload })?.error : (body as { error?: GoogleAdsErrorPayload })?.error);
+    if (errObj) {
+      const failure = errObj.details?.find((d) => String(d["@type"] ?? "").includes("GoogleAdsFailure"));
+      const first = failure?.errors?.[0];
+      const code = first?.errorCode ? Object.values(first.errorCode)[0] : errObj.status;
+      const msg = first?.message ?? errObj.message;
+      detail = [String(res.status), code, msg].filter(Boolean).join(" · ");
+    }
+  } catch {
+    /* body wasn't JSON (or already consumed) — keep the status-only detail */
+  }
+  return `Google Ads API ${detail}`;
+}
+
+/**
+ * Parse a googleAds:searchStream body tolerant of either a single buffered JSON
+ * array (the common case) OR multiple concatenated array fragments (which large
+ * streamed responses can produce, and which res.json() would throw on).
+ */
+function parseSearchStream<T>(text: string): T[] {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+  try {
+    const parsed = JSON.parse(trimmed);
+    return Array.isArray(parsed) ? (parsed as T[]) : [parsed as T];
+  } catch {
+    const out: T[] = [];
+    for (const chunk of trimmed.replace(/\]\s*\[/g, "]||SPLIT||[").split("||SPLIT||")) {
+      try {
+        const p = JSON.parse(chunk);
+        if (Array.isArray(p)) out.push(...(p as T[]));
+        else out.push(p as T);
+      } catch {
+        /* skip an unparseable fragment rather than dropping the whole response */
+      }
+    }
+    return out;
+  }
+}
+
 interface GoogleAdsBatch {
   results?: Array<{
     campaign?: { name?: string };
-    customer?: { id?: string; descriptiveName?: string };
+    customer?: { id?: string; descriptiveName?: string; manager?: boolean };
     metrics?: {
       costMicros?: string | number;
       conversions?: string | number;
@@ -211,9 +271,9 @@ export class GoogleAdsClient implements ConnectorClient {
       body: JSON.stringify({ query }),
     });
     if (!res.ok) {
-      throw new ConnectorNotReadyError(this.platform, `Google Ads API responded ${res.status}`);
+      throw new ConnectorNotReadyError(this.platform, await googleAdsError(res));
     }
-    return this.normalize((await res.json()) as GoogleAdsBatch[]);
+    return this.normalize(parseSearchStream<GoogleAdsBatch>(await res.text()));
   }
 
   private normalize(payload: GoogleAdsBatch[]): CanonicalMetric[] {
@@ -256,9 +316,9 @@ export class GoogleAdsClient implements ConnectorClient {
       body: JSON.stringify({ query }),
     });
     if (!res.ok) {
-      throw new ConnectorNotReadyError(this.platform, `Google Ads campaigns API responded ${res.status}`);
+      throw new ConnectorNotReadyError(this.platform, await googleAdsError(res));
     }
-    const batches = (await res.json()) as GoogleAdsCampaignBatch[];
+    const batches = parseSearchStream<GoogleAdsCampaignBatch>(await res.text());
     const out: CampaignConfig[] = [];
     for (const batch of Array.isArray(batches) ? batches : []) {
       for (const row of batch.results ?? []) {
@@ -1185,7 +1245,7 @@ async function listGoogleAdsAccounts(accessToken: string): Promise<AccountSelect
   const res = await fetch(`https://googleads.googleapis.com/${GOOGLE_ADS_API_VERSION}/customers:listAccessibleCustomers`, {
     headers: googleAdsHeaders(accessToken),
   });
-  if (!res.ok) throw new ConnectorNotReadyError("google_ads", `Google Ads customers API responded ${res.status}`);
+  if (!res.ok) throw new ConnectorNotReadyError("google_ads", await googleAdsError(res));
   const payload = (await res.json()) as { resourceNames?: string[] };
   const ids = (payload.resourceNames ?? [])
     .map((resourceName) => resourceName.replace("customers/", ""))
@@ -1209,13 +1269,17 @@ async function googleAdsCustomerName(accessToken: string, customerId: string): P
       method: "POST",
       headers: googleAdsHeaders(accessToken),
       body: JSON.stringify({
-        query: "SELECT customer.id, customer.descriptive_name FROM customer LIMIT 1",
+        query: "SELECT customer.id, customer.descriptive_name, customer.manager FROM customer LIMIT 1",
       }),
     },
   );
   if (!res.ok) return `Customer ${customerId}`;
-  const payload = (await res.json()) as GoogleAdsBatch[];
-  return payload[0]?.results?.[0]?.customer?.descriptiveName ?? `Customer ${customerId}`;
+  const payload = parseSearchStream<GoogleAdsBatch>(await res.text());
+  const customer = payload[0]?.results?.[0]?.customer;
+  const name = customer?.descriptiveName ?? `Customer ${customerId}`;
+  // Flag manager (MCC) accounts so the user doesn't pick one to report on — a
+  // manager has no campaigns and FROM campaign would fail against it.
+  return customer?.manager ? `${name} (manager — no campaigns)` : name;
 }
 
 async function listGa4Properties(accessToken: string): Promise<AccountSelection[]> {
