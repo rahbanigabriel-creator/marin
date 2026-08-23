@@ -11,7 +11,7 @@ interface OnboardingScreenProps {
 
 const BUSINESS = ["E-commerce", "SaaS", "Local business", "Agency"];
 const GOALS = ["More revenue", "More leads", "Brand awareness"];
-const CHANNEL_OPTIONS = ["Google Ads", "Meta Ads", "TikTok Ads", "LinkedIn Ads", "GA4"];
+const CHANNEL_OPTIONS = ["Google Ads", "Meta Ads", "TikTok Ads", "GA4", "Search Console"];
 const STEP_TITLES = [
   "What are you working on?",
   "What's your main goal?",

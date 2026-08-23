@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { COLUMN_ORDER, COLUMNS, type MetricKey } from "./format";
 
 /**
@@ -16,6 +16,8 @@ export interface ColumnChooserProps {
 export function ColumnChooser({ visible, onChange }: ColumnChooserProps): React.JSX.Element {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const menuId = useId();
   const set = new Set(visible);
 
   useEffect(() => {
@@ -23,8 +25,18 @@ export function ColumnChooser({ visible, onChange }: ColumnChooserProps): React.
     const onDoc = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setOpen(false);
+      buttonRef.current?.focus();
+    };
     document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [open]);
 
   const toggle = (key: MetricKey) => {
@@ -41,8 +53,13 @@ export function ColumnChooser({ visible, onChange }: ColumnChooserProps): React.
   return (
     <div ref={ref} className="relative">
       <button
+        ref={buttonRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
+        aria-label="Choose table columns"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={menuId}
         className="cursor-pointer rounded-[8px] font-sans text-[12.5px] font-semibold text-ink-600"
         style={{ border: "1px solid #E5E3DB", background: "#fff", padding: "6px 12px" }}
       >
@@ -50,8 +67,11 @@ export function ColumnChooser({ visible, onChange }: ColumnChooserProps): React.
       </button>
       {open ? (
         <div
+          id={menuId}
+          role="menu"
+          aria-label="Visible campaign metrics"
           className="absolute right-0 top-[calc(100%+8px)] z-30 rounded-card border border-line-3 bg-surface-card p-[8px] shadow-modal"
-          style={{ minWidth: 220 }}
+          style={{ minWidth: 220, maxWidth: "calc(100vw - 32px)" }}
         >
           <div className="px-[8px] pb-[6px] pt-[2px] font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-ink-300">
             Columns
@@ -64,6 +84,8 @@ export function ColumnChooser({ visible, onChange }: ColumnChooserProps): React.
                   key={key}
                   type="button"
                   onClick={() => toggle(key)}
+                  role="menuitemcheckbox"
+                  aria-checked={on}
                   className="flex cursor-pointer items-center gap-[9px] rounded-[7px] px-[8px] py-[6px] text-left hover:bg-[#F7F6F0]"
                 >
                   <span

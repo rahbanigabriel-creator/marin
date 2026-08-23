@@ -3,6 +3,11 @@
  * Grouped to match the spec's "Design Tokens → Colors" section.
  */
 :root {
+  /* Self-hosted typography; builds never depend on Google Fonts availability. */
+  --font-hanken: "Hanken Grotesk Variable";
+  --font-newsreader: "Newsreader Variable";
+  --font-mono: "JetBrains Mono Variable";
+
   /* Brand / accent (plum) */
   --plum: #9a3d63;
   --plum-deep: #7e2f50;
@@ -25,12 +30,12 @@
   --ink-800: #3a352d;
   --ink-700: #4a443b;
   --ink-600: #5a544a;
-  --ink-500: #6b6359;
-  --ink-450: #7c7264;
-  --ink-400: #857b6d;
-  --ink-380: #8a8072;
-  --ink-300: #9a9183;
-  --ink-200: #a89d8b;
+  --ink-500: #5f584f;
+  --ink-450: #625b52;
+  --ink-400: #675f55;
+  --ink-380: #695f56;
+  --ink-300: #6b6359;
+  --ink-200: #6f665a;
 
   /* Surfaces / neutrals (cool greige) */
   --surface-page: #f2f1ec;

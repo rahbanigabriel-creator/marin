@@ -6,10 +6,13 @@
 
 # next.js
 /.next/
+/.next-*/
 /out/
 
 # production
 /build
+/playwright-report/
+/test-results/
 
 # misc
 .DS_Store

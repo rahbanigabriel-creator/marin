@@ -1,8 +1,26 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
+import { getSecurityHeaders } from "./src/lib/security/headers";
+
+const isProductionDeployment =
+  process.env.VERCEL_ENV === "production" ||
+  (!process.env.VERCEL_ENV && process.env.NODE_ENV === "production");
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  distDir: process.env.NEXT_DIST_DIR || ".next",
+  // Keep server traces rooted in this app when a parent directory also has a lockfile.
+  outputFileTracingRoot: process.cwd(),
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: getSecurityHeaders({
+          isProduction: isProductionDeployment,
+        }),
+      },
+    ];
+  },
   /**
    * Ship the doctrine corpus markdown with the serverless trace.
    *

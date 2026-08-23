@@ -16,6 +16,7 @@ export function TypewriterText({
       trailing={
         caretOn ? (
           <span
+            aria-hidden="true"
             className="animate-blink ml-px inline-block align-[-2px]"
             style={{ width: 7, height: caretHeight, background: "#9A3D63" }}
           />

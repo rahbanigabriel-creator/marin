@@ -31,7 +31,20 @@ export const RECENT_WINDOW_DAYS = 30;
 export type MetricFactRow = Pick<
   MetricFact,
   "platform" | "campaign" | "metric" | "value" | "date"
->;
+> & Partial<Pick<MetricFact, "connectionId" | "campaignExternalId" | "campaignName" | "currency" | "staleAt">>;
+
+const PAID_PLATFORMS = ["google_ads", "meta_ads", "tiktok_ads"];
+
+function liveMetricWhere(workspaceId: string, since: Date) {
+  return {
+    workspaceId,
+    date: { gte: since },
+    OR: [
+      { platform: { notIn: PAID_PLATFORMS } },
+      { platform: { in: PAID_PLATFORMS }, connectionId: { not: null }, staleAt: null },
+    ],
+  };
+}
 
 /**
  * The injectable read seam. Returns the workspace's recent MetricFact rows
@@ -45,8 +58,11 @@ export type MetricFactQuery = (
 
 export const defaultMetricFactQuery: MetricFactQuery = (workspaceId, since) =>
   prisma.metricFact.findMany({
-    where: { workspaceId, date: { gte: since } },
-    select: { platform: true, campaign: true, metric: true, value: true, date: true },
+    where: liveMetricWhere(workspaceId, since),
+    select: {
+      platform: true, campaign: true, campaignExternalId: true, campaignName: true,
+      connectionId: true, currency: true, staleAt: true, metric: true, value: true, date: true,
+    },
   });
 
 /** Default existence probe: any MetricFact row for this workspace at all. */
@@ -127,7 +143,13 @@ function aggregate(rows: MetricFactRow[]) {
   };
 
   for (const r of rows) {
-    const campaign = r.campaign && r.campaign.length > 0 ? r.campaign : "";
+    const campaign = r.connectionId
+      ? r.campaignExternalId
+        ? r.campaignName ?? r.campaignExternalId
+        : ""
+      : r.campaign && r.campaign.length > 0
+        ? r.campaign
+        : "";
     if (campaign) {
       bump(ensure(campaignRollup, r.platform, () => new Map()), r.metric, r.value);
       const campaigns = ensure(byCampaign, r.platform, () => new Map<string, Map<string, Aggregate>>());
@@ -268,7 +290,13 @@ export type AdRow = Pick<
 /** Read this workspace's ads (with creative + perf snapshot), most-spend first. */
 export async function readAds(workspaceId: string): Promise<AdRow[]> {
   return prisma.ad.findMany({
-    where: { workspaceId },
+    where: {
+      workspaceId,
+      OR: [
+        { platform: { notIn: PAID_PLATFORMS } },
+        { platform: { in: PAID_PLATFORMS }, connectionId: { not: null }, staleAt: null },
+      ],
+    },
     select: {
       platform: true,
       externalId: true,
@@ -344,8 +372,18 @@ export async function readMetricFactsRange(
   to: Date,
 ): Promise<MetricFactRow[]> {
   return prisma.metricFact.findMany({
-    where: { workspaceId, date: { gte: from, lte: to } },
-    select: { platform: true, campaign: true, metric: true, value: true, date: true },
+    where: {
+      workspaceId,
+      date: { gte: from, lte: to },
+      OR: [
+        { platform: { notIn: PAID_PLATFORMS } },
+        { platform: { in: PAID_PLATFORMS }, connectionId: { not: null }, staleAt: null },
+      ],
+    },
+    select: {
+      platform: true, campaign: true, campaignExternalId: true, campaignName: true,
+      connectionId: true, currency: true, staleAt: true, metric: true, value: true, date: true,
+    },
     orderBy: { date: "asc" },
   });
 }
@@ -363,7 +401,13 @@ export type CampaignConfigRow = Pick<
  */
 export async function readCampaignConfig(workspaceId: string): Promise<CampaignConfigRow[]> {
   return prisma.campaign.findMany({
-    where: { workspaceId },
+    where: {
+      workspaceId,
+      OR: [
+        { platform: { notIn: PAID_PLATFORMS } },
+        { platform: { in: PAID_PLATFORMS }, connectionId: { not: null }, staleAt: null },
+      ],
+    },
     select: {
       platform: true,
       externalId: true,
@@ -391,9 +435,8 @@ export async function hasLiveData(
   if (!isDatabaseConfigured()) return false;
   try {
     return (await count(workspaceId)) > 0;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[metrics] hasLiveData probe failed, treating as no live data: ${msg}`);
+  } catch {
+    console.warn("[metrics] hasLiveData probe failed; treating as no live data");
     return false;
   }
 }

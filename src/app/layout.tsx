@@ -1,39 +1,18 @@
 import type { Metadata, Viewport } from "next";
-import { Hanken_Grotesk, Newsreader, JetBrains_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
+import "@fontsource-variable/hanken-grotesk/wght.css";
+import "@fontsource-variable/newsreader/wght.css";
+import "@fontsource-variable/jetbrains-mono/wght.css";
 import "./globals.css";
-
-import { GoogleAnalytics } from "@next/third-parties/google";
 
 import { isAuthConfigured } from "@/lib/auth";
 import { isAnalyticsConfigured } from "@/lib/analytics";
 import { PostHogProvider } from "@/components/analytics/PostHogProvider";
 
-const hanken = Hanken_Grotesk({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  variable: "--font-hanken",
-  display: "swap",
-});
-
-const newsreader = Newsreader({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
-  variable: "--font-newsreader",
-  display: "swap",
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
-  variable: "--font-mono",
-  display: "swap",
-});
-
 const SITE_URL = "https://www.marpin.ai";
 const TITLE = "Marpin — The AI Marketing Operator";
 const DESCRIPTION =
-  "Marpin is your AI marketing operator. Drop your website for a free market scan and competitor analysis, then connect your accounts and Marpin builds the campaigns, writes the copy, and ships the fixes — across Google Ads, Meta, TikTok, LinkedIn, GA4 and more.";
+  "Marpin turns your website into a practical distribution workspace: audit your site, plan organic content, prepare reviewable Google, Meta, and TikTok campaign drafts, and read connected performance without losing context.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -54,7 +33,6 @@ export const metadata: Metadata = {
     "Google Ads",
     "Meta Ads",
     "TikTok Ads",
-    "LinkedIn Ads",
     "SEO",
     "GA4",
     "growth marketing",
@@ -110,24 +88,6 @@ export default function RootLayout({
     children
   );
 
-  // First-party GA4 site analytics for www.marpin.ai — measures OUR OWN
-  // visitors. Loads only when the public Measurement ID is set; no-op otherwise.
-  // Distinct from the GOOGLE_OAUTH_* connector that lets customers connect their
-  // own GA4. @next/third-parties handles SPA pageviews automatically.
-  const gaId = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
-
-  const tree = (
-    <html
-      lang="en"
-      className={`${hanken.variable} ${newsreader.variable} ${jetbrainsMono.variable}`}
-    >
-      <body>
-        {body}
-        {gaId ? <GoogleAnalytics gaId={gaId} /> : null}
-      </body>
-    </html>
-  );
-
   // Wrap with ClerkProvider ONLY when Clerk is configured. With no keys the
   // tree renders exactly as before — ClerkProvider would otherwise throw on a
   // missing publishable key, breaking the validated mockup. The provider is
@@ -136,11 +96,19 @@ export default function RootLayout({
   // Deterministic post-auth landing: after sign-in/up, go to the app (/app),
   // not back through the conditional `/` — avoids any redirect ambiguity that
   // can present as a loop. fallback* defers to an explicit redirect_url first.
-  return isAuthConfigured() ? (
-    <ClerkProvider signInFallbackRedirectUrl="/app" signUpFallbackRedirectUrl="/app">
-      {tree}
+  const authenticatedBody = isAuthConfigured() ? (
+    <ClerkProvider
+      dynamic
+      signInFallbackRedirectUrl="/app"
+      signUpFallbackRedirectUrl="/app"
+    >
+      {body}
     </ClerkProvider>
-  ) : (
-    tree
+  ) : body;
+
+  return (
+    <html lang="en">
+      <body>{authenticatedBody}</body>
+    </html>
   );
 }

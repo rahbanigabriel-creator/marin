@@ -7,7 +7,7 @@ export function ThinkingDots({ size = 6 }: { size?: number }) {
     background: "#C7A9B4",
   } as const;
   return (
-    <div className="flex gap-1 py-1">
+    <div className="flex gap-1 py-1" aria-hidden="true">
       <span className="animate-dotPulse" style={{ ...dot, animationDelay: "0s" }} />
       <span className="animate-dotPulse" style={{ ...dot, animationDelay: ".2s" }} />
       <span className="animate-dotPulse" style={{ ...dot, animationDelay: ".4s" }} />

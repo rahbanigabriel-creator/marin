@@ -1,7 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Channel, ChatTurn } from "@/types/views";
+import type {
+  Channel,
+  ChatTurn,
+  ConnectionDisconnectResult,
+  ProviderRevocationStatus,
+} from "@/types/views";
 import type { ArtifactPayload } from "@/lib/streaming/events";
 import type { Persona, Scenario } from "@/types/scenario";
 import { PERSONAS } from "@/lib/data/personas";
@@ -21,28 +26,58 @@ import { ForecastScreen } from "@/components/screens/ForecastScreen";
 import { ClientsScreen } from "@/components/screens/ClientsScreen";
 import { CampaignsScreen } from "@/components/screens/CampaignsScreen";
 import { WelcomeScreen } from "@/components/screens/WelcomeScreen";
+import { BrandWorkspace } from "@/components/screens/BrandWorkspace";
+import { OrganicPlanner } from "@/components/organic";
+import { AgentRunsWorkspace } from "@/components/agents";
+import { DistributionAnalytics } from "@/components/analytics/DistributionAnalytics";
+import type { BillingSnapshotDto } from "@/lib/billing/types";
+import {
+  PRODUCT_PLATFORMS,
+  type ProductMode,
+} from "@/lib/product/platforms";
+import type {
+  ConversationDto,
+  ConversationSummaryDto,
+} from "@/lib/conversations/types";
+import { restoreConversation } from "@/lib/conversations/client";
+import type { ResultChip } from "@/types/artifacts";
+import type { BrandDto, BrandWriteInput } from "@/lib/brand/types";
+import {
+  parseWorkspaceLocation,
+  workspaceLocationHref,
+  type WorkspaceLocation,
+} from "@/lib/product/navigation";
 
-type Screen = "chat" | "onboarding" | "forecast" | "clients" | "dashboard";
+type Screen =
+  | "chat"
+  | "brand"
+  | "organic"
+  | "analytics"
+  | "agents"
+  | "onboarding"
+  | "forecast"
+  | "clients"
+  | "dashboard";
 
-const REAL_CONNECTOR_CHANNELS: Channel[] = [
-  // Paid ads
-  { name: "Google Ads", platform: "google_ads", category: "paid", status: "disconnected" },
-  { name: "Meta Ads", platform: "meta_ads", category: "paid", status: "disconnected" },
-  { name: "TikTok Ads", platform: "tiktok_ads", category: "paid", status: "disconnected" },
-  { name: "LinkedIn Ads", platform: "linkedin_ads", category: "paid", status: "disconnected" },
-  { name: "Microsoft Ads", platform: "microsoft_ads", category: "paid", status: "disconnected" },
-  { name: "Pinterest Ads", platform: "pinterest_ads", category: "paid", status: "disconnected" },
-  { name: "Snapchat Ads", platform: "snapchat_ads", category: "paid", status: "disconnected" },
-  { name: "Reddit Ads", platform: "reddit_ads", category: "paid", status: "disconnected" },
-  { name: "X (Twitter) Ads", platform: "x_ads", category: "paid", status: "disconnected" },
-  { name: "Amazon Ads", platform: "amazon_ads", category: "paid", status: "disconnected" },
-  { name: "Apple Search Ads", platform: "apple_search_ads", category: "paid", status: "disconnected" },
-  // Organic / SEO
-  { name: "Google Analytics 4", platform: "ga4", category: "organic", status: "disconnected" },
-  { name: "Google Search Console", platform: "search_console", category: "organic", status: "disconnected" },
-];
+const PRODUCT_CHANNELS: Channel[] = PRODUCT_PLATFORMS.map((platform) => ({
+  name: platform.label,
+  platform: platform.id,
+  connectorPlatform: platform.connectorPlatform,
+  category: platform.section,
+  connectionAvailability: platform.capabilities.connect,
+  description: platform.description,
+  configured: false,
+  status: "disconnected",
+}));
 
 const DEMO_MODE = process.env.NEXT_PUBLIC_MARPIN_DEMO_MODE === "true";
+
+function writeWorkspaceLocation(location: WorkspaceLocation, replace = false): void {
+  if (typeof window === "undefined") return;
+  const href = workspaceLocationHref(location);
+  if (replace) window.history.replaceState({}, "", href);
+  else window.history.pushState({}, "", href);
+}
 
 /**
  * In the real product the user's ACTUAL question must reach the live agent — not
@@ -79,23 +114,35 @@ function chatTitle(text: string): string {
   return trimmed.length > 34 ? trimmed.slice(0, 32) + "…" : trimmed;
 }
 
+function looksLikeWebsite(value: string): boolean {
+  const candidate = value.trim();
+  if (!candidate || /\s/.test(candidate)) return false;
+  try {
+    const url = new URL(candidate.includes("://") ? candidate : `https://${candidate}`);
+    return (url.protocol === "http:" || url.protocol === "https:") && url.hostname.includes(".");
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Top-level orchestrator. Owns the active persona + dataset, the top-level
  * screen, view mode, the active question + resolved scenario, the agency's
  * active client, channels, the modal, and recent-chat selection.
  */
-export function AppShell() {
+export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
   const [persona, setPersona] = useState<Persona>("founder");
   const [screen, setScreen] = useState<Screen>("chat");
   const [scenario, setScenario] = useState<Scenario>(() => defaultScenarioFor("founder", SCENARIOS));
   const [question, setQuestion] = useState(scenario.question);
-  const [channels, setChannels] = useState<Channel[]>(REAL_CONNECTOR_CHANNELS);
+  const [channels, setChannels] = useState<Channel[]>(PRODUCT_CHANNELS);
   const [workspaceName, setWorkspaceName] = useState("Personal workspace");
   const [modalOpen, setModalOpen] = useState(false);
   const [activeChat, setActiveChat] = useState(0);
   const [activeClient, setActiveClient] = useState<string | null>(null);
   const [founderConfig, setFounderConfig] = useState<ForecastConfig>(DEFAULT_FORECAST);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [productMode, setProductMode] = useState<ProductMode | "assistant">("assistant");
   // "auto" = conservative router. Picking a specific model in the composer
   // forces it; Extra/Opus stays disabled in the UI for now.
   const [model, setModel] = useState("auto");
@@ -104,28 +151,62 @@ export function AppShell() {
   const [hasAsked, setHasAsked] = useState(false);
   // Completed conversation turns (multi-turn memory); reset on a new conversation.
   const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [conversations, setConversations] = useState<ConversationSummaryDto[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [turnId, setTurnId] = useState<string | null>(null);
+  const [streamEnabled, setStreamEnabled] = useState(false);
+  const [restoredAnswer, setRestoredAnswer] = useState("");
+  const [restoredArtifacts, setRestoredArtifacts] = useState<ArtifactPayload[]>([]);
+  const [restoredChips, setRestoredChips] = useState<ResultChip[]>([]);
+  const [restoredChoices, setRestoredChoices] = useState<{
+    questions: { question: string; options: string[] }[];
+  } | null>(null);
+  const [restoredClosing, setRestoredClosing] = useState<Scenario["closing"] | null>(null);
+  const [restoredDataMode, setRestoredDataMode] = useState<"live" | "empty" | "sample">("empty");
+  const [brand, setBrand] = useState<BrandDto | null>(null);
+  const [brandBusy, setBrandBusy] = useState(false);
+  const [brandError, setBrandError] = useState<string | null>(null);
+  const [auditUrl, setAuditUrl] = useState("");
+  const [billing, setBilling] = useState<BillingSnapshotDto | null>(null);
 
   const dataset = PERSONAS[persona];
   const realProductMode = !DEMO_MODE;
+  const workspaceReadOnly = billing ? !billing.canManage : false;
   const realChannels = channels;
-  const connectedCount = realChannels.filter((channel) => channel.status === "connected").length;
+  const connectedCount = realProductMode
+    ? new Set(
+        realChannels
+          .filter((channel) => channel.connectionId && channel.status !== "disconnected")
+          .map((channel) => channel.connectionId),
+      ).size
+    : realChannels.filter((channel) => channel.status === "connected").length;
   const idle = realProductMode && screen === "chat" && !hasAsked;
   const sidebarAccount = realProductMode
     ? { name: workspaceName, sub: "Marpin workspace", initials: workspaceName.slice(0, 2).toUpperCase() }
     : dataset.account;
   const realRecentChats = useMemo(
     () => [
-      { title: hasAsked ? chatTitle(question) : "New conversation", question: hasAsked ? question : "" },
-      ...turns
-        .slice()
-        .reverse()
-        .map((turn) => ({ title: chatTitle(turn.question), question: turn.question })),
+      {
+        id: conversationId ?? undefined,
+        title: hasAsked ? chatTitle(question) : "New conversation",
+        question: hasAsked ? question : "",
+        mode: productMode === "organic" ? ("organic" as const) : ("assistant" as const),
+      },
+      ...conversations
+        .filter((conversation) => conversation.id !== conversationId)
+        .map((conversation) => ({
+          id: conversation.id,
+          title: conversation.title,
+          question: conversation.preview ?? conversation.title,
+          mode: conversation.mode,
+        })),
     ],
-    [hasAsked, question, turns],
+    [conversationId, conversations, hasAsked, productMode, question],
   );
   const sidebarChats = realProductMode ? realRecentChats : dataset.recentChats;
   // The staged-reveal surface is fed by a real SSE stream (/api/chat) through the
-  // shared StreamEvent reducer. `status`/`thinking` carry the live agent activity.
+  // shared StreamEvent reducer. Concise status events carry live agent activity;
+  // provider reasoning never enters the public event contract.
   // Last ~10 turns become the agent's conversational memory (sent to /api/chat).
   const history = useMemo(
     () =>
@@ -138,27 +219,53 @@ export function AppShell() {
   const {
     state,
     replay,
+    stop,
+    isStreaming,
     status,
-    thinking,
     artifacts,
     chips,
     choices,
+    conversation: streamedConversation,
     closing,
     dataMode,
+    error,
+    errorAction,
+    done,
   } = useStreamingChat(scenario, {
-    enabled: screen === "chat" && !idle,
+    enabled: screen === "chat" && !idle && streamEnabled,
     model,
     history,
+    conversationId,
+    turnId,
+    mode: productMode === "organic" ? "organic" : productMode === "paid" ? "paid" : "assistant",
   });
   const { step, typed } = state;
+  const displayStep = streamEnabled ? step : restoredAnswer ? 7 : step;
+  const displayTyped = streamEnabled ? typed : restoredAnswer;
+  const displayArtifacts = streamEnabled ? artifacts : restoredArtifacts;
+  const displayChips = streamEnabled ? chips : restoredChips;
+  const displayChoices = streamEnabled ? choices : restoredChoices;
+  const displayClosing = streamEnabled ? closing : restoredClosing;
+  const displayDataMode = streamEnabled ? dataMode : restoredDataMode;
+  const displayStatus = streamEnabled ? status : null;
+  const displayError = streamEnabled ? error : null;
+  const displayDone = streamEnabled ? done : Boolean(restoredAnswer);
   const liveSuggestions = useMemo(
-    () => [
-      "Build a growth strategy for my business",
-      "Analyze my top competitors and where I can win",
-      "Plan a campaign I can launch this month",
-      "Audit my website and funnel — what should I fix first?",
-    ],
-    [],
+    () =>
+      productMode === "organic"
+        ? [
+            "Build a 30-day organic content plan",
+            "Audit my SEO and prioritize the fixes",
+            "Plan next week's posts across my channels",
+            "Turn one product idea into seven platform posts",
+          ]
+        : [
+            "Build a growth strategy for my business",
+            "Analyze my top competitors and where I can win",
+            "Plan a paid campaign I can launch this month",
+            "Audit my website and funnel — what should I fix first?",
+          ],
+    [productMode],
   );
 
   const refreshConnections = useCallback(async () => {
@@ -170,16 +277,100 @@ export function AppShell() {
         connections?: Channel[];
       };
       if (payload.workspace?.name) setWorkspaceName(payload.workspace.name);
-      if (payload.connections?.length) setChannels(payload.connections);
-    } catch (err) {
-      console.warn("[connections] failed to refresh connection status", err);
+      if (Array.isArray(payload.connections)) {
+        const incomingByPlatform = new Map<string, Channel[]>();
+        for (const channel of payload.connections) {
+          if (!channel.platform) continue;
+          const accounts = incomingByPlatform.get(channel.platform) ?? [];
+          accounts.push(channel);
+          incomingByPlatform.set(channel.platform, accounts);
+        }
+        setChannels(PRODUCT_CHANNELS.flatMap((base) => {
+          const incoming = base.platform ? incomingByPlatform.get(base.platform) : undefined;
+          return incoming?.length
+            ? incoming.map((account) => ({ ...base, ...account }))
+            : [{ ...base }];
+        }));
+      }
+    } catch {
+      console.warn("[connections] failed to refresh connection status");
     }
   }, []);
 
+  const refreshConversations = useCallback(async () => {
+    if (!realProductMode) return;
+    try {
+      const response = await fetch("/api/conversations", { cache: "no-store" });
+      if (!response.ok) return;
+      const payload = (await response.json()) as {
+        conversations?: ConversationSummaryDto[];
+      };
+      setConversations(payload.conversations ?? []);
+    } catch {
+      // Persistence is additive; the in-memory chat remains usable while its
+      // migration is rolling out or the database is temporarily unavailable.
+    }
+  }, [realProductMode]);
+
+  const refreshBrand = useCallback(async () => {
+    if (!realProductMode) return;
+    try {
+      const response = await fetch("/api/brands", { cache: "no-store" });
+      if (!response.ok) return;
+      const payload = (await response.json()) as { brands?: BrandDto[] };
+      setBrand(payload.brands?.find((item) => item.isPrimary) ?? payload.brands?.[0] ?? null);
+    } catch {
+      // Brand persistence is additive and may be unavailable during migration.
+    }
+  }, [realProductMode]);
+
+  const refreshBilling = useCallback(async () => {
+    if (!realProductMode) return;
+    setBilling(null);
+    try {
+      const response = await fetch("/api/billing", { cache: "no-store" });
+      if (!response.ok) {
+        setBilling(null);
+        return;
+      }
+      const payload = (await response.json()) as { billing?: BillingSnapshotDto };
+      setBilling(payload.billing ?? null);
+    } catch {
+      setBilling(null);
+    }
+  }, [realProductMode]);
+
   useEffect(() => {
-    setChannels(REAL_CONNECTOR_CHANNELS);
+    setChannels(PRODUCT_CHANNELS);
     void refreshConnections();
-  }, [refreshConnections]);
+    void refreshConversations();
+    void refreshBrand();
+    void refreshBilling();
+  }, [refreshBilling, refreshBrand, refreshConnections, refreshConversations]);
+
+  useEffect(() => {
+    if (!streamedConversation) return;
+    setConversationId(streamedConversation.id);
+    void refreshConversations();
+  }, [refreshConversations, streamedConversation]);
+
+  useEffect(() => {
+    if (!done || !streamEnabled) return;
+    void refreshConversations();
+    void refreshBilling();
+  }, [done, refreshBilling, refreshConversations, streamEnabled]);
+
+  useEffect(() => {
+    if (model === "claude-opus-4-8" && !billing?.entitlements.canUseOpus) setModel("auto");
+  }, [billing?.entitlements.canUseOpus, model]);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 900px)");
+    const sync = () => setSidebarCollapsed(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
 
   useEffect(() => {
     if (!realProductMode) return;
@@ -192,9 +383,12 @@ export function AppShell() {
       void fetch("/api/sync", { method: "POST" })
         .then(() => refreshConnections())
         .catch(() => {});
+    } else if (params.get("connect") === "connection_limit") {
+      setModalOpen(true);
+      void refreshBilling();
     }
     window.history.replaceState({}, "", window.location.pathname);
-  }, [realProductMode, refreshConnections]);
+  }, [realProductMode, refreshBilling, refreshConnections]);
 
   const ask = useCallback(
     (text: string) => {
@@ -205,12 +399,22 @@ export function AppShell() {
       setActiveClient(null);
       // Archive the just-finished answer into conversation memory before asking
       // the next question (real product = multi-turn; demo stays single-shot).
-      if (realProductMode && hasAsked && typed.trim()) {
+      if (realProductMode && hasAsked && displayTyped.trim()) {
         const prevQ = question;
-        const askedQ = choices ? ` (asked: ${choices.questions.map((q) => q.question).join("; ")})` : "";
-        const prevA = typed.trim() + askedQ + summarizeCards(artifacts);
+        const askedQ = displayChoices
+          ? ` (asked: ${displayChoices.questions.map((q) => q.question).join("; ")})`
+          : "";
+        const prevA = displayTyped.trim() + askedQ + summarizeCards(displayArtifacts);
         setTurns((prev) => [...prev, { question: prevQ, answer: prevA }]);
       }
+      setTurnId(globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`);
+      setRestoredAnswer("");
+      setRestoredArtifacts([]);
+      setRestoredChips([]);
+      setRestoredChoices(null);
+      setRestoredClosing(null);
+      setRestoredDataMode("empty");
+      setStreamEnabled(true);
       setQuestion(trimmed);
       setScenario(
         realProductMode ? liveScenario(trimmed, persona) : resolveScenario(trimmed, persona, SCENARIOS),
@@ -218,7 +422,77 @@ export function AppShell() {
       setHasAsked(true);
       replay();
     },
-    [persona, realProductMode, replay, hasAsked, typed, question, artifacts, choices],
+    [
+      persona,
+      realProductMode,
+      replay,
+      hasAsked,
+      displayTyped,
+      question,
+      displayArtifacts,
+      displayChoices,
+    ],
+  );
+
+  const auditWebsite = useCallback(async (url: string): Promise<void> => {
+    const candidate = url.trim();
+    if (!candidate) return;
+    setAuditUrl(candidate);
+    setBrandBusy(true);
+    setBrandError(null);
+    setScreen("brand");
+    writeWorkspaceLocation({ area: "brand" });
+    try {
+      const response = await fetch("/api/brands/audit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: candidate }),
+      });
+      const payload = (await response.json()) as { brand?: BrandDto; error?: string };
+      if (!response.ok || !payload.brand) {
+        throw new Error(payload.error || "Marpin could not audit this website.");
+      }
+      setBrand(payload.brand);
+      setAuditUrl(payload.brand.websiteUrl ?? candidate);
+    } catch (auditError) {
+      setBrandError(
+        auditError instanceof Error ? auditError.message : "Marpin could not audit this website.",
+      );
+    } finally {
+      setBrandBusy(false);
+    }
+  }, []);
+
+  const saveBrand = useCallback(async (brandId: string, input: BrandWriteInput): Promise<void> => {
+    setBrandBusy(true);
+    setBrandError(null);
+    try {
+      const response = await fetch(`/api/brands/${encodeURIComponent(brandId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      const payload = (await response.json()) as { brand?: BrandDto; error?: string };
+      if (!response.ok || !payload.brand) {
+        throw new Error(payload.error || "Marpin could not save this brand.");
+      }
+      setBrand(payload.brand);
+    } catch (saveError) {
+      setBrandError(saveError instanceof Error ? saveError.message : "Marpin could not save this brand.");
+    } finally {
+      setBrandBusy(false);
+    }
+  }, []);
+
+  const submitWelcome = useCallback(
+    (text: string) => {
+      if (realProductMode && !brand && looksLikeWebsite(text)) {
+        void auditWebsite(text);
+        return;
+      }
+      ask(text);
+    },
+    [ask, auditWebsite, brand, realProductMode],
   );
 
   // Deep-link from the landing hero: /app?q=<website> auto-starts the analysis,
@@ -229,65 +503,192 @@ export function AppShell() {
     const q = new URLSearchParams(window.location.search).get("q");
     if (q && q.trim()) {
       didDeepLink.current = true;
-      ask(q.trim());
+      submitWelcome(q.trim());
       const url = new URL(window.location.href);
       url.searchParams.delete("q");
       window.history.replaceState({}, "", url.pathname + url.search);
     }
-  }, [ask]);
+  }, [submitWelcome]);
 
   // "New conversation" returns the real product to the clean welcome state
   // rather than re-streaming the previous answer (demo keeps the replay).
   const newChat = useCallback(() => {
+    stop();
     setScreen("chat");
+    setProductMode("assistant");
     setActiveChat(0);
     setActiveClient(null);
     setTurns([]);
+    setConversationId(null);
+    setTurnId(null);
+    setStreamEnabled(false);
+    setRestoredAnswer("");
+    setRestoredArtifacts([]);
+    setRestoredChips([]);
+    setRestoredChoices(null);
+    setRestoredClosing(null);
+    writeWorkspaceLocation({ area: "assistant" });
     if (realProductMode) {
       setHasAsked(false);
       return;
     }
     replay();
-  }, [realProductMode, replay]);
+  }, [realProductMode, replay, stop]);
+
+  const parkCurrentAnswer = useCallback(() => {
+    if (hasAsked && displayTyped.trim()) {
+      const askedQ = displayChoices
+        ? ` (asked: ${displayChoices.questions.map((item) => item.question).join("; ")})`
+        : "";
+      setTurns((previous) => [
+        ...previous,
+        { question, answer: displayTyped.trim() + askedQ + summarizeCards(displayArtifacts) },
+      ]);
+    }
+    stop();
+    setHasAsked(false);
+    setActiveChat(0);
+    setConversationId(null);
+    setTurnId(null);
+    setTurns([]);
+    setStreamEnabled(false);
+    setRestoredAnswer("");
+    setRestoredArtifacts([]);
+    setRestoredChips([]);
+    setRestoredChoices(null);
+    setRestoredClosing(null);
+  }, [displayArtifacts, displayChoices, displayTyped, hasAsked, question, stop]);
+
+  const openAssistant = useCallback(() => {
+    if (productMode === "assistant" && screen === "chat") return;
+    parkCurrentAnswer();
+    setProductMode("assistant");
+    setScreen("chat");
+    setActiveClient(null);
+    writeWorkspaceLocation({ area: "assistant" });
+  }, [parkCurrentAnswer, productMode, screen]);
+
+  const openOrganic = useCallback(() => {
+    if (productMode === "organic" && screen === "organic") return;
+    parkCurrentAnswer();
+    setProductMode("organic");
+    setScreen("organic");
+    setActiveClient(null);
+    writeWorkspaceLocation({ area: "organic", view: "calendar" });
+  }, [parkCurrentAnswer, productMode, screen]);
+
+  const openBrand = useCallback(() => {
+    if (screen === "brand") return;
+    stop();
+    setScreen("brand");
+    setActiveClient(null);
+    setBrandError(null);
+    writeWorkspaceLocation({ area: "brand" });
+  }, [screen, stop]);
+
+  const openPaid = useCallback(() => {
+    if (productMode === "paid" && screen === "dashboard") return;
+    parkCurrentAnswer();
+    setProductMode("paid");
+    setScreen("dashboard");
+    setActiveClient(null);
+    writeWorkspaceLocation({ area: "paid", view: "campaigns" });
+  }, [parkCurrentAnswer, productMode, screen]);
+
+  const openAgents = useCallback(() => {
+    if (screen === "agents") return;
+    parkCurrentAnswer();
+    setScreen("agents");
+    setActiveClient(null);
+    writeWorkspaceLocation({ area: "agents" });
+  }, [parkCurrentAnswer, screen]);
+
+  const openAnalytics = useCallback(() => {
+    if (screen === "analytics") return;
+    parkCurrentAnswer();
+    setScreen("analytics");
+    setActiveClient(null);
+    writeWorkspaceLocation({ area: "analytics" });
+  }, [parkCurrentAnswer, screen]);
+
+  useEffect(() => {
+    if (!realProductMode) return;
+    const restoreLocation = () => {
+      const location = parseWorkspaceLocation(window.location.search);
+      stop();
+      setActiveClient(null);
+      if (location.area === "brand") {
+        setProductMode("assistant");
+        setScreen("brand");
+      } else if (location.area === "organic") {
+        setProductMode("organic");
+        setScreen(location.view === "assistant" ? "chat" : "organic");
+      } else if (location.area === "paid") {
+        setProductMode("paid");
+        setScreen("dashboard");
+      } else if (location.area === "analytics") {
+        setProductMode("assistant");
+        setScreen("analytics");
+      } else if (location.area === "agents") {
+        setProductMode("assistant");
+        setScreen("agents");
+      } else {
+        setProductMode("assistant");
+        setScreen("chat");
+      }
+    };
+
+    restoreLocation();
+    window.addEventListener("popstate", restoreLocation);
+    return () => window.removeEventListener("popstate", restoreLocation);
+  }, [realProductMode, stop]);
 
   const selectChat = useCallback(
-    (index: number) => {
+    async (index: number) => {
       setScreen("chat");
       setActiveClient(null);
       if (realProductMode) {
-        // index 0 is the live conversation already on screen — keep it as-is so
-        // clicking it never discards the current answer.
         if (index <= 0) {
           setActiveChat(0);
           return;
         }
-        // index >= 1 maps into the reversed `turns` list (realRecentChats).
-        const turnIndex = turns.length - index;
-        const selected = turns[turnIndex];
-        if (!selected) {
+        const selected = realRecentChats[index];
+        if (!selected?.id) {
           setActiveChat(0);
           return;
         }
-        // Reopen the picked turn as the live conversation: archive the current
-        // answer (lossless) and lift the picked turn out of history so it isn't
-        // duplicated. Older turns stay as the agent's memory.
-        setTurns((prev) => {
-          const next = prev.filter((_, i) => i !== turnIndex);
-          if (hasAsked && typed.trim()) {
-            const askedQ = choices
-              ? ` (asked: ${choices.questions.map((qq) => qq.question).join("; ")})`
-              : "";
-            next.push({ question, answer: typed.trim() + askedQ + summarizeCards(artifacts) });
-          }
-          return next;
+        stop();
+        const response = await fetch(`/api/conversations/${encodeURIComponent(selected.id)}`, {
+          cache: "no-store",
         });
+        if (!response.ok) return;
+        const payload = (await response.json()) as { conversation?: ConversationDto };
+        if (!payload.conversation) return;
+        const restored = restoreConversation(payload.conversation);
         setActiveChat(0);
-        setQuestion(selected.question);
-        setScenario(liveScenario(selected.question, persona));
+        setConversationId(payload.conversation.id);
+        setTurnId(restored.turnId);
+        setTurns(restored.turns);
+        setQuestion(restored.question);
+        setScenario(liveScenario(restored.question, persona));
+        setRestoredAnswer(restored.answer);
+        setRestoredArtifacts(restored.artifacts);
+        setRestoredChips(restored.chips);
+        setRestoredChoices(restored.choices);
+        setRestoredClosing(restored.closing);
+        setRestoredDataMode(restored.dataMode);
+        setStreamEnabled(false);
+        const restoredMode = payload.conversation.mode === "organic" ? "organic" : "assistant";
+        setProductMode(restoredMode);
+        writeWorkspaceLocation(
+          restoredMode === "organic"
+            ? { area: "organic", view: "assistant" }
+            : { area: "assistant" },
+        );
         setHasAsked(true);
-        replay();
         return;
       }
+      setProductMode("assistant");
       setActiveChat(index);
       const q = PERSONAS[persona].recentChats[index].question;
       setQuestion(q);
@@ -295,7 +696,7 @@ export function AppShell() {
       setHasAsked(true);
       replay();
     },
-    [persona, realProductMode, replay, turns, hasAsked, typed, question, artifacts, choices],
+    [persona, realProductMode, realRecentChats, replay, stop],
   );
 
   // Switching persona swaps the dataset; the agency lands on its client roster.
@@ -334,7 +735,7 @@ export function AppShell() {
       // A freshly-onboarded founder only has the channels they actually picked.
       if (!realProductMode) {
         setChannels(
-          REAL_CONNECTOR_CHANNELS.map((channel) => ({
+          PRODUCT_CHANNELS.map((channel) => ({
             ...channel,
             status: intake.channels.includes(channel.name) ? "connected" : "disconnected",
           })),
@@ -349,7 +750,7 @@ export function AppShell() {
       setHasAsked(true);
       replay();
     },
-    [replay],
+    [realProductMode, replay],
   );
 
   const connectChannel = useCallback((channel: Channel) => {
@@ -357,8 +758,8 @@ export function AppShell() {
       setModalOpen(true);
       return;
     }
-    if (channel.platform) {
-      window.location.href = `/api/connect/${channel.platform}`;
+    if (channel.connectorPlatform) {
+      window.location.href = `/api/connect/${channel.connectorPlatform}`;
       return;
     }
     setChannels((prev) =>
@@ -370,8 +771,72 @@ export function AppShell() {
     );
   }, []);
 
+  const disconnectChannel = useCallback(
+    async (channel: Channel): Promise<ConnectionDisconnectResult> => {
+      if (!channel.connectionId) {
+        throw new Error("This account is no longer connected.");
+      }
+      const response = await fetch(
+        `/api/connections/${encodeURIComponent(channel.connectionId)}`,
+        {
+          method: "DELETE",
+          headers: { Accept: "application/json" },
+        },
+      );
+      const payload = (await response.json().catch(() => null)) as {
+        connectionId?: string;
+        disconnected?: boolean;
+        providerRevocation?: ProviderRevocationStatus;
+        message?: string;
+      } | null;
+
+      if (!response.ok) {
+        const fallback = response.status === 403
+          ? "Only workspace owners and admins can disconnect accounts."
+          : response.status === 404
+            ? "This connection no longer exists."
+            : "Marpin could not disconnect this account.";
+        throw new Error(payload?.message ?? fallback);
+      }
+      if (
+        payload?.disconnected !== true ||
+        payload.connectionId !== channel.connectionId ||
+        !["confirmed", "retained", "failed", "unavailable"].includes(payload.providerRevocation ?? "")
+      ) {
+        throw new Error("Marpin received an invalid disconnect response.");
+      }
+
+      await Promise.all([refreshConnections(), refreshBilling()]);
+      return payload as ConnectionDisconnectResult;
+    },
+    [refreshBilling, refreshConnections],
+  );
+
+  const retryCurrent = useCallback(() => {
+    if (!turnId) {
+      setTurnId(globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`);
+    }
+    setRestoredAnswer("");
+    setRestoredArtifacts([]);
+    setRestoredChips([]);
+    setRestoredChoices(null);
+    setRestoredClosing(null);
+    setRestoredDataMode("empty");
+    setStreamEnabled(true);
+    replay();
+  }, [replay, turnId]);
+
+  const askFromOrganicPlanner = useCallback(
+    (prompt: string) => {
+      setProductMode("organic");
+      writeWorkspaceLocation({ area: "organic", view: "assistant" });
+      ask(prompt);
+    },
+    [ask],
+  );
+
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-surface-page">
+    <div className="flex h-[100dvh] w-screen overflow-hidden bg-surface-page">
       <Sidebar
         activeChat={activeChat}
         onSelectChat={selectChat}
@@ -379,14 +844,26 @@ export function AppShell() {
         account={sidebarAccount}
         showClients={persona === "agency"}
         onViewClients={() => setScreen("clients")}
-        onViewDashboard={realProductMode ? () => setScreen("dashboard") : undefined}
-        dashboardActive={screen === "dashboard"}
+        onViewDashboard={realProductMode ? openPaid : undefined}
+        onViewAssistant={realProductMode ? openAssistant : undefined}
+        onViewOrganic={realProductMode ? openOrganic : undefined}
+        onViewBrand={realProductMode ? openBrand : undefined}
+        onViewAnalytics={realProductMode ? openAnalytics : undefined}
+        onViewAgents={realProductMode ? openAgents : undefined}
+        activeArea={screen === "brand"
+          ? "brand"
+          : screen === "analytics"
+            ? "analytics"
+            : screen === "agents"
+              ? "agents"
+              : productMode}
         onNewChat={newChat}
         onStartPlan={() => (realProductMode ? setModalOpen(true) : setScreen("onboarding"))}
         onOpenModal={() => setModalOpen(true)}
         primaryActionLabel={realProductMode ? "Manage connections" : "New plan"}
         collapsed={sidebarCollapsed}
         onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
+        authEnabled={authEnabled}
       />
 
       <main className="flex min-w-0 flex-1 flex-col">
@@ -402,35 +879,92 @@ export function AppShell() {
         ) : (
           <>
             <TopBar
-              onReplay={replay}
+              onReplay={DEMO_MODE ? replay : undefined}
               title={
                 idle
-                  ? "New conversation"
+                  ? productMode === "organic"
+                    ? "Organic + SEO"
+                    : "New conversation"
                   : screen === "clients"
                     ? "Clients"
                     : screen === "dashboard"
                       ? "Campaigns"
+                    : screen === "analytics"
+                      ? "Analytics"
+                      : screen === "agents"
+                        ? "Agent runs"
+                      : screen === "brand"
+                        ? "Brand"
+                        : screen === "organic"
+                          ? "Content planner"
                       : scenario.title
               }
               channels={realChannels}
               persona={persona}
               onSwitchPersona={switchPersona}
-              onForecast={() => setScreen("forecast")}
+              onForecast={DEMO_MODE ? () => setScreen("forecast") : undefined}
               chatControls={screen === "chat"}
               activeClient={screen === "chat" ? activeClient : null}
               showPersonaSwitcher={!realProductMode}
             />
 
-            {idle ? (
+            {screen === "brand" ? (
+              <BrandWorkspace
+                brand={brand}
+                initialUrl={auditUrl}
+                busy={brandBusy}
+                error={brandError}
+                canManage={billing?.canManage === true}
+                onAudit={auditWebsite}
+                onSave={saveBrand}
+              />
+            ) : screen === "agents" ? (
+              <AgentRunsWorkspace
+                brandId={brand?.id ?? null}
+                canManage={billing?.canManage === true}
+                onOpenBrand={openBrand}
+              />
+            ) : screen === "analytics" ? (
+              <DistributionAnalytics />
+            ) : screen === "organic" ? (
+              brand ? (
+                <OrganicPlanner
+                  brandId={brand.id}
+                  timezone={brand.timezone}
+                  locale={brand.locale}
+                  canManagePlans={billing?.canManage === true}
+                  onAskAI={askFromOrganicPlanner}
+                />
+              ) : (
+                <WelcomeScreen
+                  onSend={submitWelcome}
+                  onSuggest={ask}
+                  suggestions={[]}
+                  connectedCount={connectedCount}
+                  model={model}
+                  onModelChange={setModel}
+                  mode="organic"
+                  brandName={null}
+                  canUseOpus={billing?.entitlements.canUseOpus ?? false}
+                  readOnly={workspaceReadOnly}
+                />
+              )
+            ) : idle ? (
               <WelcomeScreen
-                onSend={ask}
+                onSend={submitWelcome}
                 onSuggest={ask}
-                // First-run is a clean URL prompt — no strategy chips fighting the
-                // "drop your website" intent. (Demo keeps its replay chips.)
-                suggestions={realProductMode ? [] : dataset.suggestions}
+                // True first-run stays URL-first. Once Brand memory exists, the
+                // clean welcome becomes a contextual strategy launchpad.
+                suggestions={
+                  realProductMode ? (brand ? liveSuggestions : []) : dataset.suggestions
+                }
                 connectedCount={connectedCount}
                 model={model}
                 onModelChange={setModel}
+                mode={productMode === "organic" ? "organic" : "assistant"}
+                brandName={brand?.name ?? null}
+                canUseOpus={billing?.entitlements.canUseOpus ?? false}
+                readOnly={workspaceReadOnly}
               />
             ) : screen === "clients" ? (
               <ClientsScreen
@@ -439,31 +973,41 @@ export function AppShell() {
                 onOpenClient={openClient}
               />
             ) : screen === "dashboard" ? (
-              <CampaignsScreen onOpenConnections={() => setModalOpen(true)} />
+              <CampaignsScreen
+                onOpenConnections={() => setModalOpen(true)}
+                canManage={billing?.canManage === true}
+              />
             ) : (
               <SplitView
-                step={step}
+                step={displayStep}
                 turns={turns}
-                choices={choices}
+                choices={displayChoices}
                 onChoose={ask}
-                typed={typed}
-                status={status}
-                thinking={thinking}
+                typed={displayTyped}
+                status={displayStatus}
+                error={displayError}
+                errorAction={streamEnabled ? errorAction : null}
+                isStreaming={isStreaming}
+                done={displayDone}
+                onStop={stop}
+                onRetry={retryCurrent}
                 question={question}
                 scenario={scenario}
-                artifacts={artifacts}
-                chips={chips}
-                closing={closing}
+                artifacts={displayArtifacts}
+                chips={displayChips}
+                closing={displayClosing}
                 onSend={ask}
                 onSuggest={ask}
                 suggestions={realProductMode ? liveSuggestions : dataset.suggestions}
-                dataMode={dataMode}
+                dataMode={displayDataMode}
                 onOpenConnections={() => setModalOpen(true)}
                 connectedCount={connectedCount}
                 channels={realChannels}
                 onConnect={connectChannel}
                 model={model}
                 onModelChange={setModel}
+                canUseOpus={billing?.entitlements.canUseOpus ?? false}
+                readOnly={workspaceReadOnly}
               />
             )}
           </>
@@ -473,8 +1017,13 @@ export function AppShell() {
       {modalOpen && (
         <ConnectionsModal
           channels={channels}
+          connectedCount={billing?.resources.connections ?? connectedCount}
+          maxConnections={billing?.entitlements.maxConnections}
+          planName={billing?.plan.name}
           onClose={() => setModalOpen(false)}
           onConnect={connectChannel}
+          onDisconnect={disconnectChannel}
+          canManage={!workspaceReadOnly}
         />
       )}
     </div>

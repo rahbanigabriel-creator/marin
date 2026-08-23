@@ -16,8 +16,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
 
@@ -26,20 +26,142 @@ model Workspace {
   id        String   @id @default(cuid())
   name      String
   slug      String   @unique
+  timezone  String   @default("UTC")
+  locale    String   @default("en")
+  currency  String   @default("EUR")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  memberships  Membership[]
-  connections  Connection[]
-  metricFacts  MetricFact[]
-  campaigns    Campaign[]
-  ads          Ad[]
-  subscription Subscription?
-  usageEvents  UsageEvent[]
-  actions      Action[]
-  assets       Asset[]
+  memberships                     Membership[]
+  connections                     Connection[]
+  syncAttempts                    SyncAttempt[]
+  metricFacts                     MetricFact[]
+  campaigns                       Campaign[]
+  ads                             Ad[]
+  subscription                    Subscription?
+  usageEvents                     UsageEvent[]
+  billingEvents                   BillingEvent[]
+  actions                         Action[]
+  actionAttempts                  ActionAttempt[]
+  assets                          Asset[]
+  brands                          Brand[]
+  conversations                   Conversation[]
+  messages                        Message[]
+  integrations                    Integration[]
+  channelAccounts                 ChannelAccount[]
+  contentPlans                    ContentPlan[]
+  contentItems                    ContentItem[]
+  contentProposals                ContentProposal[]
+  publications                    Publication[]
+  publicationAttempts             PublicationAttempt[]
+  seoTasks                        SeoTask[]
+  seoProposals                    SeoProposal[]
+  influencerProfiles              InfluencerProfile[]
+  paidCampaignDrafts              PaidCampaignDraft[]
+  paidDraftMutations              PaidCampaignDraftMutation[]
+  paidDraftApprovals              PaidCampaignApproval[]
+  paidOperationAttempts           PaidCampaignOperationAttempt[]
+  paidProviderPausedConfirmations PaidCampaignProviderPausedConfirmation[]
+  agentRuns                       AgentRun[]
+  agentRunSteps                   AgentRunStep[]
+  agentRunEvents                  AgentRunEvent[]
+  agentRunApprovals               AgentRunApproval[]
+  agentRunCommands                AgentRunCommand[]
+  manualCreationRequests          ManualCreationRequest[]
 
   @@map("workspaces")
+}
+
+/// Durable response ledger for user-initiated creation commands. The workspace
+/// row is locked before checking this key, so concurrent retries either perform
+/// one mutation or replay its exact committed response.
+model ManualCreationRequest {
+  id           String   @id @default(cuid())
+  workspaceId  String   @map("workspace_id")
+  operation    String
+  requestId    String   @map("request_id")
+  requestHash  String   @map("request_hash")
+  responseBody Json     @map("response_body")
+  statusCode   Int      @map("status_code")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, operation, requestId], map: "manual_creation_requests_workspace_operation_request_key")
+  @@index([workspaceId, createdAt], map: "manual_creation_requests_workspace_created_idx")
+  @@map("manual_creation_requests")
+}
+
+/// Short-lived bridge between a signed-out website audit and the workspace
+/// created after signup. Only a SHA-256 token digest is stored; the raw opaque
+/// token exists solely in an HttpOnly cookie and the row is deleted on use.
+model AuditHandoff {
+  id            String   @id @default(cuid())
+  tokenHash     String   @unique @map("token_hash")
+  finalUrl      String   @map("final_url")
+  auditSnapshot Json     @map("audit_snapshot")
+  expiresAt     DateTime @map("expires_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([expiresAt], map: "audit_handoffs_expires_at_idx")
+  @@map("audit_handoffs")
+}
+
+/// Durable deletion tombstone. Deliberately has no foreign key to Workspace so
+/// it survives the tenant cascade and prevents the same Clerk identity from
+/// silently recreating a deleted workspace. External outcomes are bounded safe
+/// statuses only; credentials, Blob keys, and provider payloads never live here.
+model WorkspaceDeletionRequest {
+  id                        String    @id @default(cuid())
+  workspaceId               String    @unique @map("workspace_id")
+  workspaceSlug             String    @unique @map("workspace_slug")
+  requestedBy               String    @map("requested_by")
+  requestId                 String    @map("request_id")
+  requestHash               String    @map("request_hash")
+  status                    String    @default("queued") // queued | processing | needs_attention | completed | completed_with_warnings
+  stage                     String    @default("queued")
+  dispatchStatus            String    @default("pending") @map("dispatch_status") // pending | sent | unavailable | failed
+  dispatchErrorCode         String?   @map("dispatch_error_code")
+  stripeStatus              String    @default("pending") @map("stripe_status") // pending | confirmed | not_applicable | failed | unavailable
+  blobStatus                String    @default("pending") @map("blob_status") // pending | confirmed | not_applicable | failed | unavailable
+  providerOutcomes          Json      @default("[]") @map("provider_outcomes")
+  warningCodes              Json      @default("[]") @map("warning_codes")
+  failureCode               String?   @map("failure_code")
+  failureMessage            String?   @map("failure_message")
+  isClerkOrganization       Boolean   @default(false) @map("is_clerk_organization")
+  clerkUserDeletionEligible Boolean   @default(false) @map("clerk_user_deletion_eligible")
+  clerkStatus               String    @default("pending") @map("clerk_status") // pending | confirmed | not_applicable | failed
+  attempt                   Int       @default(0)
+  version                   Int       @default(1)
+  requestedAt               DateTime  @default(now()) @map("requested_at")
+  processingStartedAt       DateTime? @map("processing_started_at")
+  completedAt               DateTime? @map("completed_at")
+  updatedAt                 DateTime  @updatedAt @map("updated_at")
+
+  commands WorkspaceDeletionCommand[]
+
+  @@unique([requestedBy, requestId], map: "workspace_deletion_requests_requester_request_key")
+  @@index([requestedBy, updatedAt], map: "workspace_deletion_requests_requester_updated_idx")
+  @@index([status, updatedAt], map: "workspace_deletion_requests_status_updated_idx")
+  @@map("workspace_deletion_requests")
+}
+
+/// Append-only idempotency ledger for owner-requested deletion retries.
+model WorkspaceDeletionCommand {
+  id                String   @id @default(cuid())
+  deletionRequestId String   @map("deletion_request_id")
+  requestedBy       String   @map("requested_by")
+  requestId         String   @map("request_id")
+  requestHash       String   @map("request_hash")
+  kind              String
+  resultStatus      String   @map("result_status")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  deletionRequest WorkspaceDeletionRequest @relation(fields: [deletionRequestId], references: [id], onDelete: Cascade, map: "workspace_deletion_commands_request_fkey")
+
+  @@unique([requestedBy, requestId], map: "workspace_deletion_commands_requester_request_key")
+  @@index([deletionRequestId, createdAt], map: "workspace_deletion_commands_request_created_idx")
+  @@map("workspace_deletion_commands")
 }
 
 /// Maps a Clerk user into a Workspace with a role. Role is a String
@@ -65,20 +187,31 @@ model Membership {
 /// plaintext OAuth tokens are never persisted. status drives the
 /// broken-connection UX (connected | error | revoked).
 model Connection {
-  id                String    @id @default(cuid())
-  workspaceId       String    @map("workspace_id")
-  platform          String // google_ads | ga4 | meta_ads
-  externalAccountId String    @map("external_account_id")
-  displayName       String?   @map("display_name")
-  status            String    @default("connected") // connected | error | revoked
-  scopes            String? // space- or comma-separated granted scopes
-  encAccessToken    String    @map("enc_access_token") // AES-256-GCM ciphertext
-  encRefreshToken   String?   @map("enc_refresh_token") // AES-256-GCM ciphertext
-  expiresAt         DateTime? @map("expires_at")
-  createdAt         DateTime  @default(now()) @map("created_at")
-  updatedAt         DateTime  @updatedAt @map("updated_at")
+  id                   String    @id @default(cuid())
+  workspaceId          String    @map("workspace_id")
+  platform             String // google_ads | ga4 | meta_ads
+  externalAccountId    String    @map("external_account_id")
+  displayName          String?   @map("display_name")
+  status               String    @default("connected") // connected | error | revoked
+  scopes               String? // space- or comma-separated granted scopes
+  encAccessToken       String    @map("enc_access_token") // AES-256-GCM ciphertext
+  encRefreshToken      String?   @map("enc_refresh_token") // AES-256-GCM ciphertext
+  expiresAt            DateTime? @map("expires_at")
+  currency             String?
+  timezone             String?
+  lastSyncAt           DateTime? @map("last_sync_at")
+  lastSuccessfulSyncAt DateTime? @map("last_successful_sync_at")
+  lastErrorCode        String?   @map("last_error_code")
+  lastErrorMessage     String?   @map("last_error_message")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace          Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  metricFacts        MetricFact[]
+  campaigns          Campaign[]
+  ads                Ad[]
+  syncAttempts       SyncAttempt[]
+  paidCampaignDrafts PaidCampaignDraft[]
 
   @@unique([workspaceId, platform, externalAccountId])
   @@index([workspaceId, platform])
@@ -98,20 +231,32 @@ model Connection {
 /// duplicate account-level rows slip past the natural key and break upsert. The
 /// "" sentinel keeps the compound @@unique enforceable for every grain.
 model MetricFact {
-  id          String   @id @default(cuid())
-  workspaceId String   @map("workspace_id")
-  platform    String // google_ads | ga4 | meta_ads
-  date        DateTime
-  campaign    String   @default("") // "" = account-level (no campaign); see note above
-  metric      String // spend | roas | cpa | conversions | impressions | clicks | revenue | ...
-  value       Float
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id                 String    @id @default(cuid())
+  workspaceId        String    @map("workspace_id")
+  connectionId       String?   @map("connection_id")
+  platform           String // google_ads | ga4 | meta_ads
+  date               DateTime
+  /// Compatibility identity used by the original sync. New paid syncs store a
+  /// connection-prefixed value so the legacy unique key cannot collide across accounts.
+  campaign           String    @default("")
+  campaignExternalId String    @default("") @map("campaign_external_id")
+  campaignName       String?   @map("campaign_name")
+  metric             String // spend | roas | cpa | conversions | impressions | clicks | revenue | ...
+  value              Float
+  currency           String?
+  lastSeenAttemptId  String?   @map("last_seen_attempt_id")
+  staleAt            DateTime? @map("stale_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace  Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  connection Connection? @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, platform, date, campaign, metric])
+  @@unique([connectionId, date, campaignExternalId, metric])
   @@index([workspaceId, platform, date])
+  @@index([workspaceId, connectionId, date])
+  @@index([connectionId, staleAt])
   @@index([workspaceId, metric])
   @@map("metric_facts")
 }
@@ -125,23 +270,31 @@ model MetricFact {
 /// config fields are nullable: a platform may not expose budget/objective, and a
 /// metrics-only platform writes no Campaign rows at all (config stays null).
 model Campaign {
-  id          String   @id @default(cuid())
-  workspaceId String   @map("workspace_id")
-  platform    String // google_ads | meta_ads | ...
-  externalId  String   @map("external_id") // the platform's campaign id
-  name        String // human label; joins to MetricFact.campaign for Google/Meta
-  status      String? // active | paused | removed | ... (platform-normalized lower-case)
-  objective   String? // e.g. OUTCOME_SALES, Search, Lead gen
-  budget      Float? // amount in account currency major units (e.g. €), or null
-  budgetType  String?  @map("budget_type") // daily | lifetime
-  currency    String? // ISO currency code when known
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id                 String    @id @default(cuid())
+  workspaceId        String    @map("workspace_id")
+  connectionId       String?   @map("connection_id")
+  platform           String // google_ads | meta_ads | ...
+  /// Compatibility identity. New paid rows prefix this with the connection id.
+  externalId         String    @map("external_id")
+  providerExternalId String?   @map("provider_external_id")
+  name               String // human label; joins to MetricFact.campaign for Google/Meta
+  status             String? // active | paused | removed | ... (platform-normalized lower-case)
+  objective          String? // e.g. OUTCOME_SALES, Search, Lead gen
+  budget             Float? // amount in account currency major units (e.g. €), or null
+  budgetType         String?   @map("budget_type") // daily | lifetime
+  currency           String? // ISO currency code when known
+  lastSeenAttemptId  String?   @map("last_seen_attempt_id")
+  staleAt            DateTime? @map("stale_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace  Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  connection Connection? @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, platform, externalId])
+  @@unique([connectionId, providerExternalId])
   @@index([workspaceId, platform])
+  @@index([workspaceId, connectionId, staleAt])
   @@map("campaigns")
 }
 
@@ -154,48 +307,97 @@ model Campaign {
 /// throughout: a platform may not expose creatives, and a metrics-only platform
 /// writes no Ad rows. `thumbnailUrl` is the platform CDN preview (best-effort).
 model Ad {
-  id                 String  @id @default(cuid())
-  workspaceId        String  @map("workspace_id")
+  id                 String    @id @default(cuid())
+  workspaceId        String    @map("workspace_id")
+  connectionId       String?   @map("connection_id")
   platform           String
-  externalId         String  @map("external_id") // the platform's ad id
-  campaignExternalId String? @map("campaign_external_id")
-  campaignName       String? @map("campaign_name") // joins to MetricFact.campaign
-  adsetName          String? @map("adset_name")
+  /// Compatibility identity. New paid rows prefix this with the connection id.
+  externalId         String    @map("external_id")
+  providerExternalId String?   @map("provider_external_id")
+  campaignExternalId String?   @map("campaign_external_id")
+  campaignName       String?   @map("campaign_name") // joins to MetricFact.campaign
+  adsetName          String?   @map("adset_name")
   name               String
   status             String? // active | paused | ... (platform-normalized)
-  creativeType       String? @map("creative_type") // image | video | carousel | text
-  thumbnailUrl       String? @map("thumbnail_url") // platform CDN preview (may expire)
+  creativeType       String?   @map("creative_type") // image | video | carousel | text
+  thumbnailUrl       String?   @map("thumbnail_url") // platform CDN preview (may expire)
   title              String? // creative headline
   body               String? // creative primary text
-  callToAction       String? @map("call_to_action") // human-readable label, e.g. "Install Now"
-  linkUrl            String? @map("link_url")
+  callToAction       String?   @map("call_to_action") // human-readable label, e.g. "Install Now"
+  linkUrl            String?   @map("link_url")
   // Performance snapshot over the last sync window (refreshed each sync):
-  spend       Float?
-  impressions Float?
-  clicks      Float?
-  conversions Float?
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  spend              Float?
+  impressions        Float?
+  clicks             Float?
+  conversions        Float?
+  currency           String?
+  metricsFrom        DateTime? @map("metrics_from")
+  metricsTo          DateTime? @map("metrics_to")
+  lastSeenAttemptId  String?   @map("last_seen_attempt_id")
+  staleAt            DateTime? @map("stale_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace  Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  connection Connection? @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, platform, externalId])
+  @@unique([connectionId, providerExternalId])
   @@index([workspaceId, platform, campaignExternalId])
+  @@index([workspaceId, connectionId, staleAt])
   @@index([workspaceId, campaignName])
   @@map("ads")
 }
 
+/// One durable, account-scoped pull. Phase status and sanitized detail make
+/// partial provider results visible without storing tokens or raw responses.
+model SyncAttempt {
+  id              String    @id @default(cuid())
+  workspaceId     String    @map("workspace_id")
+  connectionId    String    @map("connection_id")
+  trigger         String    @default("manual") // manual | scheduled | connected | backfill
+  status          String    @default("running") // running | succeeded | partial | failed
+  requestedFrom   DateTime  @map("requested_from")
+  requestedTo     DateTime  @map("requested_to")
+  observedFrom    DateTime? @map("observed_from")
+  observedTo      DateTime? @map("observed_to")
+  currency        String?
+  timezone        String?
+  metricsStatus   String    @default("pending") @map("metrics_status")
+  campaignsStatus String    @default("pending") @map("campaigns_status")
+  adsStatus       String    @default("pending") @map("ads_status")
+  phaseDetails    Json?     @map("phase_details")
+  errorCode       String?   @map("error_code")
+  errorMessage    String?   @map("error_message")
+  startedAt       DateTime  @default(now()) @map("started_at")
+  completedAt     DateTime? @map("completed_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  workspace  Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  connection Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, startedAt])
+  @@index([connectionId, startedAt])
+  @@map("sync_attempts")
+}
+
 /// Stripe-backed billing state for a workspace (one per tenant).
 model Subscription {
-  id               String    @id @default(cuid())
-  workspaceId      String    @unique @map("workspace_id")
-  stripeCustomerId String?   @map("stripe_customer_id")
-  stripeSubId      String?   @map("stripe_sub_id")
-  plan             String    @default("free") // free | solo | business | max
-  status           String    @default("active")
-  currentPeriodEnd DateTime? @map("current_period_end")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  id                 String    @id @default(cuid())
+  workspaceId        String    @unique @map("workspace_id")
+  stripeCustomerId   String?   @unique @map("stripe_customer_id")
+  stripeSubId        String?   @unique @map("stripe_sub_id")
+  stripePriceId      String?   @map("stripe_price_id")
+  billingInterval    String?   @map("billing_interval") // monthly | annual
+  plan               String    @default("free") // launch: free | solo
+  status             String    @default("inactive")
+  currentPeriodStart DateTime? @map("current_period_start")
+  currentPeriodEnd   DateTime? @map("current_period_end")
+  cancelAtPeriodEnd  Boolean   @default(false) @map("cancel_at_period_end")
+  lastStripeEventAt  DateTime? @map("last_stripe_event_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
@@ -204,17 +406,46 @@ model Subscription {
 
 /// Per-answer usage + credit metering (drives plan limits / overage billing).
 model UsageEvent {
-  id          String   @id @default(cuid())
-  workspaceId String   @map("workspace_id")
-  kind        String // answer | credit
-  credits     Float    @default(0)
-  model       String? // e.g. claude-haiku / sonnet / opus tier used
-  createdAt   DateTime @default(now()) @map("created_at")
+  id             String    @id @default(cuid())
+  workspaceId    String    @map("workspace_id")
+  idempotencyKey String    @map("idempotency_key")
+  requestHash    String    @map("request_hash")
+  kind           String // answer | credit
+  credits        Float     @default(0) // application-enforced positive integer; kept DB-compatible with the prior writer
+  model          String? // e.g. claude-haiku / sonnet / opus tier used
+  status         String    @default("committed") // reserved | committed | released
+  periodStart    DateTime  @map("period_start")
+  periodEnd      DateTime  @map("period_end")
+  reservedAt     DateTime  @default(now()) @map("reserved_at")
+  committedAt    DateTime? @map("committed_at")
+  releasedAt     DateTime? @map("released_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
+  @@unique([workspaceId, idempotencyKey])
+  @@index([workspaceId, status, periodStart])
   @@index([workspaceId, createdAt])
   @@map("usage_events")
+}
+
+/// Verified Stripe deliveries. Inserting stripeEventId inside the same
+/// transaction as the subscription mutation makes webhook retries idempotent.
+model BillingEvent {
+  id              String   @id @default(cuid())
+  workspaceId     String?  @map("workspace_id")
+  stripeEventId   String   @unique @map("stripe_event_id")
+  type            String
+  stripeCreatedAt DateTime @map("stripe_created_at")
+  processedAt     DateTime @default(now()) @map("processed_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, processedAt])
+  @@index([type, stripeCreatedAt])
+  @@map("billing_events")
 }
 
 /// An executable marketing action proposed by the agent (Action-OS). Persisted at
@@ -241,10 +472,33 @@ model Action {
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  attempts  ActionAttempt[]
 
   @@index([workspaceId, createdAt])
   @@map("actions")
+}
+
+/// Immutable execution attempt for an approved Action. Action is current state;
+/// these rows retain the actor, exact approved payload, and provider outcome.
+model ActionAttempt {
+  id              String   @id @default(cuid())
+  workspaceId     String   @map("workspace_id")
+  actionId        String   @map("action_id")
+  actorId         String?  @map("actor_id")
+  idempotencyKey  String   @unique @map("idempotency_key")
+  status          String // started | succeeded | failed | manual
+  approvedPayload Json?    @map("approved_payload")
+  result          Json?
+  error           String?
+  attemptedAt     DateTime @default(now()) @map("attempted_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  action    Action    @relation(fields: [actionId], references: [id], onDelete: Cascade)
+
+  @@index([actionId, attemptedAt])
+  @@index([workspaceId, attemptedAt])
+  @@map("action_attempts")
 }
 
 /// An uploaded creative asset (image/video) a user attaches to an action. The
@@ -257,10 +511,833 @@ model Asset {
   mimeType    String   @map("mime_type")
   bytes       Int
   storageKey  String   @map("storage_key")
+  filename    String?
+  width       Int?
+  height      Int?
+  durationMs  Int?     @map("duration_ms")
+  source      String   @default("upload") // upload | generated | imported
+  metadata    Json?
   createdAt   DateTime @default(now()) @map("created_at")
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace    Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contentLinks ContentItemAsset[]
 
   @@index([workspaceId, createdAt])
   @@map("assets")
+}
+
+/// A workspace can operate more than one brand, while `isPrimary` identifies
+/// the default context for the solo-founder journey. The structured JSON fields
+/// are editable source-of-truth inputs for both manual workflows and the agent.
+model Brand {
+  id             String    @id @default(cuid())
+  workspaceId    String    @map("workspace_id")
+  name           String
+  websiteUrl     String?   @map("website_url")
+  isPrimary      Boolean   @default(false) @map("is_primary")
+  summary        String?
+  audience       Json?
+  voice          Json?
+  offers         Json?
+  competitors    Json?
+  proofPoints    Json?     @map("proof_points")
+  visualStyle    Json?     @map("visual_style")
+  locale         String    @default("en")
+  timezone       String    @default("UTC")
+  currency       String    @default("EUR")
+  contextVersion Int       @default(1) @map("context_version")
+  auditSnapshot  Json?     @map("audit_snapshot")
+  auditedAt      DateTime? @map("audited_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  workspace          Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  conversations      Conversation[]
+  contentPlans       ContentPlan[]
+  contentItems       ContentItem[]
+  contentProposals   ContentProposal[]
+  seoTasks           SeoTask[]
+  seoProposals       SeoProposal[]
+  influencerProfiles InfluencerProfile[]
+  agentRuns          AgentRun[]
+
+  @@index([workspaceId, isPrimary])
+  @@index([workspaceId, websiteUrl])
+  @@map("brands")
+}
+
+/// Persisted chat thread. `mode` scopes the same assistant to general,
+/// organic/SEO, or paid work without creating separate disconnected products.
+model Conversation {
+  id            String   @id @default(cuid())
+  workspaceId   String   @map("workspace_id")
+  brandId       String?  @map("brand_id")
+  title         String
+  mode          String   @default("assistant") // assistant | organic | paid | seo
+  status        String   @default("active") // active | archived
+  createdBy     String?  @map("created_by")
+  lastMessageAt DateTime @default(now()) @map("last_message_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  brand     Brand?     @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  messages  Message[]
+  agentRuns AgentRun[]
+
+  @@index([workspaceId, lastMessageAt])
+  @@index([workspaceId, status])
+  @@map("conversations")
+}
+
+/// One immutable turn in a persisted conversation. Structured cards, tool
+/// outcomes, and citations live in `metadata`; `content` remains readable text.
+model Message {
+  id             String   @id @default(cuid())
+  workspaceId    String   @map("workspace_id")
+  conversationId String   @map("conversation_id")
+  turnId         String?  @map("turn_id")
+  role           String // user | assistant | system
+  content        String
+  metadata       Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, role, turnId])
+  @@index([conversationId, createdAt])
+  @@index([workspaceId, createdAt])
+  @@map("messages")
+}
+
+/// One OAuth authorization. Provider credentials belong here; the selectable
+/// pages, profiles, properties, and ad accounts it exposes are ChannelAccounts.
+/// Existing Connection rows remain the active read path during the additive
+/// migration and are moved here in the connector sprint.
+model Integration {
+  id              String    @id @default(cuid())
+  workspaceId     String    @map("workspace_id")
+  provider        String // google | meta | tiktok | youtube | pinterest | ...
+  label           String?
+  status          String    @default("connected") // connected | error | revoked
+  scopes          String?
+  encAccessToken  String    @map("enc_access_token")
+  encRefreshToken String?   @map("enc_refresh_token")
+  expiresAt       DateTime? @map("expires_at")
+  externalUserId  String?   @map("external_user_id")
+  metadata        Json?
+  createdBy       String?   @map("created_by")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  workspace Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  accounts  ChannelAccount[]
+
+  @@index([workspaceId, provider])
+  @@index([workspaceId, status])
+  @@map("integrations")
+}
+
+/// A concrete destination/source selected from an Integration: Meta ad account,
+/// Facebook Page, Instagram profile, GA4 property, YouTube channel, and so on.
+model ChannelAccount {
+  id                String   @id @default(cuid())
+  workspaceId       String   @map("workspace_id")
+  integrationId     String   @map("integration_id")
+  platform          String
+  accountType       String   @map("account_type")
+  externalAccountId String   @map("external_account_id")
+  displayName       String?  @map("display_name")
+  status            String   @default("active") // active | unavailable | revoked
+  capabilities      Json?
+  timezone          String?
+  currency          String?
+  metadata          Json?
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  integration  Integration   @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  publications Publication[]
+
+  @@unique([integrationId, platform, externalAccountId], map: "channel_accounts_identity_key")
+  @@index([workspaceId, platform, status])
+  @@map("channel_accounts")
+}
+
+/// A week/month/quarter organic plan. The plan owns strategy and date bounds;
+/// each channel-specific scheduled item is a ContentPost below it.
+model ContentPlan {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  brandId     String?  @map("brand_id")
+  name        String
+  objective   String?
+  status      String   @default("draft") // draft | active | archived
+  version     Int      @default(1)
+  startDate   DateTime @map("start_date")
+  endDate     DateTime @map("end_date")
+  timezone    String   @default("UTC")
+  strategy    Json?
+  createdBy   String?  @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  brand     Brand?        @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  items     ContentItem[]
+
+  @@index([workspaceId, startDate, endDate])
+  @@index([workspaceId, status])
+  @@map("content_plans")
+}
+
+/// Reusable master idea/brief. Manual edits and AI generations update the same
+/// object; channel-specific copy and schedule live in Publication variants.
+model ContentItem {
+  id          String    @id @default(cuid())
+  workspaceId String    @map("workspace_id")
+  brandId     String?   @map("brand_id")
+  planId      String?   @map("plan_id")
+  status      String    @default("idea") // idea | draft | review | approved | archived
+  source      String    @default("manual") // manual | ai | agent
+  title       String
+  brief       String?
+  coreCopy    String?   @map("core_copy")
+  objective   String?
+  metadata    Json?
+  version     Int       @default(1)
+  createdBy   String?   @map("created_by")
+  approvedBy  String?   @map("approved_by")
+  approvedAt  DateTime? @map("approved_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  workspace    Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  brand        Brand?             @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  plan         ContentPlan?       @relation(fields: [planId], references: [id], onDelete: SetNull)
+  assets       ContentItemAsset[]
+  publications Publication[]
+  proposals    ContentProposal[]
+
+  @@index([workspaceId, status, updatedAt])
+  @@index([planId, createdAt])
+  @@map("content_items")
+}
+
+/// Ordered attachment relation; the same asset can be reused across variants.
+model ContentItemAsset {
+  id            String   @id @default(cuid())
+  contentItemId String   @map("content_item_id")
+  assetId       String   @map("asset_id")
+  position      Int      @default(0)
+  role          String   @default("media") // media | thumbnail | cover
+  altText       String?  @map("alt_text")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  contentItem ContentItem @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+  asset       Asset       @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([contentItemId, assetId])
+  @@index([contentItemId, position])
+  @@map("content_item_assets")
+}
+
+/// One channel-specific version of a ContentItem. This is the canonical
+/// calendar and publishing state machine used by manual UI, AI, and jobs.
+model Publication {
+  id               String    @id @default(cuid())
+  workspaceId      String    @map("workspace_id")
+  contentItemId    String    @map("content_item_id")
+  channelAccountId String?   @map("channel_account_id")
+  platform         String // youtube | instagram | facebook | tiktok | snapchat | reddit | pinterest
+  format           String // post | reel | short | story | video | pin | thread
+  status           String    @default("draft") // draft | ready | scheduled | publishing | published (workflow terminal only; not provider verification) | failed | cancelled
+  title            String?
+  body             String
+  firstComment     String?   @map("first_comment")
+  linkUrl          String?   @map("link_url")
+  scheduledAt      DateTime? @map("scheduled_at")
+  publishedAt      DateTime? @map("published_at")
+  externalId       String?   @map("external_id")
+  permalink        String?
+  publishAttempts  Int       @default(0) @map("publish_attempts")
+  lastError        String?   @map("last_error")
+  metadata         Json?
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  workspace      Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contentItem    ContentItem          @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+  channelAccount ChannelAccount?      @relation(fields: [channelAccountId], references: [id], onDelete: SetNull)
+  attempts       PublicationAttempt[]
+  proposals      ContentProposal[]
+
+  @@index([workspaceId, scheduledAt])
+  @@index([workspaceId, platform, status])
+  @@index([contentItemId, platform])
+  @@map("publications")
+}
+
+/// A bounded AI copy suggestion that must be previewed and explicitly accepted
+/// through the same manual content mutation paths. The proposal preserves the
+/// provider/model/run evidence even after a founder edits the accepted draft.
+model ContentProposal {
+  id            String    @id @default(cuid())
+  workspaceId   String    @map("workspace_id")
+  brandId       String    @map("brand_id")
+  contentItemId String    @map("content_item_id")
+  publicationId String?   @map("publication_id")
+  requestId     String    @map("request_id")
+  requestHash   String    @map("request_hash")
+  kind          String // master | variant
+  platform      String?
+  format        String?
+  fields        Json
+  provider      String
+  model         String
+  status        String    @default("proposed") // proposed | accepted | dismissed
+  createdBy     String?   @map("created_by")
+  acceptedBy    String?   @map("accepted_by")
+  acceptedAt    DateTime? @map("accepted_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  brand       Brand        @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  contentItem ContentItem  @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+  publication Publication? @relation(fields: [publicationId], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, requestId])
+  @@index([contentItemId, status, createdAt])
+  @@index([workspaceId, createdAt])
+  @@map("content_proposals")
+}
+
+/// Append-only provider-attempt log for retries, auditability, and truthful
+/// failure states. Assisted success is user-attested; a workflow-terminal
+/// Publication status must never be interpreted as provider confirmation.
+model PublicationAttempt {
+  id             String   @id @default(cuid())
+  workspaceId    String   @map("workspace_id")
+  publicationId  String   @map("publication_id")
+  provider       String
+  idempotencyKey String   @map("idempotency_key")
+  requestHash    String   @map("request_hash")
+  actorId        String?  @map("actor_id")
+  contentVersion Int      @map("content_version")
+  status         String // started | succeeded | failed
+  response       Json?
+  error          String?
+  attemptedAt    DateTime @default(now()) @map("attempted_at")
+
+  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  publication Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, idempotencyKey])
+  @@index([publicationId, attemptedAt, id])
+  @@index([workspaceId, attemptedAt])
+  @@map("publication_attempts")
+}
+
+/// A persisted SEO work item backed by explicit crawl or connected-source
+/// evidence. Analysis refreshes evidence by fingerprint but never rewrites the
+/// founder's task copy or terminal workflow state.
+model SeoTask {
+  id                 String    @id @default(cuid())
+  workspaceId        String    @map("workspace_id")
+  brandId            String    @map("brand_id")
+  fingerprint        String
+  origin             String // manual | crawl | search_console | ga4
+  category           String // technical | content | performance | manual
+  severity           String    @default("medium") // critical | high | medium | low
+  priority           Int       @default(50) // lower numbers are worked first
+  title              String
+  description        String?
+  recommendedFix     String?   @map("recommended_fix")
+  status             String    @default("open") // open | in_progress | completed | dismissed
+  verificationStatus String    @default("unverified") @map("verification_status")
+  completionNote     String?   @map("completion_note")
+  evidence           Json
+  userEdited         Boolean   @default(false) @map("user_edited")
+  analyzedAt         DateTime? @map("analyzed_at")
+  completedAt        DateTime? @map("completed_at")
+  completedBy        String?   @map("completed_by")
+  createdBy          String?   @map("created_by")
+  updatedBy          String?   @map("updated_by")
+  version            Int       @default(1)
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  brand     Brand         @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  proposals SeoProposal[]
+
+  @@unique([workspaceId, brandId, fingerprint])
+  @@index([workspaceId, brandId, status, priority])
+  @@index([workspaceId, updatedAt])
+  @@map("seo_tasks")
+}
+
+/// One bounded AI recommendation generated against an exact task version and
+/// sanitized evidence snapshot. Acceptance applies only this server-owned text
+/// and records the task version it produced so retries cannot overwrite edits.
+model SeoProposal {
+  id                  String    @id @default(cuid())
+  workspaceId         String    @map("workspace_id")
+  brandId             String    @map("brand_id")
+  taskId              String    @map("task_id")
+  taskVersion         Int       @map("task_version")
+  requestId           String    @map("request_id")
+  requestHash         String    @map("request_hash")
+  instruction         String?
+  recommendedFix      String    @map("recommended_fix")
+  provider            String
+  model               String
+  status              String    @default("proposed") // proposed | accepted
+  createdBy           String?   @map("created_by")
+  acceptedBy          String?   @map("accepted_by")
+  acceptedAt          DateTime? @map("accepted_at")
+  acceptedTaskVersion Int?      @map("accepted_task_version")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  brand     Brand     @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  task      SeoTask   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, requestId])
+  @@index([taskId, status, createdAt])
+  @@index([workspaceId, createdAt])
+  @@map("seo_proposals")
+}
+
+/// A tenant- and brand-bound creator record. Browser writes may establish only
+/// manual/import provenance; vendor provenance is reserved for server adapters.
+model InfluencerProfile {
+  id                String    @id @default(cuid())
+  workspaceId       String    @map("workspace_id")
+  brandId           String    @map("brand_id")
+  platform          String
+  handle            String
+  normalizedHandle  String    @map("normalized_handle")
+  profileUrl        String    @map("profile_url")
+  displayName       String?   @map("display_name")
+  contactEmail      String?   @map("contact_email")
+  contactName       String?   @map("contact_name")
+  topics            Json
+  audienceCountries Json      @map("audience_countries")
+  notes             String?
+  status            String    @default("prospect")
+  source            String    @default("manual")
+  requestId         String    @map("request_id")
+  requestHash       String    @map("request_hash")
+  version           Int       @default(1)
+  createdBy         String    @map("created_by")
+  updatedBy         String    @map("updated_by")
+  lastActivityAt    DateTime? @map("last_activity_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  workspace      Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  brand          Brand                      @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  metrics        InfluencerMetricEvidence[]
+  outreachDrafts InfluencerOutreachDraft[]
+  trackingLinks  InfluencerTrackingLink[]
+
+  @@unique([workspaceId, requestId], map: "influencer_profiles_workspace_request_key")
+  @@unique([workspaceId, brandId, platform, normalizedHandle], map: "influencer_profiles_identity_key")
+  @@unique([id, workspaceId, brandId], map: "influencer_profiles_id_workspace_brand_key")
+  @@index([workspaceId, brandId, lastActivityAt], map: "influencer_profiles_activity_idx")
+  @@index([workspaceId, brandId, status], map: "influencer_profiles_status_idx")
+  @@map("influencer_profiles")
+}
+
+/// The latest sourced observation for one creator metric. An absent row means
+/// unknown; an explicit numeric zero remains a real observed value.
+model InfluencerMetricEvidence {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  brandId     String   @map("brand_id")
+  profileId   String   @map("profile_id")
+  metric      String
+  value       Float
+  sourceUrl   String?  @map("source_url")
+  observedAt  DateTime @map("observed_at")
+  source      String
+  version     Int      @default(1)
+  recordedBy  String   @map("recorded_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  profile InfluencerProfile @relation(fields: [profileId, workspaceId, brandId], references: [id, workspaceId, brandId], onDelete: Cascade, map: "influencer_metric_profile_tenant_fkey")
+
+  @@unique([profileId, metric], map: "influencer_metric_profile_metric_key")
+  @@index([workspaceId, brandId, observedAt], map: "influencer_metric_observed_idx")
+  @@map("influencer_metric_evidence")
+}
+
+/// A persisted preparation artifact only. No provider send state or token is
+/// stored because launch outreach is explicitly assisted/manual.
+model InfluencerOutreachDraft {
+  id                    String   @id @default(cuid())
+  workspaceId           String   @map("workspace_id")
+  brandId               String   @map("brand_id")
+  profileId             String   @map("profile_id")
+  profileVersion        Int      @map("profile_version")
+  requestId             String   @map("request_id")
+  requestHash           String   @map("request_hash")
+  subject               String?
+  body                  String
+  sponsorshipDisclosure String   @map("sponsorship_disclosure")
+  claimsRestrictions    String?  @map("claims_restrictions")
+  compensationNote      String?  @map("compensation_note")
+  status                String   @default("draft")
+  version               Int      @default(1)
+  createdBy             String   @map("created_by")
+  updatedBy             String   @map("updated_by")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  profile InfluencerProfile @relation(fields: [profileId, workspaceId, brandId], references: [id, workspaceId, brandId], onDelete: Cascade, map: "influencer_outreach_profile_tenant_fkey")
+
+  @@unique([workspaceId, requestId], map: "influencer_outreach_workspace_request_key")
+  @@index([profileId, createdAt], map: "influencer_outreach_profile_created_idx")
+  @@map("influencer_outreach_drafts")
+}
+
+/// An opaque public redirect to a previously validated HTTPS destination.
+/// Aggregate clicks are retained without visitor IP addresses or user agents.
+model InfluencerTrackingLink {
+  id                   String    @id @default(cuid())
+  workspaceId          String    @map("workspace_id")
+  brandId              String    @map("brand_id")
+  profileId            String    @map("profile_id")
+  requestId            String    @map("request_id")
+  requestHash          String    @map("request_hash")
+  slug                 String    @unique
+  destinationUrl       String    @map("destination_url")
+  taggedDestinationUrl String    @map("tagged_destination_url")
+  campaignKey          String    @map("campaign_key")
+  enabled              Boolean   @default(true)
+  clickCount           BigInt    @default(0) @map("click_count")
+  lastClickedAt        DateTime? @map("last_clicked_at")
+  disabledAt           DateTime? @map("disabled_at")
+  version              Int       @default(1)
+  createdBy            String    @map("created_by")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  profile InfluencerProfile @relation(fields: [profileId, workspaceId, brandId], references: [id, workspaceId, brandId], onDelete: Cascade, map: "influencer_tracking_profile_tenant_fkey")
+
+  @@unique([workspaceId, requestId], map: "influencer_tracking_workspace_request_key")
+  @@index([profileId, createdAt], map: "influencer_tracking_profile_created_idx")
+  @@index([workspaceId, brandId, enabled], map: "influencer_tracking_enabled_idx")
+  @@map("influencer_tracking_links")
+}
+
+/// An exact, versioned paid-campaign preparation snapshot. Browser and AI
+/// inputs both enter through the same validated JSON contract; the account
+/// identity persisted here is resolved from a tenant-owned Connection.
+model PaidCampaignDraft {
+  id           String    @id @default(cuid())
+  workspaceId  String    @map("workspace_id")
+  connectionId String?   @map("connection_id")
+  platform     String
+  accountId    String    @map("account_id")
+  accountName  String    @map("account_name")
+  source       String // manual | ai
+  template     String
+  state        String    @default("draft")
+  snapshot     Json
+  snapshotHash String    @map("snapshot_hash")
+  version      Int       @default(1)
+  createdBy    String    @map("created_by")
+  updatedBy    String    @map("updated_by")
+  readyAt      DateTime? @map("ready_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  workspace                  Workspace                               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  connection                 Connection?                             @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+  mutations                  PaidCampaignDraftMutation[]
+  approvals                  PaidCampaignApproval[]
+  attempts                   PaidCampaignOperationAttempt[]
+  providerPausedConfirmation PaidCampaignProviderPausedConfirmation?
+
+  @@unique([id, workspaceId], map: "paid_campaign_drafts_id_workspace_key")
+  @@index([workspaceId, updatedAt], map: "paid_campaign_drafts_workspace_updated_idx")
+  @@index([workspaceId, state, updatedAt], map: "paid_campaign_drafts_state_idx")
+  @@index([connectionId], map: "paid_campaign_drafts_connection_idx")
+  @@map("paid_campaign_drafts")
+}
+
+/// Append-only replay ledger for draft creation, updates, readiness, and
+/// user-recorded external activation outcomes.
+model PaidCampaignDraftMutation {
+  id            String   @id @default(cuid())
+  workspaceId   String   @map("workspace_id")
+  draftId       String   @map("draft_id")
+  requestId     String   @map("request_id")
+  requestHash   String   @map("request_hash")
+  kind          String // create | update | mark_ready | record_external_activation_outcome
+  resultVersion Int      @map("result_version")
+  resultState   String   @map("result_state")
+  actorId       String   @map("actor_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  workspace Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  draft     PaidCampaignDraft @relation(fields: [draftId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "paid_draft_mutations_draft_tenant_fkey")
+
+  @@unique([workspaceId, requestId], map: "paid_draft_mutations_workspace_request_key")
+  @@index([draftId, createdAt], map: "paid_draft_mutations_draft_created_idx")
+  @@map("paid_campaign_draft_mutations")
+}
+
+/// Immutable approval of one operation against one exact snapshot version and
+/// hash. Consumption is represented by the unique operation-attempt relation,
+/// so the approval row itself is never rewritten.
+model PaidCampaignApproval {
+  id              String   @id @default(cuid())
+  workspaceId     String   @map("workspace_id")
+  draftId         String   @map("draft_id")
+  requestId       String   @map("request_id")
+  requestHash     String   @map("request_hash")
+  kind            String // create_paused | activate
+  platform        String
+  connectionId    String   @map("connection_id")
+  accountId       String   @map("account_id")
+  snapshotVersion Int      @map("snapshot_version")
+  snapshotHash    String   @map("snapshot_hash")
+  approvedBy      String   @map("approved_by")
+  approvedAt      DateTime @default(now()) @map("approved_at")
+
+  workspace Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  draft     PaidCampaignDraft             @relation(fields: [draftId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "paid_approvals_draft_tenant_fkey")
+  attempt   PaidCampaignOperationAttempt?
+
+  @@unique([id, workspaceId], map: "paid_campaign_approvals_id_workspace_key")
+  @@unique([workspaceId, requestId], map: "paid_campaign_approvals_workspace_request_key")
+  @@index([draftId, approvedAt], map: "paid_campaign_approvals_draft_approved_idx")
+  @@map("paid_campaign_approvals")
+}
+
+/// Append-only audit record for an execution request. Launch currently records
+/// an assisted handoff unless a reviewed server-owned provider writer exists;
+/// raw provider payloads and credentials are never stored here.
+model PaidCampaignOperationAttempt {
+  id               String   @id @default(cuid())
+  workspaceId      String   @map("workspace_id")
+  draftId          String   @map("draft_id")
+  approvalId       String   @unique @map("approval_id")
+  requestId        String   @map("request_id")
+  requestHash      String   @map("request_hash")
+  operation        String // create_paused | activate
+  snapshotVersion  Int      @map("snapshot_version")
+  snapshotHash     String   @map("snapshot_hash")
+  status           String // assisted_handoff | succeeded | failed | needs_reconciliation
+  capabilityReason String   @map("capability_reason")
+  providerOutcome  Json?    @map("provider_outcome")
+  actorId          String   @map("actor_id")
+  attemptedAt      DateTime @default(now()) @map("attempted_at")
+
+  workspace Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  draft     PaidCampaignDraft    @relation(fields: [draftId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "paid_operation_attempts_draft_tenant_fkey")
+  approval  PaidCampaignApproval @relation(fields: [approvalId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "paid_operation_attempts_approval_tenant_fkey")
+
+  @@unique([workspaceId, requestId], map: "paid_operation_attempts_workspace_request_key")
+  @@unique([approvalId, workspaceId], map: "paid_operation_attempts_approval_workspace_key")
+  @@index([draftId, attemptedAt], map: "paid_operation_attempts_draft_attempted_idx")
+  @@index([workspaceId, attemptedAt], map: "paid_operation_attempts_workspace_attempted_idx")
+  @@map("paid_campaign_operation_attempts")
+}
+
+/// Immutable user assertion that an assisted campaign was manually created in
+/// the provider and left paused. This is not provider verification.
+model PaidCampaignProviderPausedConfirmation {
+  id                 String   @id @default(cuid())
+  workspaceId        String   @map("workspace_id")
+  draftId            String   @map("draft_id")
+  requestId          String   @map("request_id")
+  requestHash        String   @map("request_hash")
+  platform           String
+  connectionId       String   @map("connection_id")
+  accountId          String   @map("account_id")
+  providerCampaignId String   @map("provider_campaign_id")
+  verificationStatus String   @default("user_asserted_unverified") @map("verification_status")
+  snapshotVersion    Int      @map("snapshot_version")
+  snapshotHash       String   @map("snapshot_hash")
+  confirmedBy        String   @map("confirmed_by")
+  confirmedAt        DateTime @default(now()) @map("confirmed_at")
+
+  workspace Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  draft     PaidCampaignDraft @relation(fields: [draftId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "paid_provider_confirmations_draft_tenant_fkey")
+
+  @@unique([draftId, workspaceId], map: "paid_provider_confirmations_draft_workspace_key")
+  @@unique([workspaceId, requestId], map: "paid_provider_confirmations_workspace_request_key")
+  @@unique([workspaceId, platform, accountId, providerCampaignId], map: "paid_provider_confirmations_provider_identity_key")
+  @@index([workspaceId, confirmedAt], map: "paid_provider_confirmations_workspace_confirmed_idx")
+  @@map("paid_campaign_provider_paused_confirmations")
+}
+
+/// A bounded, deterministic agent workflow. Goals are user-authored inputs;
+/// internal reasoning, credentials, and provider payloads are never persisted.
+model AgentRun {
+  id                String    @id @default(cuid())
+  workspaceId       String    @map("workspace_id")
+  brandId           String    @map("brand_id")
+  conversationId    String?   @map("conversation_id")
+  requestId         String    @map("request_id")
+  requestHash       String    @map("request_hash")
+  mode              String
+  goal              String
+  planKey           String    @map("plan_key")
+  target            Json?
+  status            String    @default("queued")
+  dispatchStatus    String    @default("pending") @map("dispatch_status")
+  dispatchErrorCode String?   @map("dispatch_error_code")
+  limits            Json
+  stepsUsed         Int       @default(0) @map("steps_used")
+  toolCallsUsed     Int       @default(0) @map("tool_calls_used")
+  modelTurnsUsed    Int       @default(0) @map("model_turns_used")
+  webReadsUsed      Int       @default(0) @map("web_reads_used")
+  creditsUsed       Int       @default(0) @map("credits_used")
+  attempt           Int       @default(1)
+  version           Int       @default(1)
+  failureCode       String?   @map("failure_code")
+  failureMessage    String?   @map("failure_message")
+  deadlineAt        DateTime  @map("deadline_at")
+  cancelRequestedAt DateTime? @map("cancel_requested_at")
+  startedAt         DateTime? @map("started_at")
+  completedAt       DateTime? @map("completed_at")
+  createdBy         String    @map("created_by")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  workspace    Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  brand        Brand              @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  conversation Conversation?      @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  steps        AgentRunStep[]
+  events       AgentRunEvent[]
+  approvals    AgentRunApproval[]
+  commands     AgentRunCommand[]
+
+  @@unique([id, workspaceId], map: "agent_runs_id_workspace_key")
+  @@unique([workspaceId, requestId], map: "agent_runs_workspace_request_key")
+  @@index([workspaceId, updatedAt, id], map: "agent_runs_workspace_updated_idx")
+  @@index([workspaceId, status, deadlineAt], map: "agent_runs_status_deadline_idx")
+  @@index([brandId, updatedAt], map: "agent_runs_brand_updated_idx")
+  @@index([conversationId, updatedAt], map: "agent_runs_conversation_updated_idx")
+  @@map("agent_runs")
+}
+
+/// Immutable, append-only record of one reviewed tool decision or execution.
+/// Only hashes and public object references are stored, never raw tool payloads.
+model AgentRunStep {
+  id                  String    @id @default(cuid())
+  workspaceId         String    @map("workspace_id")
+  runId               String    @map("run_id")
+  ordinal             Int
+  attempt             Int
+  toolName            String    @map("tool_name")
+  risk                String
+  status              String
+  idempotencyKey      String    @map("idempotency_key")
+  inputHash           String    @map("input_hash")
+  approvalBinding     Json?     @map("approval_binding")
+  outputObjectType    String?   @map("output_object_type")
+  outputObjectId      String?   @map("output_object_id")
+  outputObjectVersion Int?      @map("output_object_version")
+  outputSnapshotHash  String?   @map("output_snapshot_hash")
+  errorCode           String?   @map("error_code")
+  errorMessage        String?   @map("error_message")
+  startedAt           DateTime  @default(now()) @map("started_at")
+  completedAt         DateTime? @map("completed_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+
+  workspace Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  run       AgentRun          @relation(fields: [runId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "agent_run_steps_run_tenant_fkey")
+  approval  AgentRunApproval?
+
+  @@unique([runId, ordinal], map: "agent_run_steps_run_ordinal_key")
+  @@unique([workspaceId, idempotencyKey], map: "agent_run_steps_workspace_idempotency_key")
+  @@unique([id, workspaceId, runId], map: "agent_run_steps_id_workspace_run_key")
+  @@index([workspaceId, runId, createdAt], map: "agent_run_steps_tenant_created_idx")
+  @@map("agent_run_steps")
+}
+
+/// Public, append-only progress feed. Text is sanitized and bounded before it
+/// reaches this table; internal reasoning is not an event type.
+model AgentRunEvent {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  runId       String   @map("run_id")
+  sequence    Int
+  eventKey    String   @map("event_key")
+  type        String
+  label       String
+  detail      String?
+  objectType  String?  @map("object_type")
+  objectId    String?  @map("object_id")
+  evidenceIds Json     @map("evidence_ids")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  run       AgentRun  @relation(fields: [runId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "agent_run_events_run_tenant_fkey")
+
+  @@unique([runId, sequence], map: "agent_run_events_run_sequence_key")
+  @@unique([runId, eventKey], map: "agent_run_events_run_event_key")
+  @@index([workspaceId, runId, createdAt], map: "agent_run_events_tenant_created_idx")
+  @@map("agent_run_events")
+}
+
+/// Immutable human decision bound to one exact step/object/version/hash/account.
+model AgentRunApproval {
+  id            String   @id @default(cuid())
+  workspaceId   String   @map("workspace_id")
+  runId         String   @map("run_id")
+  stepId        String   @unique @map("step_id")
+  requestId     String   @map("request_id")
+  requestHash   String   @map("request_hash")
+  decision      String
+  kind          String
+  objectType    String   @map("object_type")
+  objectId      String   @map("object_id")
+  objectVersion Int      @map("object_version")
+  snapshotHash  String   @map("snapshot_hash")
+  accountId     String?  @map("account_id")
+  expiresAt     DateTime @map("expires_at")
+  decidedBy     String   @map("decided_by")
+  decidedAt     DateTime @default(now()) @map("decided_at")
+
+  workspace Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  run       AgentRun     @relation(fields: [runId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "agent_run_approvals_run_tenant_fkey")
+  step      AgentRunStep @relation(fields: [stepId, workspaceId, runId], references: [id, workspaceId, runId], onDelete: Cascade, map: "agent_run_approvals_step_tenant_fkey")
+
+  @@unique([workspaceId, requestId], map: "agent_run_approvals_workspace_request_key")
+  @@unique([stepId, workspaceId, runId], map: "agent_run_approvals_step_tenant_key")
+  @@index([runId, decidedAt], map: "agent_run_approvals_run_decided_idx")
+  @@map("agent_run_approvals")
+}
+
+/// Append-only idempotency ledger for cancel, retry, and approval commands.
+model AgentRunCommand {
+  id            String   @id @default(cuid())
+  workspaceId   String   @map("workspace_id")
+  runId         String   @map("run_id")
+  requestId     String   @map("request_id")
+  requestHash   String   @map("request_hash")
+  kind          String
+  resultStatus  String   @map("result_status")
+  resultVersion Int      @map("result_version")
+  actorId       String   @map("actor_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  run       AgentRun  @relation(fields: [runId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "agent_run_commands_run_tenant_fkey")
+
+  @@unique([workspaceId, requestId], map: "agent_run_commands_workspace_request_key")
+  @@index([runId, createdAt], map: "agent_run_commands_run_created_idx")
+  @@map("agent_run_commands")
 }

@@ -11,8 +11,7 @@ interface AssistantBlockProps {
   typed: string;
   /** live agent activity (dynamic "what it's doing") */
   status: { key: AgentStatusKey; label: string } | null;
-  /** accumulated summarized reasoning */
-  thinking: string;
+  done?: boolean;
   lead: string;
   chips: ResultChip[];
   closing: { split: string; thread: string } | null;
@@ -25,7 +24,7 @@ export function AssistantBlock({
   step,
   typed,
   status,
-  thinking,
+  done = false,
   lead,
   chips,
   closing,
@@ -67,10 +66,10 @@ export function AssistantBlock({
           </span>
         </div>
 
-        <AgentActivity status={status} thinking={thinking} answering={answering} />
+        <AgentActivity status={status} answering={answering || done} />
 
         {answering && (
-          <div className="font-sans text-ink-800" style={{ fontSize: bodySize, lineHeight }}>
+          <div data-testid="assistant-response" className="font-sans text-ink-800" style={{ fontSize: bodySize, lineHeight }}>
             <TypewriterText
               typed={typed}
               caretOn={showCaret}

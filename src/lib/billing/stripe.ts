@@ -2,6 +2,10 @@ import "server-only";
 
 import Stripe from "stripe";
 
+import { isBillingConfigured } from "@/lib/billing/config";
+
+export { isBillingConfigured, isWebhookConfigured } from "@/lib/billing/config";
+
 /**
  * Stripe client lifecycle + billing gating (Stack C — Billing & metering).
  * Server-only.
@@ -35,19 +39,6 @@ export class BillingNotConfiguredError extends Error {
  * from env on every call — never at import — so the gate reflects the runtime
  * environment. Gate every checkout/portal/webrite path on this.
  */
-export function isBillingConfigured(): boolean {
-  return Boolean(process.env.STRIPE_SECRET_KEY);
-}
-
-/**
- * True when inbound webhooks can be verified (signing secret present). The
- * webhook route refuses to act unless this is true AND the signature checks out,
- * so unverified events are never trusted.
- */
-export function isWebhookConfigured(): boolean {
-  return Boolean(process.env.STRIPE_WEBHOOK_SECRET);
-}
-
 let client: Stripe | null = null;
 
 /**
@@ -64,7 +55,7 @@ export function getStripe(): Stripe {
   if (!client) {
     client = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
       // Identify this integration in Stripe's request logs (no secrets here).
-      appInfo: { name: "Marin", url: "https://marin.app" },
+      appInfo: { name: "Marpin", url: "https://www.marpin.ai" },
       typescript: true,
     });
   }

@@ -51,9 +51,24 @@ export interface MetricRange {
 export interface CanonicalMetric {
   platform: ConnectorPlatform;
   date: Date;
+  /** Provider campaign id. Empty string denotes account-level data. */
+  campaignExternalId?: string;
+  /** Human-facing campaign label. Never used as canonical identity. */
+  campaignName?: string | null;
+  /** Legacy alias retained for non-paid connectors and background compatibility. */
   campaign?: string;
   metric: string;
   value: number;
+}
+
+/** A fully fetched provider phase. `complete=false` must never be reconciled. */
+export interface FetchSnapshot<T> {
+  items: T[];
+  complete: boolean;
+  observedFrom: Date | null;
+  observedTo: Date | null;
+  currency: string | null;
+  timezone: string | null;
 }
 
 /**
@@ -116,6 +131,7 @@ export interface AdCreative {
   impressions?: number | null;
   clicks?: number | null;
   conversions?: number | null;
+  currency?: string | null;
 }
 
 export interface ConnectorClient {

@@ -3,7 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 /**
  * Anthropic client lifecycle + live-agent gating. Server-only (imported only by
  * the agent loop, which is imported only by the /api/chat route). When no key is
- * configured the caller falls back to a deterministic canned lead.
+ * configured the caller falls back to deterministic doctrine guidance.
  */
 export class MissingApiKeyError extends Error {
   constructor() {

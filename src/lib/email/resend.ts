@@ -116,13 +116,12 @@ export async function sendEmail(params: SendEmailParams): Promise<SendEmailResul
   try {
     const { data, error } = await resend.emails.send(payload);
     if (error) {
-      console.warn(`[email] send "${params.subject}" failed: ${error.message}`);
-      return { ok: false, skipped: false, error: error.message };
+      console.warn("[email] delivery failed");
+      return { ok: false, skipped: false, error: "Email delivery failed." };
     }
     return { ok: true, skipped: false, id: data?.id };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[email] send "${params.subject}" threw: ${msg}`);
-    return { ok: false, skipped: false, error: msg };
+  } catch {
+    console.warn("[email] delivery threw");
+    return { ok: false, skipped: false, error: "Email delivery failed." };
   }
 }

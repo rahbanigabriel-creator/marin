@@ -9,6 +9,10 @@
  * EU data residency follows the DSN's region. No host is hardcoded.
  */
 import * as Sentry from "@sentry/nextjs";
+import {
+  scrubSentryBreadcrumb,
+  scrubSentryEvent,
+} from "./src/lib/observability/sentry-scrub";
 
 const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
 
@@ -17,6 +21,8 @@ if (dsn) {
     dsn,
     tracesSampleRate: Number(process.env.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE ?? 0.1),
     sendDefaultPii: false,
+    beforeSend: (event) => scrubSentryEvent(event),
+    beforeBreadcrumb: (breadcrumb) => scrubSentryBreadcrumb(breadcrumb),
     enabled: true,
   });
 }

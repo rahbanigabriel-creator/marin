@@ -102,18 +102,24 @@ test("hasLiveData is false with no DATABASE_URL (offline path stays sample)", as
 
 test("hasLiveData reflects row count when DB is configured", async () => {
   const prev = process.env.DATABASE_URL;
+  const originalWarn = console.warn;
+  const warnings: string[] = [];
   process.env.DATABASE_URL = "postgresql://stub";
+  console.warn = (...values: unknown[]) => warnings.push(values.map(String).join(" "));
   try {
     assert.equal(await hasLiveData("ws_123", async () => 0), false);
     assert.equal(await hasLiveData("ws_123", async () => 5), true);
     // a thrown probe degrades to false (never throws)
     assert.equal(
       await hasLiveData("ws_123", async () => {
-        throw new Error("db unreachable");
+        throw new Error("postgresql://admin:super-secret@db.internal/private");
       }),
       false,
     );
+    assert.equal(warnings.length, 1);
+    assert.doesNotMatch(warnings[0], /super-secret|db\.internal|admin/);
   } finally {
+    console.warn = originalWarn;
     if (prev === undefined) delete process.env.DATABASE_URL;
     else process.env.DATABASE_URL = prev;
   }

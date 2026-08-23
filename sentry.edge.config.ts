@@ -8,6 +8,10 @@
  * Loaded by instrumentation.ts when NEXT_RUNTIME === "edge".
  */
 import * as Sentry from "@sentry/nextjs";
+import {
+  scrubSentryBreadcrumb,
+  scrubSentryEvent,
+} from "./src/lib/observability/sentry-scrub";
 
 const dsn = process.env.SENTRY_DSN;
 
@@ -16,6 +20,8 @@ if (dsn) {
     dsn,
     tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE ?? 0.1),
     sendDefaultPii: false,
+    beforeSend: (event) => scrubSentryEvent(event),
+    beforeBreadcrumb: (breadcrumb) => scrubSentryBreadcrumb(breadcrumb),
     enabled: true,
   });
 }

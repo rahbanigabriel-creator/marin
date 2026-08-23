@@ -1,6 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { getCurrentWorkspace } from "@/lib/auth";
+import {
+  NotAuthenticatedError,
+  WorkspaceAuthorizationError,
+  isWorkspaceSeatLimitError,
+  requireWorkspaceRole,
+  type WorkspaceRef,
+} from "@/lib/auth";
 import { isDatabaseConfigured } from "@/lib/db";
 import type { ConnectorPlatform } from "@/lib/connectors/types";
 import { encryptToken, isVaultConfigured, tokenAad } from "@/lib/security/vault";
@@ -16,12 +22,14 @@ import {
   OAUTH_TX_MAX_AGE,
   signPendingSelection,
   statesMatch,
+  verifyOAuthActorBinding,
   verifyTransaction,
   type OAuthTokens,
 } from "@/lib/connectors/oauth";
 import { listOAuthAccounts, type AccountSelection } from "@/lib/connectors/clients";
 import { persistOAuthConnection } from "@/lib/connectors/persist";
 import { emitConnectionBackfill, emitConnectionConnected } from "@/lib/jobs/inngest";
+import { isEntitlementDeniedError } from "@/lib/billing/errors";
 
 /**
  * GET /api/connect/[platform]/callback — finish a connector OAuth flow.
@@ -76,10 +84,11 @@ function selectionResponse(input: {
   platform: Exclude<ConnectorPlatform, "apple_search_ads">;
   label: string;
   workspaceId: string;
+  clerkUserId: string;
   tokens: OAuthTokens;
   accounts: AccountSelection[];
 }): NextResponse {
-  const { req, platform, label, workspaceId, tokens, accounts } = input;
+  const { req, platform, label, workspaceId, clerkUserId, tokens, accounts } = input;
   const encAccessToken = encryptToken(
     tokens.accessToken,
     tokenAad({
@@ -103,6 +112,8 @@ function selectionResponse(input: {
 
   const signed = signPendingSelection({
     platform,
+    workspaceId,
+    clerkUserId,
     encAccessToken,
     encRefreshToken,
     expiresAt: tokens.expiresAt?.toISOString(),
@@ -206,6 +217,35 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Re
     return appRedirect(req, "state_mismatch", config.id);
   }
 
+  // A valid OAuth transaction still belongs to a shared workspace. Only its
+  // owner/admin may exchange and persist credentials for that tenant.
+  let workspace: WorkspaceRef;
+  let clerkUserId: string;
+  try {
+    const access = await requireWorkspaceRole(["owner", "admin"]);
+    workspace = access.workspace;
+    clerkUserId = access.clerkUserId;
+  } catch (error) {
+    if (isWorkspaceSeatLimitError(error)) {
+      return appRedirect(req, "workspace_seat_limit", config.id);
+    }
+    if (error instanceof NotAuthenticatedError) {
+      return appRedirect(req, "unauthenticated", config.id);
+    }
+    if (error instanceof WorkspaceAuthorizationError) {
+      return appRedirect(req, "forbidden", config.id);
+    }
+    throw error;
+  }
+
+  const actorBinding = verifyOAuthActorBinding(tx, {
+    workspaceId: workspace.id,
+    clerkUserId,
+  });
+  if (!actorBinding.ok) {
+    return appRedirect(req, actorBinding.status, config.id);
+  }
+
   // ── Exchange the code for tokens (network; guarded) ──
   let tokens;
   try {
@@ -229,17 +269,9 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Re
     return appRedirect(req, "exchange_failed", config.id);
   }
 
-  // ── Resolve tenant + persist the Connection (DB; guarded) ──
-  const workspace = await getCurrentWorkspace();
-  if (!workspace) {
-    return appRedirect(req, "unauthenticated", config.id);
-  }
-
-  // No DB wired (or dev workspace with no DB) → succeed gracefully without a
-  // write rather than throwing on a missing DATABASE_URL. The connection row
-  // appears the moment the DB is configured, behind this same code path.
+  // Local credential-free development can complete OAuth without persistence.
+  // Deployed production is blocked earlier when persistence is unavailable.
   if (!isDatabaseConfigured()) {
-    console.log(`[connect] ${config.id} authorized for workspace ${workspace.slug} (no DB — not persisted)`);
     return appRedirect(req, "connected", config.id);
   }
 
@@ -266,6 +298,7 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Re
       platform: oauthPlatform,
       label: config.label,
       workspaceId: workspace.id,
+      clerkUserId,
       tokens,
       accounts,
     });
@@ -279,6 +312,7 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Re
       tokens: { ...tokens, scope: tokens.scope ?? config.scopes.join(" ") },
     });
   } catch (err) {
+    if (isEntitlementDeniedError(err)) return appRedirect(req, err.code, config.id);
     console.warn(
       `[connect] failed to persist ${config.id} connection: ${err instanceof Error ? err.name : "error"}`,
     );

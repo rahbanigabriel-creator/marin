@@ -25,5 +25,5 @@ export default async function Home() {
       signedIn = false;
     }
   }
-  return signedIn ? <AppShell /> : <Landing />;
+  return signedIn ? <AppShell authEnabled /> : <Landing />;
 }

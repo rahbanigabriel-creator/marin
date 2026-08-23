@@ -4,15 +4,16 @@ import { useState } from "react";
 import type { Channel } from "@/types/views";
 import type { Persona } from "@/types/scenario";
 import { PERSONAS, PERSONA_ORDER } from "@/lib/data/personas";
+import { LuRefreshCw, LuTrendingUp } from "react-icons/lu";
 
 interface TopBarProps {
-  onReplay: () => void;
+  onReplay?: () => void;
   /** active conversation title */
   title: string;
   channels: Channel[];
   persona: Persona;
   onSwitchPersona: (p: Persona) => void;
-  onForecast: () => void;
+  onForecast?: () => void;
   /** chat-specific controls (mode tabs, forecast, replay, channel summary) */
   chatControls?: boolean;
   /** agency: the client the workspace is currently scoped to */
@@ -105,7 +106,7 @@ export function TopBar({
           {title}
         </span>
         {chatControls && (
-          <span className="flex flex-none items-center gap-[5px] font-sans text-[11px] font-medium text-ink-300">
+          <span className="hidden flex-none items-center gap-[5px] font-sans text-[11px] font-medium text-ink-300 xl:flex">
             <span
               style={{
                 width: 6,
@@ -118,24 +119,28 @@ export function TopBar({
           </span>
         )}
       </div>
-      {chatControls && (
+      {chatControls && (onForecast || onReplay) && (
       <div className="flex flex-none items-center gap-[10px]">
+        {onForecast && (
         <button
           type="button"
           onClick={onForecast}
           className="flex cursor-pointer items-center gap-[6px] rounded-[9px] border border-line-1 bg-surface-chip font-sans text-[12px] font-semibold text-ink-700"
           style={{ padding: "7px 12px" }}
         >
-          ↗ Forecast
+          <LuTrendingUp aria-hidden /> Forecast
         </button>
+        )}
+        {onReplay && (
         <button
           type="button"
           onClick={onReplay}
           className="flex cursor-pointer items-center gap-[6px] rounded-[9px] border border-plum-border bg-surface-chip font-sans text-[12px] font-semibold text-plum-deep"
           style={{ padding: "7px 12px" }}
         >
-          ↻ Replay
+          <LuRefreshCw aria-hidden /> Replay
         </button>
+        )}
       </div>
       )}
     </header>

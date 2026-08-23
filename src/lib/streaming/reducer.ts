@@ -12,10 +12,10 @@ export interface ChatStreamState {
   step: number;
   /** accumulated assistant lead text (typewriter source) */
   typed: string;
+  /** persisted thread assigned by the server for this answer. */
+  conversation: { id: string; title: string } | null;
   /** live agent-activity status — the dynamic "what it's doing now" line */
   status: { key: AgentStatusKey; label: string } | null;
-  /** accumulated summarized reasoning (Claude-app-style thinking) */
-  thinking: string;
   /** artifacts received so far, in arrival order */
   artifacts: ArtifactPayload[];
   /** result chips for the chat column */
@@ -28,6 +28,8 @@ export interface ChatStreamState {
   done: boolean;
   /** terminal error message, if the stream failed */
   error: string | null;
+  /** Optional recovery command supplied by a typed server failure. */
+  errorAction: { url: string; label: string } | null;
   /**
    * Whether this answer is grounded in live (DB-backed) data, waiting on
    * connected accounts, or running in the explicit demo fallback. Defaults to
@@ -40,14 +42,15 @@ export interface ChatStreamState {
 export const initialChatState: ChatStreamState = {
   step: 0,
   typed: "",
+  conversation: null,
   status: null,
-  thinking: "",
   artifacts: [],
   chips: [],
   choices: null,
   closing: null,
   done: false,
   error: null,
+  errorAction: null,
   dataMode: "empty",
 };
 
@@ -59,12 +62,12 @@ export function streamReducer(state: ChatStreamState, event: StreamEvent): ChatS
     case "phase":
       // never go backwards — guards against out-of-order frames
       return { ...state, step: Math.max(state.step, event.step) };
+    case "conversation":
+      return { ...state, conversation: { id: event.id, title: event.title } };
     case "status":
       return { ...state, status: { key: event.key, label: event.label } };
     case "data-mode":
       return { ...state, dataMode: event.mode };
-    case "thinking-delta":
-      return { ...state, thinking: state.thinking + event.text };
     case "text-delta":
       return { ...state, typed: state.typed + event.text };
     case "result-chips":
@@ -76,9 +79,18 @@ export function streamReducer(state: ChatStreamState, event: StreamEvent): ChatS
     case "closing":
       return { ...state, closing: event.closing };
     case "done":
-      return { ...state, done: true };
+      return { ...state, status: null, done: true };
     case "error":
-      return { ...state, error: event.message, done: true };
+      return {
+        ...state,
+        status: null,
+        error: event.message,
+        errorAction:
+          event.actionUrl && event.actionLabel
+            ? { url: event.actionUrl, label: event.actionLabel }
+            : null,
+        done: true,
+      };
     default: {
       // exhaustiveness: if a new StreamEvent variant is added, this errors at compile time
       const _never: never = event;

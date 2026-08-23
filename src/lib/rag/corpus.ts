@@ -211,9 +211,8 @@ export function loadCorpus(): RagDoc[] {
       return parseDoc(stem, readFileSync(join(dir, file), "utf8"));
     });
     docs.sort((a, b) => a.docId.localeCompare(b.docId));
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[rag] corpus load failed (degrading to empty corpus): ${msg}`);
+  } catch {
+    console.warn("[rag] corpus load failed; degrading to empty corpus");
     docs = [];
   }
   cache = docs;

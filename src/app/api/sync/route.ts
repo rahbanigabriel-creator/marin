@@ -1,48 +1,71 @@
 import { NextResponse } from "next/server";
 
-import { getCurrentWorkspace } from "@/lib/auth";
+import { requireWorkspaceRole } from "@/lib/auth";
+import { workspaceSeatLimitResponse } from "@/lib/auth-http";
+import {
+  PaidSyncInProgressError,
+  PaidSyncPersistenceError,
+  syncPaidWorkspace,
+} from "@/lib/connectors/paid-sync";
+import { paidSyncAuthFailure } from "@/lib/connectors/paid-http";
 import { isDatabaseConfigured } from "@/lib/db";
-import { backfillWorkspace, syncWorkspace } from "@/lib/jobs/inngest";
+import { enforceEndpointRateLimit } from "@/lib/security/rate-limit";
+import { requestBodyErrorResponse } from "@/lib/security/request-body";
+import { readSyncRange } from "./_lib/request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** Above this requested depth (days) we run the chunked historical backfill. */
-const BACKFILL_THRESHOLD_DAYS = 30;
-
-/**
- * On-demand metric sync for the current workspace — the same `syncWorkspace`
- * the Inngest job runs, exposed so connecting a platform pulls data immediately
- * (and a "Sync now" button can refresh it) without depending on Inngest being
- * fully wired. Authenticated + workspace-scoped; safe-fails without a DB.
- *
- * `?days=N` pulls history N days back: ≤30 is the quick recent sync, >30 runs
- * the chunked historical backfill so the date picker gains real depth. Runs
- * synchronously (the user's data is small); Inngest does the same in background.
- */
 export async function POST(request: Request): Promise<Response> {
-  const workspace = await getCurrentWorkspace();
-  if (!workspace) {
-    return NextResponse.json({ ok: false, error: "no_workspace" }, { status: 401 });
+  let access;
+  try {
+    access = await requireWorkspaceRole(["owner", "admin"]);
+  } catch (error) {
+    const seatLimit = workspaceSeatLimitResponse(error);
+    if (seatLimit) return seatLimit;
+    const authFailure = paidSyncAuthFailure(error);
+    if (authFailure) {
+      return NextResponse.json({ ok: false, error: authFailure.error }, { status: authFailure.status });
+    }
+    return NextResponse.json({ ok: false, error: "authentication_unavailable" }, { status: 503 });
+  }
+  const rateLimited = await enforceEndpointRateLimit(request, "sync");
+  if (rateLimited) return rateLimited;
+  let range;
+  try {
+    range = await readSyncRange(request);
+  } catch (error) {
+    const bodyFailure = requestBodyErrorResponse(error);
+    if (bodyFailure) return bodyFailure;
+    throw error;
+  }
+  if (!range) {
+    return NextResponse.json({ ok: false, error: "invalid_sync_request" }, { status: 400 });
   }
   if (!isDatabaseConfigured()) {
-    return NextResponse.json({ ok: false, error: "database_not_configured" }, { status: 200 });
+    return NextResponse.json({ ok: false, error: "persistence_unavailable" }, { status: 503 });
   }
 
-  const daysRaw = new URL(request.url).searchParams.get("days");
-  const days = daysRaw ? Number(daysRaw) : null;
-  const backfill = days != null && Number.isFinite(days) && days > BACKFILL_THRESHOLD_DAYS;
-
   try {
-    if (backfill) {
-      const result = await backfillWorkspace(workspace.id, { days: days as number });
-      return NextResponse.json({ ok: true, backfill: true, ...result });
+    const result = await syncPaidWorkspace({
+      workspaceId: access.workspace.id,
+      range,
+      trigger: "manual",
+    });
+    if (result.state === "failed") {
+      return NextResponse.json({ ok: false, ...result }, { status: 502 });
     }
-    const result = await syncWorkspace(workspace.id);
+    if (result.state === "partial") {
+      return NextResponse.json({ ok: true, ...result }, { status: 207 });
+    }
     return NextResponse.json({ ok: true, ...result });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn("[sync] manual sync failed", message);
-    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+  } catch (error) {
+    if (error instanceof PaidSyncInProgressError) {
+      return NextResponse.json({ ok: false, error: error.code }, { status: 409 });
+    }
+    if (error instanceof PaidSyncPersistenceError) {
+      return NextResponse.json({ ok: false, error: error.code }, { status: 503 });
+    }
+    return NextResponse.json({ ok: false, error: "provider_sync_failed" }, { status: 502 });
   }
 }

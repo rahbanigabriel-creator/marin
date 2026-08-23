@@ -19,6 +19,8 @@ export interface StepGates {
 }
 
 export function gatesForStep(step: number, typedLen: number, leadLen: number): StepGates {
+  void typedLen;
+  void leadLen;
   return {
     showThinking: step < 1,
     analyzing: step >= 1 && step < 2,

@@ -24,6 +24,20 @@ function description(action: Action): string {
 export function deepLinkFor(action: Action): string | undefined {
   const enc = encodeURIComponent(description(action).slice(0, 600));
   switch (action.platform) {
+    case "youtube":
+      return "https://studio.youtube.com/";
+    case "instagram":
+      return "https://www.instagram.com/";
+    case "facebook":
+      return "https://business.facebook.com/latest/composer";
+    case "tiktok":
+      return "https://www.tiktok.com/upload";
+    case "snapchat":
+      return "https://my.snapchat.com/";
+    case "reddit":
+      return `https://www.reddit.com/submit?title=${encodeURIComponent(action.title)}&text=${enc}`;
+    case "pinterest":
+      return "https://www.pinterest.com/pin-builder/";
     case "x_ads":
       return `https://x.com/intent/tweet?text=${encodeURIComponent(description(action).slice(0, 280))}`;
     case "linkedin_ads":

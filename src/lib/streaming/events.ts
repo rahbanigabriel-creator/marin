@@ -79,8 +79,8 @@ export type ArtifactPayload =
   | { kind: "marketScan"; data: MarketScanData };
 
 /**
- * Live agent-activity states, surfaced in the UI so "thinking" is dynamic and
- * truthful (what the agent is actually doing) rather than a canned timeline.
+ * Live agent-activity states, surfaced as concise progress rather than model
+ * reasoning or a canned timeline.
  */
 export type AgentStatusKey =
   | "reading"
@@ -110,10 +110,10 @@ export const AGENT_STATUS_LABEL: Record<AgentStatusKey, string> = {
  *   • "empty"  — auth is configured and this real workspace has no connected
  *                metrics yet. The UI shows a connect state and never renders
  *                sample graphs to a real user.
- *   • "sample" — no connected data yet in the unauthenticated/dev demo path, so
- *                the answer is grounded in the canned demo dataset.
- * Defaults to "sample" everywhere (the offline / no-DB path), so the existing
- * mockup behaviour is preserved unless the route explicitly signals otherwise.
+ *   • "sample" — explicit demo mode only, where the answer is grounded in the
+ *                labeled canned dataset.
+ * Runtime state defaults to "empty" so a real user never sees sample figures
+ * before the server identifies the source.
  */
 export type DataMode = "live" | "empty" | "sample";
 
@@ -125,14 +125,20 @@ export interface AskQuestion {
 
 export type StreamEvent =
   | { type: "start"; question: string }
+  | { type: "conversation"; id: string; title: string }
   | { type: "phase"; step: number }
   | { type: "status"; key: AgentStatusKey; label: string }
   | { type: "data-mode"; mode: DataMode }
-  | { type: "thinking-delta"; text: string }
   | { type: "text-delta"; text: string }
   | { type: "result-chips"; chips: ResultChip[] }
   | { type: "artifact"; payload: ArtifactPayload }
   | { type: "choices"; questions: AskQuestion[] }
   | { type: "closing"; closing: AnswerData["closing"] }
   | { type: "done" }
-  | { type: "error"; message: string };
+  | {
+      type: "error";
+      message: string;
+      code?: string;
+      actionUrl?: string;
+      actionLabel?: string;
+    };

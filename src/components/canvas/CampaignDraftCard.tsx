@@ -44,9 +44,8 @@ function EditField({
 }
 
 export function CampaignDraftCard({ data }: { data: CampaignDraftData }) {
-  const [launched, setLaunched] = useState(false);
-  const [confirming, setConfirming] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [spec, setSpec] = useState(data.spec);
   const [draft, setDraft] = useState(data.spec);
   const [edited, setEdited] = useState(false);
@@ -138,19 +137,7 @@ export function CampaignDraftCard({ data }: { data: CampaignDraftData }) {
         </div>
       </div>
 
-      {launched ? (
-        <div
-          className="flex items-center gap-[9px] rounded-[9px] p-[10px_14px]"
-          style={{ background: "#E7EEE0" }}
-        >
-          <span className="font-sans text-[13px] font-semibold text-pos-700">
-            ✓ Campaign launched
-          </span>
-          <span className="font-sans text-[12.5px] text-pos-soft">
-            Live in your connected ad account · first results in ~24h
-          </span>
-        </div>
-      ) : editing ? (
+      {editing ? (
         <div className="animate-fadeUpFast flex flex-col gap-[12px]">
           <div
             className="grid gap-[10px]"
@@ -180,7 +167,7 @@ export function CampaignDraftCard({ data }: { data: CampaignDraftData }) {
               className="cursor-pointer rounded-[9px] font-sans text-[13px] font-semibold"
               style={{ border: "none", background: "#2B2722", color: "#F2F1EC", padding: "9px 18px" }}
             >
-              Save draft
+              Apply edits
             </button>
             <button
               type="button"
@@ -197,47 +184,24 @@ export function CampaignDraftCard({ data }: { data: CampaignDraftData }) {
             </button>
           </div>
         </div>
-      ) : confirming ? (
-        <div className="flex flex-col gap-[10px] rounded-[10px] border border-line-3 bg-surface-chip p-[12px_14px]">
-          <span className="font-sans text-[12.5px] leading-[1.5] text-ink-700">
-            This will publish to your connected ad account and start spending your budget. You can
-            pause anytime.
-          </span>
-          <div className="flex gap-[9px]">
-            <button
-              type="button"
-              onClick={() => {
-                setConfirming(false);
-                setLaunched(true);
-              }}
-              className="cursor-pointer rounded-[9px] font-sans text-[13px] font-semibold"
-              style={{ border: "none", background: "#9A3D63", color: "#FFFFFF", padding: "9px 18px" }}
-            >
-              Confirm &amp; launch
-            </button>
-            <button
-              type="button"
-              onClick={() => setConfirming(false)}
-              className="cursor-pointer rounded-[9px] font-sans text-[13px] font-semibold"
-              style={{ border: "1px solid #DDDBD2", background: "#FFFFFF", color: "#6B6359", padding: "9px 16px" }}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
       ) : (
         <div className="flex gap-[9px]">
           <button
             type="button"
-            onClick={() => setConfirming(true)}
+            onClick={openEditor}
             className="cursor-pointer rounded-[9px] font-sans text-[13px] font-semibold"
             style={{ border: "none", background: "#9A3D63", color: "#FFFFFF", padding: "9px 18px" }}
           >
-            Launch campaign
+            Review draft
           </button>
           <button
             type="button"
-            onClick={openEditor}
+            onClick={async () => {
+              await navigator.clipboard.writeText(
+                `${data.title}\nObjective: ${spec.objective}\nBudget: ${spec.budget}\nAudience: ${spec.audience}\n${data.explainer}`,
+              );
+              setCopied(true);
+            }}
             className="cursor-pointer rounded-[9px] font-sans text-[13px] font-semibold"
             style={{
               border: "1px solid #DDDBD2",
@@ -246,7 +210,7 @@ export function CampaignDraftCard({ data }: { data: CampaignDraftData }) {
               padding: "9px 16px",
             }}
           >
-            Open editor
+            {copied ? "Copied" : "Copy brief"}
           </button>
         </div>
       )}

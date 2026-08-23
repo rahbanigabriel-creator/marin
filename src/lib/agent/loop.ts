@@ -6,6 +6,7 @@ import { checkGroundedness } from "./oracle";
 import { dispatchTool, briefFromInput, marketScanFromInput, diagnosisFromInput, auditFromInput, actionPlanInputFromTool, questionsFromInput, TOOLS, type DispatchCtx, type MetricsSource } from "./tools";
 import { persistActionPlan } from "@/lib/actions/persist";
 import { startLlmTrace, type LlmTrace } from "@/lib/observability/llm-trace";
+import { abortableDelay, raceWithAbort } from "@/lib/streaming/deadline";
 
 /**
  * The agent loop (architecture §1, §4) — now surfacing what it's actually doing.
@@ -19,16 +20,17 @@ import { startLlmTrace, type LlmTrace } from "@/lib/observability/llm-trace";
  *  - SERVER TOOLS + pause_turn: web_search runs server-side; when the model
  *    pauses mid-turn (stop_reason "pause_turn") we re-send the assistant turn to
  *    let it continue, rather than treating the pause as the final answer.
- *  - The answer turn streams SUMMARIZED THINKING live (yielded as it arrives, so
- *    the UI can show the real reasoning like the Claude app) while the lead text
- *    is buffered.
+ *  - The answer turn may receive provider-summarized thinking for internal
+ *    tracing, but the public chat route reduces it to concise activity status;
+ *    model reasoning is never rendered as user-facing transcript content.
  *  - The buffered lead runs through the deterministic groundedness oracle ONLY
  *    when real account data was read this turn (doctrine answers have no internal
  *    numbers to verify); on a flag it regenerates once with the figures fed back.
  *  - The verified lead is then streamed word-by-word.
  *
- * Yields a typed activity stream (status | thinking | text) the route maps to
- * StreamEvents. Throws on SDK errors (the route falls back to the canned lead).
+ * Yields a typed activity stream (status | thinking | text) that the route
+ * safely reduces to public events. Throws on SDK errors so the route can use
+ * its deterministic doctrine fallback.
  */
 export type AgentEvent =
   | { kind: "status"; key: AgentStatusKey; label: string }
@@ -101,8 +103,17 @@ const WEB_FETCH_TOOL = {
 
 const AGENT_TOOLS = [...TOOLS, WEB_SEARCH_TOOL, WEB_FETCH_TOOL];
 
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const status = (key: AgentStatusKey): AgentEvent => ({ kind: "status", key, label: AGENT_STATUS_LABEL[key] });
+
+function bounded<T>(operation: PromiseLike<T>, signal?: AbortSignal): Promise<T> {
+  return signal ? raceWithAbort(operation, signal) : Promise.resolve(operation);
+}
+
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return signal
+    ? abortableDelay(ms, signal)
+    : new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
 
 /**
  * Incremental prompt caching for the agent loop. Every iteration re-sends the
@@ -204,7 +215,6 @@ export async function* runAgentWithTools(opts: {
         name: i === 0 ? "first_turn" : "answer_turn",
         model: opts.model,
         tier,
-        input: messages,
         stream: client.messages.stream(
           params as Parameters<typeof client.messages.stream>[0],
           opts.signal ? ({ signal: opts.signal } as Parameters<typeof client.messages.stream>[1]) : undefined,
@@ -212,13 +222,17 @@ export async function* runAgentWithTools(opts: {
       });
 
       let turnText = "";
-      for await (const event of stream) {
+      const iterator = stream[Symbol.asyncIterator]();
+      for (;;) {
+        const next = await bounded(iterator.next(), opts.signal);
+        if (next.done) break;
+        const event = next.value;
         if (event.type === "content_block_delta") {
           if (event.delta.type === "thinking_delta") yield { kind: "thinking", text: event.delta.thinking };
           else if (event.delta.type === "text_delta") turnText += event.delta.text;
         }
       }
-      const message = await stream.finalMessage();
+      const message = await bounded(stream.finalMessage(), opts.signal);
 
       // ── Surface live web research the moment it happens. The web_search SERVER
       //    tool can run two ways: (a) it needs more iterations and the model
@@ -327,14 +341,17 @@ export async function* runAgentWithTools(opts: {
             const planInput = actionPlanInputFromTool(tu.input);
             if (planInput) {
               renderedCard = true;
-              const data = await persistActionPlan(opts.workspaceId ?? null, planInput);
+              const data = await bounded(
+                persistActionPlan(opts.workspaceId ?? null, planInput),
+                opts.signal,
+              );
               yield { kind: "artifact", payload: { kind: "actionPlan", data } };
             }
             results.push({
               type: "tool_result",
               tool_use_id: tu.id,
               content: planInput
-                ? "Action plan rendered with executable steps for the user to run."
+                ? "Action plan rendered with reviewable steps and server-owned capability labels."
                 : "Action plan needs a title and at least one step — try again.",
               is_error: !planInput,
             });
@@ -360,7 +377,10 @@ export async function* runAgentWithTools(opts: {
           // happens when it judges a real connection is relevant.
           if (tu.name === "marketing_playbook" && !ctx.doctrineRetrieved) yield status("consulting");
           else if (tu.name === "get_account_metrics" && !ctx.internalReadDone) yield status("reading");
-          const outcome = await dispatchTool(tu.name, tu.input, opts.source, ctx);
+          const outcome = await bounded(
+            dispatchTool(tu.name, tu.input, opts.source, ctx),
+            opts.signal,
+          );
           if (tu.name === "get_account_metrics" && !outcome.isError) internalData = outcome.content;
           results.push({
             type: "tool_result",
@@ -385,7 +405,7 @@ export async function* runAgentWithTools(opts: {
       break;
     }
 
-    if (!finalText) return; // nothing produced → route falls back to canned lead
+    if (!finalText) return; // nothing produced → route uses its doctrine fallback
 
     // ── Cap the chat lead when the canvas carries the answer ──
     // The model tends to write a full essay in chat even after rendering cards.
@@ -410,7 +430,7 @@ export async function* runAgentWithTools(opts: {
           check = checkGroundedness(finalText, internalData);
         }
         if (!check.ok) {
-          console.warn(`[agent] groundedness: unverified after refine: ${check.unverified.join(", ")}`);
+          console.warn("[agent] groundedness remained unverified after refinement");
         }
       }
     }
@@ -419,12 +439,12 @@ export async function* runAgentWithTools(opts: {
     yield status("writing");
     for (const chunk of finalText.match(/\s*\S+/g) ?? [finalText]) {
       yield { kind: "text", text: chunk };
-      await sleep(WORD_MS);
+      await delay(WORD_MS, opts.signal);
     }
   } finally {
     // Deliver any queued traces before the generator is discarded (covers early
     // return and abort too). No-op without keys; never throws.
-    await trace.flush();
+    await bounded(trace.flush(), opts.signal).catch(() => undefined);
   }
 }
 
@@ -512,18 +532,21 @@ Your previous draft stated figures NOT supported by the data: ${unverified.join(
     name: "regenerate_grounded",
     model: opts.model,
     tier,
-    input: params.messages,
     stream: client.messages.stream(
       params as Parameters<typeof client.messages.stream>[0],
       opts.signal ? ({ signal: opts.signal } as Parameters<typeof client.messages.stream>[1]) : undefined,
     ),
   });
   let text = "";
-  for await (const event of stream) {
+  const iterator = stream[Symbol.asyncIterator]();
+  for (;;) {
+    const next = await bounded(iterator.next(), opts.signal);
+    if (next.done) break;
+    const event = next.value;
     if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
       text += event.delta.text;
     }
   }
-  await stream.finalMessage();
+  await bounded(stream.finalMessage(), opts.signal);
   return text.trim();
 }

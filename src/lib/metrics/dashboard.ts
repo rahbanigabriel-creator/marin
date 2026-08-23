@@ -408,7 +408,6 @@ export function sampleDashboard(): DashboardData {
     { platform: "meta_ads", campaign: "Retargeting — DPA", spend: 3100, revenue: 15500, conversions: 129, clicks: 9100, impressions: 410000, status: "active", objective: "Sales", budget: 120 },
     { platform: "meta_ads", campaign: "Cold — Lookalike 1%", spend: 5200, revenue: 9360, conversions: 80, clicks: 6400, impressions: 520000, status: "paused", objective: "Sales", budget: 200 },
     { platform: "tiktok_ads", campaign: "Spark Ads — UGC", spend: 2800, revenue: 7000, conversions: 70, clicks: 8800, impressions: 690000, status: "active", objective: "Conversions", budget: 100 },
-    { platform: "linkedin_ads", campaign: "ABM — Enterprise", spend: 3600, revenue: 5400, conversions: 30, clicks: 2100, impressions: 88000, status: "active", objective: "Lead gen", budget: 130 },
   ];
 
   const DAYS = 30;

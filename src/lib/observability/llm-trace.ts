@@ -1,8 +1,12 @@
 import "server-only";
 
-import type Anthropic from "@anthropic-ai/sdk";
 import type { MessageStream } from "@anthropic-ai/sdk/lib/MessageStream";
 import { Langfuse, type LangfuseTraceClient } from "langfuse";
+
+import {
+  buildLlmGenerationTelemetry,
+  type LlmTelemetryTier,
+} from "@/lib/observability/telemetry";
 
 /**
  * LLM cost tracing (Langfuse, Stack C).
@@ -34,25 +38,14 @@ import { Langfuse, type LangfuseTraceClient } from "langfuse";
  * (https://cloud.langfuse.com). Override with LANGFUSE_BASEURL only to another
  * EU-region host (or a self-hosted EU instance). No US endpoint is hardcoded.
  *
- * Security: never log secrets; the prompt input/output are product traces, not a
- * log sink — we record the model call's text, never tokens or keys.
+ * Security: prompt and response capture is deliberately disabled. Traces retain
+ * only the model, tier, token counts, and computed cost.
  */
 
 /** Langfuse EU cloud host (data residency). */
 const DEFAULT_BASE_URL = "https://cloud.langfuse.com";
 
-/**
- * Per-1M-token list prices (USD), keyed by tier. Source of truth for the cost
- * computed and reported on each generation. Haiku $1/$5, Sonnet $3/$15,
- * Opus $5/$25 (input/output). Mirrors the tiers in src/lib/agent/router.ts.
- */
-const TIER_PRICE_PER_MTOK: Record<LlmTier, { input: number; output: number }> = {
-  low: { input: 1, output: 5 },
-  medium: { input: 3, output: 15 },
-  high: { input: 5, output: 25 },
-};
-
-export type LlmTier = "low" | "medium" | "high";
+export type LlmTier = LlmTelemetryTier;
 
 /**
  * True when Langfuse is configured (both keys present). Read lazily from env on
@@ -78,17 +71,6 @@ function getLangfuse(): Langfuse | null {
 }
 
 /** Compute USD cost from token usage and the tier's per-1M prices. */
-function computeCostUsd(
-  tier: LlmTier,
-  inputTokens: number,
-  outputTokens: number,
-): { input: number; output: number; total: number } {
-  const price = TIER_PRICE_PER_MTOK[tier];
-  const input = (inputTokens / 1_000_000) * price.input;
-  const output = (outputTokens / 1_000_000) * price.output;
-  return { input, output, total: input + output };
-}
-
 /**
  * An opaque tracing handle for one agent answer. The no-op handle (returned when
  * tracing is off) is the same shape, so the caller code is identical on both
@@ -106,7 +88,6 @@ export interface LlmTrace {
     name: string;
     model: string;
     tier: LlmTier;
-    input: unknown;
     stream: MessageStream;
   }): MessageStream;
   /** Flush queued events to Langfuse. No-op when tracing is off; never throws. */
@@ -128,7 +109,6 @@ export function startLlmTrace(meta: {
   name: string;
   tier: LlmTier;
   model: string;
-  metadata?: Record<string, unknown>;
 }): LlmTrace {
   const lf = getLangfuse();
   if (!lf) return NOOP_TRACE;
@@ -137,7 +117,11 @@ export function startLlmTrace(meta: {
   try {
     trace = lf.trace({
       name: meta.name,
-      metadata: { tier: meta.tier, model: meta.model, ...meta.metadata },
+      metadata: {
+        tier: meta.tier,
+        model: meta.model,
+        contentCapture: "disabled",
+      },
     });
   } catch {
     // If trace creation fails for any reason, degrade to the no-op path so the
@@ -146,33 +130,24 @@ export function startLlmTrace(meta: {
   }
 
   return {
-    observe: ({ name, model, tier, input, stream }) => {
+    observe: ({ name, model, tier, stream }) => {
       // Fire-and-forget: read the assembled message's usage AFTER the caller has
       // consumed the stream. finalMessage() is idempotent, so this neither
       // consumes the iterator nor alters anything the caller observes.
       void stream
         .finalMessage()
-        .then((message: Anthropic.Message) => {
+        .then((message) => {
           const usage = message.usage;
           const inputTokens = usage?.input_tokens ?? 0;
           const outputTokens = usage?.output_tokens ?? 0;
-          const cost = computeCostUsd(tier, inputTokens, outputTokens);
           trace.generation({
             name,
             model,
-            input,
-            output: textOf(message),
-            usageDetails: {
-              input: inputTokens,
-              output: outputTokens,
-              total: inputTokens + outputTokens,
-            },
-            costDetails: {
-              input: cost.input,
-              output: cost.output,
-              total: cost.total,
-            },
-            metadata: { tier, costCurrency: "USD" },
+            ...buildLlmGenerationTelemetry({
+              tier,
+              inputTokens,
+              outputTokens,
+            }),
           });
         })
         .catch(() => {
@@ -189,12 +164,4 @@ export function startLlmTrace(meta: {
       }
     },
   };
-}
-
-/** Concatenate the text blocks of an assembled message (for the trace output). */
-function textOf(message: Anthropic.Message): string {
-  return message.content
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-    .map((b) => b.text)
-    .join("");
 }

@@ -70,8 +70,8 @@ export async function persistActionPlan(
       steps.push(stepFor(s, row.id));
     }
     return { title: input.title, subtitle: input.subtitle, situation: input.situation, steps };
-  } catch (err) {
-    console.warn(`[actions] persist failed (migration applied?): ${err instanceof Error ? err.message : "error"}`);
+  } catch {
+    console.warn("[actions] persist failed; returning an ungrounded plan");
     return ungrounded();
   }
 }

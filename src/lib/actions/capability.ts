@@ -1,4 +1,3 @@
-import "server-only";
 import type { ExecMode } from "@/types/artifacts";
 
 /**
@@ -18,6 +17,11 @@ export interface Capability {
   writeScopes?: string[];
 }
 
+/** Assisted copy/open handoffs are harmless; only a provider API write is paid execution. */
+export function requiresExecutionEntitlement(execMode: string): boolean {
+  return execMode === "api";
+}
+
 export function classify(platform: string | undefined, kind: string): Capability {
   const k = (kind || "").toLowerCase();
   const p = (platform || "").toLowerCase();
@@ -25,11 +29,6 @@ export function classify(platform: string | undefined, kind: string): Capability
   // Off-platform work (SEO, website, email copy): prepare + copy, no OAuth ever.
   if (!platform || p === "none" || k === "seo_meta" || k === "manual" || k.startsWith("seo") || k === "email") {
     return { execMode: "prepare", requiresApproval: false, ctaLabel: "Copy brief" };
-  }
-
-  // X / Twitter post — the one real single-POST write in Phase 1 (needs tweet.write).
-  if (p === "x_ads" && (k === "tweet" || k === "post")) {
-    return { execMode: "api", requiresApproval: true, ctaLabel: "Post to X", writeScopes: ["tweet.write"] };
   }
 
   // Paid ad creation — always prepare + open the campaign builder (money-gated,
@@ -49,6 +48,13 @@ export function classify(platform: string | undefined, kind: string): Capability
 
 function openLabel(platform: string): string {
   const name: Record<string, string> = {
+    youtube: "YouTube",
+    instagram: "Instagram",
+    facebook: "Facebook",
+    tiktok: "TikTok",
+    snapchat: "Snapchat",
+    reddit: "Reddit",
+    pinterest: "Pinterest",
     meta_ads: "Meta",
     tiktok_ads: "TikTok",
     linkedin_ads: "LinkedIn",

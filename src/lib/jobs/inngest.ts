@@ -48,6 +48,21 @@ export function isInngestConfigured(): boolean {
   return Boolean(process.env.INNGEST_EVENT_KEY);
 }
 
+/** Agent execution also requires verified inbound delivery in production. */
+export function isAgentRunDispatchConfigured(): boolean {
+  if (!process.env.INNGEST_EVENT_KEY) return false;
+  if (
+    (process.env.VERCEL === "1" || process.env.NODE_ENV === "production") &&
+    !process.env.INNGEST_SIGNING_KEY
+  ) return false;
+  return true;
+}
+
+/** Destructive deletion requires both outbound and inbound signing keys. */
+export function isWorkspaceDeletionDispatchConfigured(): boolean {
+  return Boolean(process.env.INNGEST_EVENT_KEY && process.env.INNGEST_SIGNING_KEY);
+}
+
 /**
  * The Inngest client. Constructing it is side-effect-free (no network, no env
  * requirement) so this is import/build-safe with no keys. The SDK resolves
@@ -78,6 +93,22 @@ export interface ConnectionConnectedData {
 /** Event name emitted to pull deep history for a workspace's connections. */
 export const CONNECTION_BACKFILL_EVENT = "connection/backfill" as const;
 
+/** Replay-safe event for one bounded, tenant-scoped agent run. */
+export const AGENT_RUN_EXECUTE_EVENT = "agent-run/execute" as const;
+
+/** Replay-safe event for one durable workspace deletion request. */
+export const WORKSPACE_DELETION_EXECUTE_EVENT = "workspace-deletion/execute" as const;
+
+export interface AgentRunExecuteData {
+  workspaceId: string;
+  runId: string;
+}
+
+export interface WorkspaceDeletionExecuteData {
+  workspaceId: string;
+  deletionRequestId: string;
+}
+
 /** Payload for {@link CONNECTION_BACKFILL_EVENT}. */
 export interface ConnectionBackfillData {
   workspaceId: string;
@@ -98,6 +129,7 @@ const BACKFILL_CHUNK_DAYS = 30;
 
 /** Cron cadence for the scheduled full sync (every 6 hours, UTC). */
 const SYNC_CRON = "0 */6 * * *";
+const ASSET_CLEANUP_CRON = "*/15 * * * *";
 
 /** Outcome of a sync pass — returned by the functions for observability. */
 interface SyncResult {
@@ -191,12 +223,11 @@ async function runSync(
         const rows = await client.fetchMetrics(connection, range);
         metricsWritten += await ingestMetrics(workspaceId, connection.platform, rows);
         touched = true;
-      } catch (err) {
+      } catch {
         // Never let one connection/chunk failure (or its error message) leak
         // token material or abort the whole sync. Log a safe message and skip.
-        const message = err instanceof Error ? err.message : String(err);
         console.warn(
-          `[inngest] sync skipped ${connection.platform} ${isoDay(range.from)}..${isoDay(range.to)}: ${message}`,
+          `[inngest] sync skipped ${connection.platform} ${isoDay(range.from)}..${isoDay(range.to)}`,
         );
       }
     }
@@ -221,12 +252,12 @@ export async function syncWorkspace(
   const result = await runSync(workspaceId, [recentRange(SYNC_WINDOW_DAYS)], platformFilter);
   // Refresh campaign config + the ad/creative layer alongside performance —
   // both best-effort, never fatal to the metric sync.
-  const campaigns = await syncCampaignConfig(workspaceId, platformFilter).catch((err) => {
-    console.warn(`[inngest] campaign-config refresh failed: ${err instanceof Error ? err.message : String(err)}`);
+  const campaigns = await syncCampaignConfig(workspaceId, platformFilter).catch(() => {
+    console.warn("[inngest] campaign-config refresh failed");
     return 0;
   });
-  const ads = await syncAds(workspaceId, platformFilter).catch((err) => {
-    console.warn(`[inngest] ad-sync failed: ${err instanceof Error ? err.message : String(err)}`);
+  const ads = await syncAds(workspaceId, platformFilter).catch(() => {
+    console.warn("[inngest] ad-sync failed");
     return 0;
   });
   return { ...result, campaigns, ads };
@@ -287,9 +318,8 @@ export async function syncCampaignConfig(
         });
         upserted += 1;
       }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.warn(`[inngest] campaign-config skipped ${connection.platform}: ${message}`);
+    } catch {
+      console.warn(`[inngest] campaign-config skipped ${connection.platform}`);
     }
   }
   return upserted;
@@ -347,9 +377,8 @@ export async function syncAds(
         });
         upserted += 1;
       }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.warn(`[inngest] ad-sync skipped ${connection.platform}: ${message}`);
+    } catch {
+      console.warn(`[inngest] ad-sync skipped ${connection.platform}`);
     }
   }
   return upserted;
@@ -477,8 +506,145 @@ export const backfillOnConnection = inngest.createFunction(
   },
 );
 
+/** Reconcile interrupted private uploads without ever exposing their Blob URLs. */
+export const cleanupAssetStorage = inngest.createFunction(
+  { id: "cleanup-asset-storage", name: "Clean interrupted asset uploads" },
+  { cron: ASSET_CLEANUP_CRON },
+  async ({ step }) => {
+    const { isDatabaseConfigured } = await import("@/lib/db");
+    const { isAssetStorageConfigured } = await import("@/lib/storage/blob");
+    if (!isDatabaseConfigured() || !isAssetStorageConfigured()) {
+      return { ran: false, reason: "storage_not_configured" };
+    }
+    return step.run("cleanup-stale-asset-reservations", async () => {
+      const {
+        cleanupDeletingAssets,
+        cleanupStaleAssetStorageReservations,
+      } = await import("@/lib/billing/storage");
+      const [reservations, deletions] = await Promise.all([
+        cleanupStaleAssetStorageReservations({ take: 250 }),
+        cleanupDeletingAssets({ take: 250 }),
+      ]);
+      return {
+        ran: true,
+        reservations,
+        deletions,
+      };
+    });
+  },
+);
+
+export const executeBoundedAgentRun = inngest.createFunction(
+  {
+    id: "execute-bounded-agent-run",
+    name: "Execute bounded agent run",
+    retries: 2,
+    concurrency: { limit: 1, key: "event.data.runId" },
+  },
+  { event: AGENT_RUN_EXECUTE_EVENT },
+  async ({ event, step }) => {
+    const data = event.data as AgentRunExecuteData;
+    if (
+      !data ||
+      typeof data.workspaceId !== "string" ||
+      !data.workspaceId ||
+      data.workspaceId.length > 191 ||
+      typeof data.runId !== "string" ||
+      !data.runId ||
+      data.runId.length > 191
+    ) {
+      return { ran: false, status: "missing", reason: "invalid_event" };
+    }
+    return step.run("execute-reviewed-agent-plan", async () => {
+      const { executeAgentRun } = await import("@/lib/agent-runs/coordinator");
+      return executeAgentRun({
+        workspaceId: data.workspaceId,
+        runId: data.runId,
+      });
+    });
+  },
+);
+
+export const reconcileAgentRunDeadlines = inngest.createFunction(
+  {
+    id: "reconcile-agent-run-deadlines",
+    name: "Reconcile agent run deadlines",
+    retries: 1,
+  },
+  { cron: "*/2 * * * *" },
+  async ({ step }) => {
+    const { isDatabaseConfigured } = await import("@/lib/db");
+    if (!isDatabaseConfigured()) {
+      return { ran: false, reason: "database_not_configured" };
+    }
+    return step.run("expire-bounded-agent-runs", async () => {
+      const { reconcileExpiredAgentRuns } = await import("@/lib/agent-runs/coordinator");
+      return { ran: true, ...(await reconcileExpiredAgentRuns()) };
+    });
+  },
+);
+
+export const executeWorkspaceDeletion = inngest.createFunction(
+  {
+    id: "execute-workspace-deletion",
+    name: "Execute workspace deletion",
+    retries: 2,
+    concurrency: { limit: 1, key: "event.data.workspaceId" },
+  },
+  { event: WORKSPACE_DELETION_EXECUTE_EVENT },
+  async ({ event, step }) => {
+    const data = event.data as WorkspaceDeletionExecuteData;
+    if (
+      !data ||
+      typeof data.workspaceId !== "string" ||
+      !data.workspaceId ||
+      data.workspaceId.length > 191 ||
+      typeof data.deletionRequestId !== "string" ||
+      !data.deletionRequestId ||
+      data.deletionRequestId.length > 191
+    ) {
+      return { ran: false, reason: "invalid_event" };
+    }
+    return step.run("delete-workspace-safely", async () => {
+      const { processWorkspaceDeletion } = await import("@/lib/privacy/deletion/service");
+      return processWorkspaceDeletion({
+        workspaceId: data.workspaceId,
+        deletionRequestId: data.deletionRequestId,
+      });
+    });
+  },
+);
+
+export const reconcileWorkspaceDeletionLeases = inngest.createFunction(
+  {
+    id: "reconcile-workspace-deletion-leases",
+    name: "Reconcile interrupted workspace deletions",
+    retries: 1,
+  },
+  { cron: "*/5 * * * *" },
+  async ({ step }) => {
+    const { isDatabaseConfigured } = await import("@/lib/db");
+    if (!isDatabaseConfigured()) return { ran: false, reason: "database_not_configured" };
+    return step.run("mark-interrupted-deletions", async () => {
+      const { reconcileStaleWorkspaceDeletions } = await import(
+        "@/lib/privacy/deletion/service"
+      );
+      return { ran: true, reconciled: await reconcileStaleWorkspaceDeletions() };
+    });
+  },
+);
+
 /** All Inngest functions served by the /api/inngest endpoint. */
-export const inngestFunctions = [scheduledSync, syncOnConnection, backfillOnConnection];
+export const inngestFunctions = [
+  scheduledSync,
+  syncOnConnection,
+  backfillOnConnection,
+  cleanupAssetStorage,
+  executeBoundedAgentRun,
+  reconcileAgentRunDeadlines,
+  executeWorkspaceDeletion,
+  reconcileWorkspaceDeletionLeases,
+];
 
 /**
  * Fire-and-forget: emit the "connection/connected" event so the backfill runs
@@ -492,9 +658,8 @@ export async function emitConnectionConnected(
   if (!isInngestConfigured()) return;
   try {
     await inngest.send({ name: CONNECTION_CONNECTED_EVENT, data });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[inngest] failed to emit ${CONNECTION_CONNECTED_EVENT}: ${message}`);
+  } catch {
+    console.warn(`[inngest] failed to emit ${CONNECTION_CONNECTED_EVENT}`);
   }
 }
 
@@ -509,8 +674,7 @@ export async function emitConnectionBackfill(
   if (!isInngestConfigured()) return;
   try {
     await inngest.send({ name: CONNECTION_BACKFILL_EVENT, data });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[inngest] failed to emit ${CONNECTION_BACKFILL_EVENT}: ${message}`);
+  } catch {
+    console.warn(`[inngest] failed to emit ${CONNECTION_BACKFILL_EVENT}`);
   }
 }

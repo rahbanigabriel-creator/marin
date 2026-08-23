@@ -16,17 +16,16 @@ type StepState = {
 };
 
 const PLATFORM_LABELS: Record<string, string> = {
+  youtube: "YouTube",
+  instagram: "Instagram",
+  facebook: "Facebook",
+  tiktok: "TikTok",
+  snapchat: "Snapchat",
+  reddit: "Reddit",
+  pinterest: "Pinterest",
   google_ads: "Google Ads",
   meta_ads: "Meta",
   tiktok_ads: "TikTok",
-  linkedin_ads: "LinkedIn",
-  microsoft_ads: "Microsoft Ads",
-  pinterest_ads: "Pinterest",
-  snapchat_ads: "Snapchat",
-  reddit_ads: "Reddit",
-  x_ads: "X",
-  amazon_ads: "Amazon Ads",
-  apple_search_ads: "Apple Search Ads",
 };
 
 function platformLabel(step: ActionStep, channel?: Channel): string {
@@ -46,7 +45,7 @@ function copyLabel(step: ActionStep): string {
 
 /**
  * The executable action plan — the operating surface. Situation summary, then
- * prioritized steps each with a one-click button driven by its execMode:
+ * prioritized steps with a truthful action driven by its execMode:
  * prepare → copy the ready-to-ship brief; guided → open the platform prefilled;
  * api → run it via /api/actions/execute (server runs by actionId only). Owns its
  * own step state so status updates are local, decoupled from the answer stream.
@@ -124,11 +123,15 @@ export function CanvasActionPlan({
       const fd = new FormData();
       fd.append("file", file);
       const res = await fetch("/api/assets", { method: "POST", body: fd });
-      const json = (await res.json()) as { ok?: boolean; url?: string; reason?: string };
+      const json = (await res.json()) as {
+        ok?: boolean;
+        contentUrl?: string;
+        reason?: string;
+      };
       setStates((m) => {
         const prev = m[actionId] ?? { status: "proposed" as ActionStatus };
         return json.ok
-          ? { ...m, [actionId]: { ...prev, uploading: false, assetUrl: json.url } }
+          ? { ...m, [actionId]: { ...prev, uploading: false, assetUrl: json.contentUrl } }
           : { ...m, [actionId]: { ...prev, uploading: false, uploadError: json.reason || "Upload failed." } };
       });
     } catch {
@@ -182,6 +185,7 @@ export function CanvasActionPlan({
           const platformStep = Boolean(step.platform);
           const connected = Boolean(channel && channel.status === "connected");
           const needsConnection = platformStep && !connected;
+          const canConnect = Boolean(channel?.connectorPlatform && channel.configured);
           const canUseAsset = step.needsAsset && step.execMode === "api" && connected;
           const label = platformLabel(step, channel);
           return (
@@ -233,15 +237,24 @@ export function CanvasActionPlan({
               <div className="flex flex-none flex-col items-end">
                 {done ? (
                   st.resultUrl ? (
-                    <a
-                      href={st.resultUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="rounded-chip font-sans text-[12px] font-semibold"
-                      style={{ color: "#4C6B40", background: "#E7EEE0", padding: "6px 12px" }}
-                    >
-                      ✓ Open ▸
-                    </a>
+                    <div className="flex flex-col items-end gap-[6px]">
+                      <a
+                        href={st.resultUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rounded-chip font-sans text-[12px] font-semibold"
+                        style={{ color: "#4C6B40", background: "#E7EEE0", padding: "6px 12px" }}
+                      >
+                        Open {label}
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => copy(step, false)}
+                        className="cursor-pointer whitespace-nowrap rounded-chip border border-line-2 bg-surface-card px-[10px] py-[5px] font-sans text-[11.5px] font-semibold text-ink-500"
+                      >
+                        {st.copied ? "Copied" : copyLabel(step)}
+                      </button>
+                    </div>
                   ) : (
                     <span
                       className="rounded-chip font-sans text-[12px] font-semibold"
@@ -252,7 +265,7 @@ export function CanvasActionPlan({
                   )
                 ) : (
                   <div className="flex flex-col items-end gap-[6px]">
-                    {needsConnection && channel ? (
+                    {needsConnection && channel && canConnect ? (
                       <>
                         <button
                           type="button"
@@ -271,16 +284,44 @@ export function CanvasActionPlan({
                           {st.copied ? "Copied" : copyLabel(step)}
                         </button>
                       </>
+                    ) : needsConnection && channel ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => run(step)}
+                          className="cursor-pointer whitespace-nowrap rounded-chip border-none bg-ink-900 px-[13px] py-[6px] font-sans text-[12px] font-semibold text-white"
+                        >
+                          {step.ctaLabel}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => copy(step, false)}
+                          className="cursor-pointer whitespace-nowrap rounded-chip border border-line-2 bg-surface-card px-[10px] py-[5px] font-sans text-[11.5px] font-semibold text-ink-500"
+                        >
+                          {st.copied ? "Copied" : copyLabel(step)}
+                        </button>
+                      </>
                     ) : (
-                      <button
-                        type="button"
-                        disabled={running}
-                        onClick={() => run(step)}
-                        className="cursor-pointer whitespace-nowrap rounded-chip font-sans text-[12px] font-semibold disabled:opacity-60"
-                        style={{ border: "none", background: "#2B2722", color: "#F2F1EC", padding: "6px 13px" }}
-                      >
-                        {running ? "Working…" : step.execMode === "prepare" ? copyLabel(step) : step.ctaLabel}
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          disabled={running}
+                          onClick={() => run(step)}
+                          className="cursor-pointer whitespace-nowrap rounded-chip font-sans text-[12px] font-semibold disabled:opacity-60"
+                          style={{ border: "none", background: "#2B2722", color: "#F2F1EC", padding: "6px 13px" }}
+                        >
+                          {running ? "Working…" : step.execMode === "prepare" ? copyLabel(step) : step.ctaLabel}
+                        </button>
+                        {step.execMode === "guided" ? (
+                          <button
+                            type="button"
+                            onClick={() => copy(step, false)}
+                            className="cursor-pointer whitespace-nowrap rounded-chip border border-line-2 bg-surface-card px-[10px] py-[5px] font-sans text-[11.5px] font-semibold text-ink-500"
+                          >
+                            {st.copied ? "Copied" : copyLabel(step)}
+                          </button>
+                        ) : null}
+                      </>
                     )}
                   </div>
                 )}

@@ -15,10 +15,10 @@ import { Ratelimit } from "@upstash/ratelimit";
  *   • Importing this module NEVER constructs a client or touches the network.
  *   • The client is lazily created on first use, and ONLY when BOTH
  *     UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are present.
- *   • With no env the rate limiter is a PERMISSIVE no-op (every check returns
- *     allowed) and the cache is a pass-through MISS (get → null, set → no-op) —
- *     nothing throws, so `next build` / `tsc --noEmit` stay green with no env
- *     and no request path can be broken by missing cache config.
+ *   • With no env the low-level limiter is a no-op and cache reads are misses so
+ *     builds and local development remain keyless. Production mutation routes
+ *     call enforceEndpointRateLimit(), which rejects requests when Redis is not
+ *     configured; callers must not use this primitive as a deployment gate.
  *
  * EU data residency: create the Upstash database in an EU region; the REST URL
  * is bound to that region's endpoint (no host hardcoded here). The SDK targets
@@ -105,6 +105,7 @@ export function getRateLimiter(opts?: {
   tokens?: number;
   window?: Parameters<typeof Ratelimit.slidingWindow>[1];
   prefix?: string;
+  failClosed?: boolean;
 }): RateLimiter {
   const client = getRedis();
   if (!client) return NOOP_LIMITER;
@@ -137,11 +138,19 @@ export function getRateLimiter(opts?: {
           remaining: r.remaining,
           reset: r.reset,
         };
-      } catch (err) {
-        // Fail OPEN: a cache/limiter outage must never block legitimate traffic
-        // or break a request path. Log without secrets and allow the request.
-        const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`[cache] rate limit check failed, allowing request: ${msg}`);
+      } catch {
+        if (opts?.failClosed) {
+          console.warn("[cache] rate limit check failed; denying request");
+          return {
+            success: false,
+            limit: tokens,
+            remaining: 0,
+            reset: Date.now() + 60_000,
+          };
+        }
+        // Low-risk cache users may explicitly retain availability during an
+        // Upstash outage. Expensive mutation routes use failClosed instead.
+        console.warn("[cache] rate limit check failed; allowing request");
         return { success: true, limit: 0, remaining: 0, reset: 0 };
       }
     },
@@ -159,9 +168,8 @@ export async function cacheGet<T>(key: string): Promise<T | null> {
     // Upstash auto-deserialises JSON values stored via set().
     const value = await client.get<T>(key);
     return value ?? null;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[cache] get failed, treating as miss: ${msg}`);
+  } catch {
+    console.warn("[cache] get failed; treating as miss");
     return null;
   }
 }
@@ -183,8 +191,7 @@ export async function cacheSet<T>(
     } else {
       await client.set(key, value);
     }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[cache] set failed, skipping: ${msg}`);
+  } catch {
+    console.warn("[cache] set failed; skipping");
   }
 }

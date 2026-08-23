@@ -1,4 +1,5 @@
 import { AppShell } from "@/components/shell/AppShell";
+import { isAuthConfigured } from "@/lib/auth";
 
 /**
  * The product itself. The landing hero deep-links here (`/app?q=…`, which
@@ -6,5 +7,5 @@ import { AppShell } from "@/components/shell/AppShell";
  * separate from `/` so `/` can always serve the crawlable marketing landing.
  */
 export default function AppPage() {
-  return <AppShell />;
+  return <AppShell authEnabled={isAuthConfigured()} />;
 }

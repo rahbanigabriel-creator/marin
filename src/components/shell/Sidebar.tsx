@@ -1,8 +1,25 @@
 "use client";
 
+import Link from "next/link";
+import { SignOutButton } from "@clerk/nextjs";
 import { useState } from "react";
 import type { RecentChat } from "@/types/views";
 import type { Account } from "@/lib/data/personas";
+import type { ProductMode } from "@/lib/product/platforms";
+import {
+  LuChevronLeft,
+  LuChevronRight,
+  LuBuilding2,
+  LuBot,
+  LuChartNoAxesCombined,
+  LuLeaf,
+  LuMegaphone,
+  LuMessageSquare,
+  LuPlus,
+  LuPlug,
+  LuSettings,
+  LuUsers,
+} from "react-icons/lu";
 
 interface SidebarProps {
   activeChat: number;
@@ -16,11 +33,17 @@ interface SidebarProps {
   onViewClients: () => void;
   /** real-product: open the unified campaigns dashboard. */
   onViewDashboard?: () => void;
-  dashboardActive?: boolean;
+  onViewAssistant?: () => void;
+  onViewOrganic?: () => void;
+  onViewBrand?: () => void;
+  onViewAnalytics?: () => void;
+  onViewAgents?: () => void;
+  activeArea?: ProductMode | "assistant" | "brand" | "analytics" | "agents";
   hideRecent?: boolean;
   primaryActionLabel?: string;
   collapsed: boolean;
   onToggleCollapsed: () => void;
+  authEnabled?: boolean;
 }
 
 export function Sidebar({
@@ -34,16 +57,54 @@ export function Sidebar({
   showClients,
   onViewClients,
   onViewDashboard,
-  dashboardActive = false,
+  onViewAssistant,
+  onViewOrganic,
+  onViewBrand,
+  onViewAnalytics,
+  onViewAgents,
+  activeArea = "assistant",
   hideRecent = false,
   primaryActionLabel = "New plan",
   collapsed,
   onToggleCollapsed,
+  authEnabled = false,
 }: SidebarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const buttonBase =
     "mb-[8px] flex w-full items-center gap-[9px] rounded-btn font-sans text-[13px] font-semibold";
-  const primaryIsConnections = primaryActionLabel.toLowerCase().includes("connection");
+  const realProductNavigation = Boolean(
+    onViewDashboard
+      && onViewAssistant
+      && onViewOrganic
+      && onViewBrand
+      && onViewAnalytics
+      && onViewAgents,
+  );
+
+  const navButton = (
+    label: string,
+    area: ProductMode | "assistant" | "brand" | "analytics" | "agents",
+    onClick: (() => void) | undefined,
+    icon: React.ReactNode,
+  ) => (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-current={activeArea === area ? "page" : undefined}
+      className={`${buttonBase} ${collapsed ? "justify-center" : ""}`}
+      style={{
+        padding: collapsed ? "10px 0" : "10px 12px",
+        cursor: "pointer",
+        border: "none",
+        background: activeArea === area ? "#F2E2EA" : "transparent",
+        color: activeArea === area ? "#8A3459" : "#4A443B",
+      }}
+    >
+      <span className="flex h-[18px] w-[18px] items-center justify-center">{icon}</span>
+      {!collapsed && <span>{label}</span>}
+    </button>
+  );
 
   return (
     <aside
@@ -88,7 +149,7 @@ export function Sidebar({
           className="flex cursor-pointer items-center justify-center rounded-[8px] border border-line-2 bg-surface-chip font-sans text-[13px] font-semibold text-ink-500"
           style={{ width: 28, height: 28 }}
         >
-          {collapsed ? "›" : "‹"}
+          {collapsed ? <LuChevronRight aria-hidden /> : <LuChevronLeft aria-hidden />}
         </button>
       </div>
 
@@ -100,28 +161,35 @@ export function Sidebar({
         className={`${buttonBase} border border-line-1 bg-surface-chip text-ink-900 ${collapsed ? "justify-center" : ""}`}
         style={{ padding: collapsed ? "10px 0" : "10px 12px", cursor: "pointer" }}
       >
-        <span className="text-[16px] leading-none text-plum">＋</span>
+        <LuPlus className="text-[16px] text-plum" aria-hidden />
         {!collapsed && <span>New conversation</span>}
       </button>
-      {onViewDashboard && (
-        <button
-          type="button"
-          onClick={onViewDashboard}
-          title="Campaigns"
-          className={`${buttonBase} ${collapsed ? "justify-center" : ""}`}
-          style={{
-            padding: collapsed ? "10px 0" : "10px 12px",
-            cursor: "pointer",
-            border: "none",
-            background: dashboardActive ? "#F2E2EA" : "transparent",
-            color: dashboardActive ? "#9A3D63" : "#4A443B",
-          }}
-        >
-          <span className="text-[14px] leading-none">▦</span>
-          {!collapsed && <span>Campaigns</span>}
-        </button>
-      )}
-      {showClients ? (
+      {realProductNavigation ? (
+        <nav aria-label="Workspace" className="mb-[10px]">
+          {navButton("Assistant", "assistant", onViewAssistant, <LuMessageSquare aria-hidden />)}
+          {navButton("Brand", "brand", onViewBrand, <LuBuilding2 aria-hidden />)}
+          {navButton("Organic + SEO", "organic", onViewOrganic, <LuLeaf aria-hidden />)}
+          {navButton("Paid campaigns", "paid", onViewDashboard, <LuMegaphone aria-hidden />)}
+          {navButton("Analytics", "analytics", onViewAnalytics, <LuChartNoAxesCombined aria-hidden />)}
+          {navButton("Agent runs", "agents", onViewAgents, <LuBot aria-hidden />)}
+          <button
+            type="button"
+            onClick={onOpenModal}
+            title="Manage connections"
+            className={`${buttonBase} ${collapsed ? "justify-center" : ""}`}
+            style={{
+              padding: collapsed ? "10px 0" : "10px 12px",
+              cursor: "pointer",
+              border: "none",
+              background: "transparent",
+              color: "#6C645A",
+            }}
+          >
+            <LuPlug className="h-[18px] w-[18px]" aria-hidden />
+            {!collapsed && <span>Manage connections</span>}
+          </button>
+        </nav>
+      ) : showClients ? (
         <button
           type="button"
           onClick={onViewClients}
@@ -129,7 +197,7 @@ export function Sidebar({
           className={`${buttonBase} text-white ${collapsed ? "justify-center" : ""}`}
           style={{ padding: collapsed ? "10px 0" : "10px 12px", cursor: "pointer", border: "none", background: "#9A3D63" }}
         >
-          <span className="text-[14px] leading-none">⊞</span>
+          <LuUsers className="text-[15px]" aria-hidden />
           {!collapsed && <span>Clients</span>}
         </button>
       ) : (
@@ -140,7 +208,7 @@ export function Sidebar({
           className={`${buttonBase} mb-[18px] text-white ${collapsed ? "justify-center" : ""}`}
           style={{ padding: collapsed ? "10px 0" : "10px 12px", cursor: "pointer", border: "none", background: "#9A3D63" }}
         >
-          <span className="text-[15px] leading-none">⌁</span>
+          <LuLeaf className="text-[15px]" aria-hidden />
           {!collapsed && primaryActionLabel}
         </button>
       )}
@@ -153,10 +221,11 @@ export function Sidebar({
               RECENT
             </div>
             {recentChats.map((chat, i) => (
-              <div
-                key={`${i}-${chat.title}`}
+              <button
+                type="button"
+                key={chat.id ?? `${i}-${chat.title}`}
                 onClick={() => onSelectChat(i)}
-                className="cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap rounded-chip p-[8px_10px] font-sans text-[13px]"
+                className="w-full cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap rounded-chip border-none p-[8px_10px] text-left font-sans text-[13px]"
                 style={
                   i === activeChat
                     ? { background: "#F9F9F4", color: "#2B2722", fontWeight: 600 }
@@ -164,12 +233,12 @@ export function Sidebar({
                 }
               >
                 {chat.title}
-              </div>
+              </button>
             ))}
           </>
         )}
 
-        {!collapsed && !primaryIsConnections && (
+        {!collapsed && !realProductNavigation && (
           <button
             type="button"
             onClick={onOpenModal}
@@ -185,7 +254,11 @@ export function Sidebar({
         {menuOpen && (
           <>
             <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
-            <div className="animate-fadeUpFast absolute bottom-full left-0 right-0 z-50 mb-[6px] overflow-hidden rounded-btn border border-line-1 bg-surface-card shadow-modal">
+            <div
+              className={`animate-fadeUpFast absolute bottom-full left-0 z-50 mb-[6px] overflow-hidden rounded-btn border border-line-1 bg-surface-card shadow-modal ${
+                collapsed ? "w-[220px]" : "right-0"
+              }`}
+            >
               <div className="border-b border-line-3 p-[10px_12px]">
                 <div className="font-sans text-[12.5px] font-semibold text-ink-900">{account.name}</div>
                 <div className="font-sans text-[11px] text-ink-300">{account.sub}</div>
@@ -210,29 +283,44 @@ export function Sidebar({
               >
                 New conversation
               </button>
-              <button
-                type="button"
-                onClick={() => setMenuOpen(false)}
-                className="block w-full cursor-pointer border-t border-line-3 bg-transparent p-[9px_12px] text-left font-sans text-[12.5px] font-medium text-plum-deep hover:bg-surface-chip"
+              <Link
+                href="/settings/billing"
+                className="block w-full p-[9px_12px] text-left font-sans text-[12.5px] font-medium text-ink-800 no-underline hover:bg-surface-chip"
               >
-                Sign out
-              </button>
+                Billing &amp; usage
+              </Link>
+              <Link
+                href="/settings/data"
+                className="block w-full p-[9px_12px] text-left font-sans text-[12.5px] font-medium text-ink-800 no-underline hover:bg-surface-chip"
+              >
+                Data &amp; privacy
+              </Link>
+              {authEnabled ? (
+                <SignOutButton redirectUrl="/">
+                  <button
+                    type="button"
+                    onClick={() => setMenuOpen(false)}
+                    className="block w-full cursor-pointer border-t border-line-3 bg-transparent p-[9px_12px] text-left font-sans text-[12.5px] font-medium text-plum-deep hover:bg-surface-chip"
+                  >
+                    Sign out
+                  </button>
+                </SignOutButton>
+              ) : null}
             </div>
           </>
         )}
         <div className={`flex items-center gap-[10px] ${collapsed ? "justify-center p-[10px_0]" : "p-[10px_8px]"}`}>
-          <div
-            className="flex items-center justify-center font-sans text-[12px] font-semibold"
-            style={{
-              width: 30,
-              height: 30,
-              borderRadius: "50%",
-              background: "linear-gradient(135deg,#8A8B6F,#5E7B52)",
-              color: "#FBF6EE",
-            }}
+          <button
+            type="button"
+            onClick={() => setMenuOpen((open) => !open)}
+            aria-label="Account menu"
+            aria-expanded={menuOpen}
+            title="Account menu"
+            className="flex h-[30px] w-[30px] flex-none cursor-pointer items-center justify-center rounded-full border-none p-0 font-sans text-[12px] font-semibold text-[#FBF6EE] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-plum"
+            style={{ background: "linear-gradient(135deg,#8A8B6F,#5E7B52)" }}
           >
             {account.initials}
-          </div>
+          </button>
           {!collapsed && (
             <>
               <div className="min-w-0 flex-1">
@@ -242,12 +330,12 @@ export function Sidebar({
               <button
                 type="button"
                 onClick={() => setMenuOpen((o) => !o)}
-                aria-label="Account menu"
+                aria-label="Account settings"
                 aria-expanded={menuOpen}
                 className="cursor-pointer border-none text-[15px] leading-none text-ink-200 hover:text-ink-400"
                 style={{ background: menuOpen ? "#EFEEE7" : "transparent", borderRadius: 7, padding: "3px 5px" }}
               >
-                ⚙
+                <LuSettings aria-hidden />
               </button>
             </>
           )}

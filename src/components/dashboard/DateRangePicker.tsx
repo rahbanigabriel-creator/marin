@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { DashRange } from "@/lib/metrics/dashboard";
 import { dayLabel } from "./format";
 
@@ -43,7 +43,9 @@ export function DateRangePicker({ range, onChange, disabled }: DateRangePickerPr
   const [open, setOpen] = useState(false);
   const [customFrom, setCustomFrom] = useState(range.from);
   const [customTo, setCustomTo] = useState(range.to);
-  const popRef = useRef<HTMLDivElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const customButtonRef = useRef<HTMLButtonElement | null>(null);
+  const popoverId = useId();
   const today = todayIso();
 
   useEffect(() => {
@@ -54,10 +56,20 @@ export function DateRangePicker({ range, onChange, disabled }: DateRangePickerPr
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
-      if (popRef.current && !popRef.current.contains(e.target as Node)) setOpen(false);
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setOpen(false);
+      customButtonRef.current?.focus();
     };
     document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [open]);
 
   const activePreset = range.to === today ? PRESETS.find((p) => p.days === range.days)?.days ?? null : null;
@@ -69,7 +81,7 @@ export function DateRangePicker({ range, onChange, disabled }: DateRangePickerPr
   };
 
   const applyCustom = () => {
-    if (disabled) return;
+    if (disabled || !customFrom || !customTo) return;
     let from = customFrom;
     let to = customTo;
     if (from > to) [from, to] = [to, from];
@@ -79,8 +91,8 @@ export function DateRangePicker({ range, onChange, disabled }: DateRangePickerPr
   };
 
   return (
-    <div className="relative flex flex-wrap items-center gap-[8px]">
-      <div className="flex items-center gap-[4px]">
+    <div ref={rootRef} className="relative flex max-w-full flex-wrap items-center gap-[8px]">
+      <div className="flex max-w-full items-center gap-[4px]" role="group" aria-label="Reporting date range">
         {PRESETS.map((p) => {
           const on = activePreset === p.days;
           return (
@@ -89,6 +101,7 @@ export function DateRangePicker({ range, onChange, disabled }: DateRangePickerPr
               type="button"
               disabled={disabled}
               onClick={() => applyPreset(p.days)}
+              aria-pressed={on}
               className="cursor-pointer rounded-[8px] font-mono text-[12px] font-semibold transition-colors disabled:opacity-50"
               style={
                 on
@@ -101,9 +114,13 @@ export function DateRangePicker({ range, onChange, disabled }: DateRangePickerPr
           );
         })}
         <button
+          ref={customButtonRef}
           type="button"
           disabled={disabled}
           onClick={() => setOpen((o) => !o)}
+          aria-pressed={activePreset === null}
+          aria-expanded={open}
+          aria-controls={popoverId}
           className="cursor-pointer rounded-[8px] font-mono text-[12px] font-semibold transition-colors disabled:opacity-50"
           style={
             activePreset === null
@@ -115,15 +132,17 @@ export function DateRangePicker({ range, onChange, disabled }: DateRangePickerPr
         </button>
       </div>
 
-      <span className="font-mono text-[11.5px] text-ink-300">
+      <span className="font-mono text-[11.5px] text-ink-300" aria-live="polite">
         {dayLabel(range.from)} – {dayLabel(range.to)} · {range.days} {range.days === 1 ? "day" : "days"}
       </span>
 
       {open ? (
         <div
-          ref={popRef}
+          id={popoverId}
+          role="group"
+          aria-label="Custom date range"
           className="absolute right-0 top-[calc(100%+8px)] z-30 rounded-card border border-line-3 bg-surface-card p-[14px] shadow-modal"
-          style={{ minWidth: 240 }}
+          style={{ minWidth: 240, maxWidth: "calc(100vw - 32px)" }}
         >
           <div className="flex flex-col gap-[10px]">
             <label className="flex flex-col gap-[4px]">
@@ -149,6 +168,7 @@ export function DateRangePicker({ range, onChange, disabled }: DateRangePickerPr
             <button
               type="button"
               onClick={applyCustom}
+              disabled={disabled || !customFrom || !customTo}
               className="mt-[2px] cursor-pointer rounded-[8px] font-sans text-[13px] font-semibold text-white"
               style={{ background: "#9A3D63", border: "none", padding: "8px 12px" }}
             >

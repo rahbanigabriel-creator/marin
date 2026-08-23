@@ -1,6 +1,22 @@
 "use client";
 
-import { useEffect } from "react";
+import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
+import {
+  ANALYTICS_CONSENT_STORAGE_KEY,
+  ANALYTICS_CONSENT_EVENT,
+  parseAnalyticsConsent,
+  persistAnalyticsConsent,
+  sanitizedPageLocation,
+  shouldInitializeBrowserAnalytics,
+  type AnalyticsConsent,
+} from "@/lib/observability/consent";
+
+type AnalyticsClient = {
+  capture(event: string, properties?: Record<string, unknown>): void;
+  opt_in_capturing(): void;
+  opt_out_capturing(): void;
+};
 
 /**
  * Client-side PostHog initialiser (Stack C, browser analytics via posthog-js).
@@ -19,28 +35,105 @@ import { useEffect } from "react";
  * Mounted conditionally from app/layout.tsx (see isAnalyticsConfigured()).
  */
 export function PostHogProvider({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const publicKey = process.env.NEXT_PUBLIC_POSTHOG_KEY;
+  const [consent, setConsent] = useState<AnalyticsConsent>("unset");
+  const [consentLoaded, setConsentLoaded] = useState(false);
+  const [analytics, setAnalytics] = useState<AnalyticsClient | null>(null);
+
   useEffect(() => {
-    const key = process.env.NEXT_PUBLIC_POSTHOG_KEY;
-    if (!key) return; // unconfigured → no init, no network
+    setConsent(parseAnalyticsConsent(window.localStorage.getItem(ANALYTICS_CONSENT_STORAGE_KEY)));
+    setConsentLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    const update = (event: Event) => {
+      const detail = (event as CustomEvent<unknown>).detail;
+      setConsent(parseAnalyticsConsent(typeof detail === "string" ? detail : null));
+    };
+    window.addEventListener(ANALYTICS_CONSENT_EVENT, update);
+    return () => window.removeEventListener(ANALYTICS_CONSENT_EVENT, update);
+  }, []);
+
+  useEffect(() => {
+    if (consent === "denied" && analytics) {
+      analytics.opt_out_capturing();
+      return;
+    }
+    if (!shouldInitializeBrowserAnalytics({ publicKey, consent })) return;
+    if (analytics) {
+      analytics.opt_in_capturing();
+      return;
+    }
 
     let cancelled = false;
-    // Dynamic import keeps posthog-js out of the bundle until analytics is on.
     void import("posthog-js").then(({ default: posthog }) => {
       if (cancelled) return;
-      posthog.init(key, {
+      posthog.init(publicKey as string, {
         api_host:
           process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "https://eu.i.posthog.com",
-        // Privacy-forward defaults; capture pageviews/leaves automatically.
-        capture_pageview: true,
-        capture_pageleave: true,
-        person_profiles: "identified_only",
+        autocapture: false,
+        capture_pageview: false,
+        capture_pageleave: false,
+        disable_session_recording: true,
+        person_profiles: "never",
       });
+      posthog.opt_in_capturing();
+      setAnalytics(posthog);
     });
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [analytics, consent, publicKey]);
 
-  return <>{children}</>;
+  useEffect(() => {
+    if (!analytics || consent !== "granted") return;
+    analytics.capture("page_viewed", {
+      path: pathname,
+      $current_url: sanitizedPageLocation(window.location.origin, pathname),
+    });
+  }, [analytics, consent, pathname]);
+
+  const choose = (value: Exclude<AnalyticsConsent, "unset">) => {
+    persistAnalyticsConsent(window.localStorage, value);
+    setConsent(value);
+    window.dispatchEvent(new CustomEvent(ANALYTICS_CONSENT_EVENT, { detail: value }));
+  };
+
+  return (
+    <>
+      {children}
+      {publicKey && consentLoaded && consent === "unset" ? (
+        <aside
+          aria-label="Analytics preference"
+          className="fixed inset-x-[12px] bottom-[12px] z-[70] mx-auto flex max-w-[720px] flex-col gap-[12px] rounded-[8px] border border-line-2 bg-surface-panel p-[14px] shadow-modal sm:flex-row sm:items-center sm:justify-between"
+        >
+          <p className="m-0 max-w-[470px] font-sans text-[12.5px] leading-[1.5] text-ink-600">
+            Marpin can collect limited, query-free product analytics. Autocapture and session replay stay off. Read the{" "}
+            <a href="/privacy" className="font-semibold text-ink-900 underline underline-offset-2">
+              privacy policy
+            </a>
+            .
+          </p>
+          <div className="flex flex-none gap-[7px]">
+            <button
+              type="button"
+              onClick={() => choose("denied")}
+              className="h-[34px] cursor-pointer rounded-[7px] border border-line-2 bg-transparent px-[11px] font-sans text-[12px] font-semibold text-ink-700"
+            >
+              Essential only
+            </button>
+            <button
+              type="button"
+              onClick={() => choose("granted")}
+              className="h-[34px] cursor-pointer rounded-[7px] border-none bg-ink-900 px-[11px] font-sans text-[12px] font-semibold text-white"
+            >
+              Allow analytics
+            </button>
+          </div>
+        </aside>
+      ) : null}
+    </>
+  );
 }

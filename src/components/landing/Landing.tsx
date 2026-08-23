@@ -6,11 +6,13 @@ import {
   SiTiktok,
   SiGoogleanalytics,
   SiGooglesearchconsole,
+  SiFacebook,
+  SiInstagram,
+  SiYoutube,
+  SiSnapchat,
   SiPinterest,
   SiReddit,
-  SiX,
 } from "react-icons/si";
-import { FaLinkedin } from "react-icons/fa6";
 import { HeroUrlInput } from "./HeroUrlInput";
 
 /**
@@ -24,32 +26,34 @@ const CONNECTORS: { name: string; Icon: IconType; color: string }[] = [
   { name: "Google Ads", Icon: SiGoogleads, color: "#4285F4" },
   { name: "Meta", Icon: SiMeta, color: "#0467DF" },
   { name: "TikTok", Icon: SiTiktok, color: "#111111" },
-  { name: "LinkedIn", Icon: FaLinkedin, color: "#0A66C2" },
+  { name: "YouTube", Icon: SiYoutube, color: "#FF0033" },
+  { name: "Instagram", Icon: SiInstagram, color: "#C13584" },
+  { name: "Facebook", Icon: SiFacebook, color: "#0866FF" },
+  { name: "Snapchat", Icon: SiSnapchat, color: "#E2BD00" },
   { name: "Google Analytics 4", Icon: SiGoogleanalytics, color: "#E37400" },
   { name: "Google Search Console", Icon: SiGooglesearchconsole, color: "#4285F4" },
   { name: "Pinterest", Icon: SiPinterest, color: "#BD081C" },
   { name: "Reddit", Icon: SiReddit, color: "#FF4500" },
-  { name: "X", Icon: SiX, color: "#111111" },
 ];
 
 // The three lead cards carry the operator story as a funnel: free hook →
-// builds & ships → diagnoses & fixes. Each previews its real template (a graph /
+// prepares work → diagnoses performance. Each previews its real template (a graph /
 // mini card) — the visual output is the differentiator: any chat can send text.
 const LEAD_CARDS = [
   {
     kind: "scan" as const,
-    title: "Market & competitor scan",
-    body: "Your market size, your share, and exactly how you stack up against every competitor — researched live from your URL, not guessed. This one's free.",
+    title: "Website & positioning audit",
+    body: "Marpin inspects your public website, records the evidence it found, and turns the gaps into a prioritized distribution brief. This one's free.",
   },
   {
     kind: "campaign" as const,
-    title: "Campaigns, built — not suggested",
-    body: "Marpin writes the actual ad copy and briefs, tagged by platform, and ships them to Google, Meta, or TikTok in one click. You approve; it executes.",
+    title: "Campaigns, prepared — not hand-waved",
+    body: "Marpin turns strategy into reviewable Google, Meta, and TikTok campaign drafts, then keeps performance in one operating view.",
   },
   {
     kind: "diagnosis" as const,
     title: "Performance diagnosis",
-    body: "“Why is my CPA up?” gets a ranked root-cause answer from a top-1% operator — connect your accounts and Marpin pinpoints the leak, then drafts the fix.",
+    body: "Connect an approved data source and Marpin separates observed changes from unavailable inputs, highlights likely drivers, and drafts the next action.",
   },
 ];
 
@@ -81,7 +85,7 @@ function JsonLd() {
         applicationCategory: "BusinessApplication",
         operatingSystem: "Web",
         description:
-          "AI marketing operator — drop your website for a free market scan and competitor analysis, then connect your accounts and Marpin builds the campaigns, writes the copy, and ships the fixes across Google Ads, Meta, TikTok, LinkedIn, GA4 and more.",
+          "AI marketing operating system — audit a website, plan organic content, prepare paid campaigns, and review performance across the channels Marpin supports.",
         url: "https://www.marpin.ai",
         offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
       },
@@ -90,7 +94,6 @@ function JsonLd() {
   return (
     <script
       type="application/ld+json"
-      // eslint-disable-next-line react/no-danger
       dangerouslySetInnerHTML={{ __html: JSON.stringify(data) }}
     />
   );
@@ -150,7 +153,7 @@ function LeadTeaser({ kind }: { kind: "scan" | "campaign" | "diagnosis" }) {
             className="rounded-chip font-sans text-[9px] font-semibold text-white"
             style={{ background: "#2B2722", padding: "3px 10px" }}
           >
-            Post ▸
+            Review draft
           </span>
         </div>
         <div className="mt-[9px] font-sans text-[10.5px] italic leading-[1.45] text-ink-450">
@@ -219,18 +222,19 @@ export function Landing() {
         </nav>
       </header>
 
+      <main>
       {/* Hero */}
       <section className="mx-auto max-w-[1080px] px-[24px] pb-[40px] pt-[44px] text-center">
         <div className="mx-auto mb-[16px] inline-block rounded-pill border border-plum-border font-mono text-[11px] font-semibold uppercase tracking-[0.1em] text-plum" style={{ padding: "5px 12px" }}>
           The AI marketing operator
         </div>
         <h1 className="mx-auto max-w-[760px] font-serif text-[clamp(34px,6vw,58px)] font-medium leading-[1.08] tracking-[-0.01em] text-ink-900">
-          Tell Marpin what to grow. It does the work.
+          Marpin, your distribution operating system.
         </h1>
         <p className="mx-auto mt-[18px] max-w-[620px] font-sans text-[clamp(15px,2.2vw,18px)] leading-[1.6] text-ink-500">
-          Free market scan from just your URL — competitors, openings, and your next moves. Connect your
-          accounts and Marpin builds the campaigns, writes the copy, and ships the fixes. Nothing goes live
-          without your approval.
+          Free website audit from just your URL: technical gaps, content signals, and the first fixes to make.
+          Connect your accounts and Marpin prepares campaigns, drafts content, and keeps the work organized.
+          Nothing goes live without your approval.
         </p>
         <div className="mt-[26px]">
           <HeroUrlInput />
@@ -241,7 +245,7 @@ export function Landing() {
       {/* Connectors strip */}
       <section className="mx-auto max-w-[1080px] px-[24px] pb-[44px]">
         <p className="mb-[14px] text-center font-mono text-[10.5px] font-semibold uppercase tracking-[0.12em] text-ink-300">
-          Plugs into your marketing stack
+          Built around your launch stack
         </p>
         <div className="flex flex-wrap items-center justify-center gap-x-[30px] gap-y-[16px]">
           {CONNECTORS.map(({ name, Icon, color }) => (
@@ -261,11 +265,11 @@ export function Landing() {
         <div className="mx-auto max-w-[1080px] px-[24px]">
           <div className="text-center">
             <h2 className="font-serif text-[clamp(26px,4vw,38px)] font-medium tracking-[-0.01em] text-ink-900">
-              A whole marketing team, in one chat
+              One operating system for distribution
             </h2>
             <p className="mx-auto mt-[12px] max-w-[600px] font-sans text-[16px] leading-[1.6] text-ink-500">
-              Research, paid, SEO, and creative — Marpin does the work and shows it as designed cards, not
-              walls of text.
+              Research, organic planning, paid reporting, SEO, and creative share one brand context and one
+              set of editable records.
             </p>
           </div>
           <div className="mt-[36px] grid gap-[18px] md:grid-cols-3">
@@ -295,9 +299,9 @@ export function Landing() {
             Not a chatbot. An operator.
           </h2>
           <p className="mx-auto mt-[16px] max-w-[620px] font-sans text-[17px] leading-[1.65] text-ink-500">
-            Most AI tools give you advice. Marpin gives you the work — the campaign built, the post written,
-            the fix ready to ship. Think of it as the Cursor of marketing: you steer, it executes, and
-            nothing goes live without your approval.
+            Most AI tools stop at advice. Marpin gives you reviewable campaign drafts, editable posts, and
+            prioritized fixes in the same workspace. You steer every change, and nothing goes live without
+            an explicit approval and a confirmed provider response.
           </p>
         </div>
       </section>
@@ -306,16 +310,17 @@ export function Landing() {
       <section className="py-[64px]">
         <div className="mx-auto max-w-[680px] px-[24px] text-center">
           <h2 className="font-serif text-[clamp(28px,4.5vw,42px)] font-medium tracking-[-0.01em] text-ink-900">
-            See what Marpin finds in your market
+            See what Marpin finds on your website
           </h2>
           <p className="mx-auto mt-[12px] max-w-[520px] font-sans text-[16px] leading-[1.6] text-ink-500">
-            Drop your website and get your first market scan and growth plan free.
+            Drop your website and get your first evidence-backed audit and distribution brief free.
           </p>
           <div className="mt-[24px]">
             <HeroUrlInput />
           </div>
         </div>
       </section>
+      </main>
 
       {/* Footer */}
       <footer className="border-t border-line-2">

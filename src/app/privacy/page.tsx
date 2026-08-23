@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { LegalShell, H2, P, Bullets } from "@/components/legal/LegalShell";
+import { AnalyticsPreferenceControl } from "@/components/analytics/AnalyticsPreferenceControl";
 
 export const metadata: Metadata = {
   title: "Privacy Policy",
@@ -34,7 +35,7 @@ export default function PrivacyPage() {
           </>,
           <>
             <strong>Connected-account data</strong> — if you connect a marketing or analytics platform (e.g.
-            Google Ads, Google Analytics, Search Console, Meta, LinkedIn, TikTok), we receive and store
+            Google Ads, Google Analytics, Search Console, Meta, or TikTok), we receive and store
             OAuth access/refresh tokens for that account, the account identifier, and the marketing metrics we
             sync on your behalf (such as spend, conversions, ROAS, CPA, and campaign names).
           </>,
@@ -43,8 +44,10 @@ export default function PrivacyPage() {
             enter, and any assets you upload.
           </>,
           <>
-            <strong>Usage and technical data</strong> — basic product-analytics and error/diagnostic data
-            (e.g. pages viewed, feature usage, crash logs) used to operate and improve the service.
+            <strong>Usage and technical data</strong> — basic product analytics and error/diagnostic data used
+            to operate and improve the service (for example, feature usage and crash logs). Optional browser
+            analytics remain disabled until you choose Allow analytics; autocapture and session replay are
+            disabled, and recorded page locations exclude query strings.
           </>,
           <>
             <strong>Billing data</strong> — if you subscribe, our payment processor handles your card details;
@@ -52,6 +55,7 @@ export default function PrivacyPage() {
           </>,
         ]}
       />
+      <AnalyticsPreferenceControl />
 
       <H2>2. How we use your data</H2>
       <P>We process your data to:</P>
@@ -94,7 +98,7 @@ export default function PrivacyPage() {
         by humans except with your consent, for security, or as required by law.
       </P>
       <P>
-        Data obtained from Meta, LinkedIn, TikTok, and other platforms is likewise used only to provide the
+        Data obtained from Meta and TikTok is likewise used only to provide the
         service and handled in accordance with each platform&apos;s developer terms.
       </P>
 

@@ -10,8 +10,8 @@ import { PostHog } from "posthog-node";
  *   • The client is lazily created on first capture(), and ONLY when
  *     NEXT_PUBLIC_POSTHOG_KEY is present. With no key, capture() is a silent
  *     no-op that never throws and never opens a connection — so `next build`
- *     and `tsc --noEmit` stay green with no env, and the live agent / mockup
- *     are completely unaffected.
+ *     and `tsc --noEmit` stay green with no env, and product behavior is
+ *     unaffected.
  *
  * EU data residency: the host defaults to the PostHog EU ingestion endpoint
  * (https://eu.i.posthog.com). Override with NEXT_PUBLIC_POSTHOG_HOST only to
@@ -79,10 +79,9 @@ export function capture(
       event,
       properties,
     });
-  } catch (err) {
+  } catch {
     // Never let analytics surface to the caller.
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[analytics] capture("${event}") failed: ${msg}`);
+    console.warn(`[analytics] capture("${event}") failed`);
   }
 }
 
@@ -95,8 +94,7 @@ export async function flushAnalytics(): Promise<void> {
   if (!ph) return;
   try {
     await ph.flush();
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[analytics] flush failed: ${msg}`);
+  } catch {
+    console.warn("[analytics] flush failed");
   }
 }

@@ -19,9 +19,10 @@ function KpiCard({ kpi }: { kpi: KpiCardData }) {
   const { points, line } = sparkGeometry(kpi.spark);
   const [active, setActive] = useState<number | null>(null);
   const bandW = 80 / (points.length - 1);
+  const valueSize = kpi.value.length > 10 ? 17 : kpi.value.length > 7 ? 20 : 25;
 
   return (
-    <div className="flex flex-col gap-[9px] rounded-[13px] border border-line-3 bg-surface-card p-[13px_14px]">
+    <div className="flex min-h-[128px] min-w-0 flex-col gap-[9px] rounded-[8px] border border-line-3 bg-surface-card p-[13px_14px]">
       <div className="flex items-center justify-between gap-2">
         <span className="font-sans text-[12.5px] font-medium text-ink-400">{kpi.label}</span>
         <span
@@ -31,14 +32,18 @@ function KpiCard({ kpi }: { kpi: KpiCardData }) {
           {kpi.delta}
         </span>
       </div>
-      <div className="font-mono text-[25px] font-semibold leading-none tracking-[-0.02em] text-ink-900">
+      <div
+        className="min-h-[25px] min-w-0 whitespace-nowrap font-mono font-semibold leading-none tracking-[0] text-ink-900"
+        style={{ fontSize: valueSize }}
+        data-testid="kpi-value"
+      >
         {kpi.value}
       </div>
       <div className="relative" style={{ height: 24 }} onMouseLeave={() => setActive(null)}>
         <svg
           viewBox="0 0 80 28"
           preserveAspectRatio="none"
-          style={{ width: "100%", height: 24, overflow: "visible" }}
+          style={{ width: "100%", height: 24, overflow: "hidden" }}
         >
           <polyline
             points={line}
@@ -97,7 +102,7 @@ export function KpiRow({ kpis }: { kpis: KpiCardData[] }) {
   return (
     <ArtifactShell
       className="grid gap-[10px]"
-      style={{ gridTemplateColumns: "repeat(auto-fit,minmax(148px,1fr))" }}
+      style={{ gridTemplateColumns: "repeat(auto-fit,minmax(min(160px,100%),1fr))" }}
     >
       {kpis.map((k) => (
         <KpiCard key={k.label} kpi={k} />

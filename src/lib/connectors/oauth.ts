@@ -19,10 +19,12 @@ import type { ConnectorConfig } from "./registry";
  * when the provider supports it (config.usesPkce) — the `code_verifier` is also
  * carried in the cookie and replayed at the token exchange.
  *
- * The OAuth transaction (state + verifier + platform) is stored in ONE signed,
- * HttpOnly, SameSite=Lax cookie. The signature (HMAC-SHA256 with a key derived
- * from TOKEN_ENC_KEY) makes the cookie tamper-evident so an attacker cannot
- * forge a matching state. We never log the verifier, state, or any token.
+ * The OAuth transaction (state + verifier + platform + initiating actor) is
+ * stored in ONE signed, HttpOnly, SameSite=Lax cookie. The signature
+ * (HMAC-SHA256 with a key derived from TOKEN_ENC_KEY) makes the cookie
+ * tamper-evident so an attacker cannot forge a matching state or move the flow
+ * to another signed-in user/workspace. We never log the verifier, state, actor,
+ * or any token.
  */
 
 // ── PKCE (RFC 7636) ─────────────────────────────────────────────────────────
@@ -318,6 +320,8 @@ export async function refreshAccessToken(input: {
 export interface OAuthTransaction {
   platform: string;
   state: string;
+  workspaceId: string;
+  clerkUserId: string;
   /** PKCE verifier; absent for providers without PKCE (Meta). */
   codeVerifier?: string;
 }
@@ -332,6 +336,8 @@ export const OAUTH_TX_MAX_AGE = 600; // 10 minutes
 
 export interface OAuthPendingSelection {
   platform: string;
+  workspaceId: string;
+  clerkUserId: string;
   encAccessToken: string;
   encRefreshToken?: string;
   expiresAt?: string;
@@ -393,7 +399,17 @@ function signJson(value: unknown): string | null {
 export function verifyTransaction(cookieValue: string | undefined): OAuthTransaction | null {
   const parsed = verifyJson(cookieValue) as OAuthTransaction | null;
   if (!parsed) return null;
-  if (typeof parsed.platform !== "string" || typeof parsed.state !== "string") return null;
+  if (
+    typeof parsed.platform !== "string" ||
+    typeof parsed.state !== "string" ||
+    typeof parsed.workspaceId !== "string" ||
+    parsed.workspaceId.length === 0 ||
+    typeof parsed.clerkUserId !== "string" ||
+    parsed.clerkUserId.length === 0 ||
+    (parsed.codeVerifier !== undefined && typeof parsed.codeVerifier !== "string")
+  ) {
+    return null;
+  }
   return parsed;
 }
 
@@ -402,6 +418,10 @@ export function verifyPendingSelection(cookieValue: string | undefined): OAuthPe
   if (!parsed) return null;
   if (
     typeof parsed.platform !== "string" ||
+    typeof parsed.workspaceId !== "string" ||
+    parsed.workspaceId.length === 0 ||
+    typeof parsed.clerkUserId !== "string" ||
+    parsed.clerkUserId.length === 0 ||
     typeof parsed.encAccessToken !== "string" ||
     typeof parsed.exp !== "number" ||
     parsed.exp < Math.floor(Date.now() / 1000)
@@ -409,6 +429,40 @@ export function verifyPendingSelection(cookieValue: string | undefined): OAuthPe
     return null;
   }
   return parsed;
+}
+
+export interface OAuthActorBinding {
+  workspaceId: string;
+  clerkUserId: string;
+}
+
+/**
+ * Require the current authenticated actor to be the exact actor that initiated
+ * the signed transaction. Both identifiers are server-resolved; neither comes
+ * from provider input or browser form data.
+ */
+function oauthActorMatches(
+  bound: OAuthActorBinding,
+  current: OAuthActorBinding,
+): boolean {
+  return (
+    statesMatch(bound.workspaceId, current.workspaceId) &&
+    statesMatch(bound.clerkUserId, current.clerkUserId)
+  );
+}
+
+export type OAuthActorBindingResult =
+  | { ok: true }
+  | { ok: false; status: "oauth_actor_mismatch" };
+
+/** Stable continuation gate consumed by callbacks and account selection. */
+export function verifyOAuthActorBinding(
+  bound: OAuthActorBinding,
+  current: OAuthActorBinding,
+): OAuthActorBindingResult {
+  return oauthActorMatches(bound, current)
+    ? { ok: true }
+    : { ok: false, status: "oauth_actor_mismatch" };
 }
 
 function verifyJson(cookieValue: string | undefined): unknown | null {

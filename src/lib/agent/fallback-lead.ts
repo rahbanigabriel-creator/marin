@@ -1,5 +1,7 @@
 import "server-only";
 import { retrieveDoctrine, type RetrievedDoc } from "@/lib/rag/retrieve";
+import type { BrandPromptContext } from "@/lib/brand/types";
+import { buildOfflineBrandLead } from "./fallback-brand-lead";
 
 /**
  * Keyless / offline honest lead (Phase-1 constraint #2: NO fake data).
@@ -52,7 +54,11 @@ function leadSentenceFrom(doc: RetrievedDoc): string | null {
  * Build an honest, doctrine-grounded lead for the keyless/offline default path.
  * Never contains fabricated account numbers. Returns 2–3 plain sentences.
  */
-export function buildOfflineDoctrineLead(question: string, persona?: string): string {
+export function buildOfflineDoctrineLead(
+  question: string,
+  persona?: string,
+  brand?: BrandPromptContext | null,
+): string {
   void persona;
   let docs: RetrievedDoc[] = [];
   try {
@@ -66,6 +72,9 @@ export function buildOfflineDoctrineLead(question: string, persona?: string): st
   // then ask for the specifics needed to turn it into a tailored plan (the same
   // clarify-first behaviour the live agent follows). Never fabricates numbers.
   const orient = docs.length ? leadSentenceFrom(docs[0]) : null;
+  if (brand) {
+    return buildOfflineBrandLead(question, brand, orient);
+  }
   if (orient) {
     return (
       `${orient} ` +

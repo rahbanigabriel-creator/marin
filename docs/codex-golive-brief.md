@@ -1,4 +1,12 @@
-# Codex brief — take Marpin from "built but dormant" to a live product
+# Archived Codex implementation brief
+
+> **Historical only. Do not use this file as a launch checklist or environment
+> source of truth.** It predates the paid launch scope, current billing model,
+> provider truth rules, consent-gated analytics, and production hardening. Use
+> `docs/production-launch-runbook.md`, `docs/production-readiness-checklist.md`,
+> `.env.example`, and `docs/sprint-0-product-contract.md` instead.
+
+## Historical brief: take Marpin from "built but dormant" to a live product
 
 You are an autonomous engineer with browser control. Your job: make **Marpin** (an AI marketing copilot at `www.marpin.ai`) a real, live product where **nothing is dormant** — the AI agent answers on real data, the marketing-platform connectors pull real numbers, billing works, analytics fire, and it's deployed on Vercel at the real domain. Read this whole file before acting. Work in small steps and **verify after each one**.
 
@@ -22,7 +30,7 @@ Stacks committed on `backend`:
 - **Connector OAuth framework** (`src/lib/connectors/{registry,oauth,clients,types}.ts`, routes `src/app/api/connect/[platform]/{route,callback}.ts`): platforms `google_ads`, `ga4`, `meta_ads`. PKCE+state, tokens stored encrypted. **The `fetchMetrics()` clients are STUBS — they return `[]`** (see `clients.ts`).
 - **Metrics** (`src/lib/metrics/{source,ingest}.ts`): DB-backed `MetricsSource` wired into the chat route; emits `data-mode: "sample" | "live"`; UI shows a "Sample data" badge until real `MetricFact` rows exist.
 - **Stack C**: Sentry + PostHog (`instrumentation*.ts`, `sentry.*.config.ts`, `src/lib/analytics.ts`, `src/components/analytics/PostHogProvider.tsx`); Langfuse cost tracing (`src/lib/observability/llm-trace.ts`, wired in `loop.ts`); Inngest background sync (`src/lib/jobs/inngest.ts`, `src/app/api/inngest/route.ts`, 6h cron); Stripe billing (`src/lib/billing/*`, `src/app/api/billing/{checkout,portal,webhook}.ts`) + `UsageEvent` metering; Resend email (`src/lib/email/resend.ts`); Upstash rate-limit/cache (`src/lib/cache/redis.ts`).
-- **GA4 site analytics** for marpin.ai itself: gated tag in `src/app/layout.tsx` via `@next/third-parties`, env `NEXT_PUBLIC_GA_MEASUREMENT_ID`.
+- **Consent-gated product analytics** for marpin.ai itself: PostHog loads only after an explicit browser preference; session replay and person profiles are disabled in code.
 - `.npmrc` has `legacy-peer-deps=true` (Clerk vs React 19). Keep it.
 
 ## DEFINITION OF DONE (verify each — this is "nothing dormant")
@@ -32,7 +40,7 @@ Stacks committed on `backend`:
 4. Connectors implemented for real (not stubs): **Google Ads, GA4, Meta Ads, and a NEW Apple Search Ads connector** — each `fetchMetrics` returns real `CanonicalMetric[]`.
 5. Inngest cron + on-connect sync actually run in prod and ingest data.
 6. *(DEFERRED — billing is out of scope this pass; do not set up Stripe. `UsageEvent` metering may stay as-is.)*
-7. GA4 fires on marpin.ai; Sentry, PostHog, Langfuse all receiving events in prod.
+7. Consent-gated PostHog, Sentry, and privacy-minimized Langfuse telemetry are verified in production.
 8. Clerk sign-in/sign-up work in prod; a real user gets their own workspace (no shared dev workspace).
 9. `tsc` + `build` green; no secrets in git.
 

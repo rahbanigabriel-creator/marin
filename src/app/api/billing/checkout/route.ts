@@ -1,99 +1,191 @@
+import { randomUUID } from "node:crypto";
+
 import { NextResponse, type NextRequest } from "next/server";
 
-import { requireWorkspace } from "@/lib/auth";
+import {
+  NotAuthenticatedError,
+  WorkspaceAuthorizationError,
+  requireWorkspaceRole,
+} from "@/lib/auth";
+import { workspaceSeatLimitResponse } from "@/lib/auth-http";
+import {
+  checkoutConflictPayload,
+  isBlockingLocalSubscriptionStatus,
+  isNonterminalStripeSubscriptionStatus,
+  isOpenSubscriptionCheckout,
+  subscriptionConflictPayload,
+  withWorkspaceCheckoutLock,
+  type CheckoutConflictPayload,
+  type SubscriptionConflictPayload,
+} from "@/lib/billing/checkout";
+import {
+  getStripePriceId,
+  isBillingInterval,
+  type BillingInterval,
+} from "@/lib/billing/plans";
 import { getStripe, isBillingConfigured } from "@/lib/billing/stripe";
-import { getPlan, getStripePriceId, isPlanId } from "@/lib/billing/plans";
+import { isDatabaseConfigured } from "@/lib/db";
+import {
+  readBoundedJson,
+  requestBodyErrorResponse,
+} from "@/lib/security/request-body";
 
-/**
- * POST /api/billing/checkout — create a Stripe Checkout Session for a plan.
- *
- * Body: { plan: "solo" | "business" | "max" }.
- *
- * Graceful without keys (mirrors app/api/connect/[platform]/route.ts):
- *   • No STRIPE_SECRET_KEY → 503 { error: "not_configured" }, NO throw, NO build
- *     dependency on env.
- *   • Unknown / non-purchasable plan (e.g. "free") or no configured Stripe price
- *     id for the plan → 400 / 503 with a clear reason.
- * Nothing here touches the network or env at import time.
- *
- * Security: we never log the secret key. The session is bound to the caller's
- * workspace (stored in metadata + client_reference_id) so the webhook can map
- * the resulting subscription back to the tenant.
- */
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 interface CheckoutBody {
   plan?: string;
+  interval?: string;
+}
+
+type CheckoutOutcome =
+  | { kind: "created"; sessionId: string; url: string }
+  | { kind: "subscription_conflict"; payload: SubscriptionConflictPayload }
+  | { kind: "checkout_conflict"; payload: CheckoutConflictPayload };
+
+function baseUrl(req: NextRequest): string {
+  return process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin;
+}
+
+function accessFailure(error: unknown): NextResponse | null {
+  const seatLimit = workspaceSeatLimitResponse(error);
+  if (seatLimit) return seatLimit;
+  if (error instanceof NotAuthenticatedError) {
+    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+  }
+  if (error instanceof WorkspaceAuthorizationError) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+  return null;
 }
 
 export async function POST(req: NextRequest): Promise<Response> {
-  // Feature-detect: billing not configured → graceful 503, never a throw.
-  if (!isBillingConfigured()) {
+  let access;
+  try {
+    access = await requireWorkspaceRole(["owner", "admin"]);
+  } catch (error) {
+    const response = accessFailure(error);
+    if (response) return response;
+    throw error;
+  }
+  if (!isBillingConfigured() || !isDatabaseConfigured() || access.workspace.isDev) {
     return NextResponse.json({ error: "not_configured" }, { status: 503 });
   }
 
   let body: CheckoutBody;
   try {
-    body = (await req.json()) as CheckoutBody;
-  } catch {
+    body = await readBoundedJson<CheckoutBody>(req, 4 * 1024);
+  } catch (error) {
+    const bodyFailure = requestBodyErrorResponse(error);
+    if (bodyFailure) return bodyFailure;
     return NextResponse.json({ error: "invalid_body" }, { status: 400 });
   }
-
-  const planId = body.plan;
-  if (!planId || !isPlanId(planId) || planId === "free") {
-    return NextResponse.json(
-      { error: "invalid_plan", detail: "plan must be one of: solo, business, max" },
-      { status: 400 },
-    );
+  if (body.plan !== "solo") {
+    return NextResponse.json({ error: "invalid_plan", detail: "Only Solo Founder is self-serve." }, { status: 400 });
   }
-
-  const plan = getPlan(planId);
-  const priceId = getStripePriceId(planId);
-  if (!plan || !priceId) {
-    // Plan is valid but no Stripe Price id is configured for it yet.
-    return NextResponse.json(
-      { error: "price_not_configured", plan: planId },
-      { status: 503 },
-    );
+  const interval: BillingInterval = body.interval && isBillingInterval(body.interval)
+    ? body.interval
+    : "annual";
+  const priceId = getStripePriceId("solo", interval);
+  if (!priceId) {
+    return NextResponse.json({ error: "price_not_configured", interval }, { status: 503 });
   }
-
-  // Bind the session to the current tenant so the webhook can resolve it back.
-  const workspace = await requireWorkspace();
-  const baseUrl = resolveBaseUrl(req);
 
   try {
     const stripe = getStripe();
-    const session = await stripe.checkout.sessions.create({
-      mode: "subscription",
-      line_items: [{ price: priceId, quantity: 1 }],
-      // Tie the Checkout Session (and the Subscription it creates) to our tenant.
-      client_reference_id: workspace.id,
-      subscription_data: {
-        metadata: { workspaceId: workspace.id, plan: planId },
-      },
-      metadata: { workspaceId: workspace.id, plan: planId },
-      allow_promotion_codes: true,
-      success_url: `${baseUrl}/settings/billing?checkout=success`,
-      cancel_url: `${baseUrl}/settings/billing?checkout=cancelled`,
-    });
+    const outcome = await withWorkspaceCheckoutLock<CheckoutOutcome>(
+      access.workspace.id,
+      async (tx) => {
+        const existing = await tx.subscription.findUnique({
+          where: { workspaceId: access.workspace.id },
+        });
+        if (isBlockingLocalSubscriptionStatus(existing?.status)) {
+          return {
+            kind: "subscription_conflict",
+            payload: subscriptionConflictPayload(existing!.status),
+          };
+        }
 
-    return NextResponse.json({ url: session.url, sessionId: session.id });
-  } catch (err) {
-    // Do not leak the secret key or Stripe internals; log a safe message.
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[billing] checkout session creation failed: ${msg}`);
+        let customerId = existing?.stripeCustomerId ?? null;
+        if (!customerId) {
+          const customer = await stripe.customers.create(
+            {
+              description: `Marpin workspace ${access.workspace.name}`,
+              metadata: { workspaceId: access.workspace.id },
+            },
+            { idempotencyKey: `marpin:customer:${access.workspace.id}` },
+          );
+          customerId = customer.id;
+          await tx.subscription.upsert({
+            where: { workspaceId: access.workspace.id },
+            update: { stripeCustomerId: customerId },
+            create: {
+              workspaceId: access.workspace.id,
+              stripeCustomerId: customerId,
+              plan: "free",
+              status: "inactive",
+            },
+          });
+        }
+
+        for await (const subscription of stripe.subscriptions.list({
+          customer: customerId,
+          status: "all",
+          limit: 100,
+        })) {
+          if (isNonterminalStripeSubscriptionStatus(subscription.status)) {
+            return {
+              kind: "subscription_conflict",
+              payload: subscriptionConflictPayload(subscription.status),
+            };
+          }
+        }
+
+        for await (const session of stripe.checkout.sessions.list({
+          customer: customerId,
+          status: "open",
+          limit: 100,
+        })) {
+          if (isOpenSubscriptionCheckout(session)) {
+            return {
+              kind: "checkout_conflict",
+              payload: checkoutConflictPayload(session),
+            };
+          }
+        }
+
+        const session = await stripe.checkout.sessions.create(
+          {
+            mode: "subscription",
+            customer: customerId,
+            customer_update: { address: "auto", name: "auto" },
+            line_items: [{ price: priceId, quantity: 1 }],
+            client_reference_id: access.workspace.id,
+            subscription_data: {
+              metadata: { workspaceId: access.workspace.id, plan: "solo", interval },
+            },
+            metadata: { workspaceId: access.workspace.id, plan: "solo", interval },
+            allow_promotion_codes: true,
+            success_url: `${baseUrl(req)}/settings/billing?checkout=success`,
+            cancel_url: `${baseUrl(req)}/settings/billing?checkout=cancelled`,
+          },
+          {
+            idempotencyKey: `marpin:checkout:${access.workspace.id}:${randomUUID()}`,
+          },
+        );
+        if (!session.url) throw new Error("Checkout URL missing");
+        return { kind: "created", sessionId: session.id, url: session.url };
+      },
+    );
+
+    if (outcome.kind === "subscription_conflict" || outcome.kind === "checkout_conflict") {
+      return NextResponse.json(outcome.payload, { status: 409 });
+    }
+    return NextResponse.json({ url: outcome.url, sessionId: outcome.sessionId });
+  } catch (error) {
+    console.error("[billing] checkout session creation failed", {
+      name: error instanceof Error ? error.name : "UnknownError",
+    });
     return NextResponse.json({ error: "checkout_failed" }, { status: 502 });
   }
-}
-
-/**
- * Public base URL for success/cancel redirects. Honors a configured public base
- * (APP_URL / NEXT_PUBLIC_APP_URL) for prod; otherwise derives the origin from the
- * incoming request so dev works without extra env.
- */
-function resolveBaseUrl(req: NextRequest): string {
-  return (
-    process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin
-  );
 }

@@ -64,6 +64,30 @@ async function accessTokenFor(connection: Connection, platform: ConnectorPlatfor
   return requireAccessToken(connection, platform);
 }
 
+const paidTokenFlights = new Map<string, Promise<string>>();
+
+/** Coalesce concurrent paid phase token reads so one expired token refreshes once. */
+export function coalesceConnectionToken(
+  key: string,
+  load: () => Promise<string>,
+): Promise<string> {
+  const existing = paidTokenFlights.get(key);
+  if (existing) return existing;
+  const pending = load().finally(() => {
+    if (paidTokenFlights.get(key) === pending) paidTokenFlights.delete(key);
+  });
+  paidTokenFlights.set(key, pending);
+  return pending;
+}
+
+/** Server-only access-token seam used by the account-aware paid read clients. */
+export async function getConnectionAccessToken(
+  connection: Connection,
+  platform: ConnectorPlatform,
+): Promise<string> {
+  return coalesceConnectionToken(`${platform}:${connection.id}`, () => accessTokenFor(connection, platform));
+}
+
 async function refreshStoredToken(connection: Connection, platform: ConnectorPlatform): Promise<string | null> {
   if (!connection.encRefreshToken) return null;
   const refreshToken = decryptToken(
@@ -1142,7 +1166,9 @@ export class SearchConsoleClient implements ConnectorClient {
 export class AmazonAdsClient implements ConnectorClient {
   readonly platform = "amazon_ads" as const;
 
-  async fetchMetrics(_connection: Connection, _range: MetricRange): Promise<CanonicalMetric[]> {
+  async fetchMetrics(connection: Connection, range: MetricRange): Promise<CanonicalMetric[]> {
+    void connection;
+    void range;
     throw new ConnectorNotReadyError(
       this.platform,
       "Amazon Ads reporting is async (request → poll → download); finalized against a live account",
@@ -1154,7 +1180,9 @@ export class AmazonAdsClient implements ConnectorClient {
 export class MicrosoftAdsClient implements ConnectorClient {
   readonly platform = "microsoft_ads" as const;
 
-  async fetchMetrics(_connection: Connection, _range: MetricRange): Promise<CanonicalMetric[]> {
+  async fetchMetrics(connection: Connection, range: MetricRange): Promise<CanonicalMetric[]> {
+    void connection;
+    void range;
     throw new ConnectorNotReadyError(
       this.platform,
       "Microsoft Advertising reporting (SOAP) is finalized against a live account",
@@ -1166,7 +1194,9 @@ export class MicrosoftAdsClient implements ConnectorClient {
 export class RedditAdsClient implements ConnectorClient {
   readonly platform = "reddit_ads" as const;
 
-  async fetchMetrics(_connection: Connection, _range: MetricRange): Promise<CanonicalMetric[]> {
+  async fetchMetrics(connection: Connection, range: MetricRange): Promise<CanonicalMetric[]> {
+    void connection;
+    void range;
     throw new ConnectorNotReadyError(this.platform, "Reddit Ads reporting is finalized against a live account");
   }
 }
@@ -1175,7 +1205,9 @@ export class RedditAdsClient implements ConnectorClient {
 export class XAdsClient implements ConnectorClient {
   readonly platform = "x_ads" as const;
 
-  async fetchMetrics(_connection: Connection, _range: MetricRange): Promise<CanonicalMetric[]> {
+  async fetchMetrics(connection: Connection, range: MetricRange): Promise<CanonicalMetric[]> {
+    void connection;
+    void range;
     throw new ConnectorNotReadyError(
       this.platform,
       "X Ads reporting uses OAuth 1.0a + elevated access; finalized against a live account",

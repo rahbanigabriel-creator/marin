@@ -41,7 +41,7 @@ export default function OpengraphImage() {
           </div>
         </div>
         <div style={{ fontSize: 25, color: "#6b6359" }}>
-          Market scans · competitor analysis · one-click campaigns
+          Website audits · organic planning · paid campaign drafts
         </div>
       </div>
     ),

@@ -33,7 +33,7 @@ export default function TermsPage() {
 
       <H2>3. Connecting your accounts</H2>
       <P>
-        When you connect a third-party platform (such as Google Ads, Google Analytics, Meta, LinkedIn, or
+        When you connect a third-party platform (such as Google Ads, Google Analytics, Meta, or
         TikTok), you represent that you are authorised to connect that account and to grant Marpin access to
         its data. You can disconnect at any time. Your use of each platform remains subject to that
         platform&apos;s own terms.

@@ -13,6 +13,10 @@
  * Loaded by instrumentation.ts (the Next.js server instrumentation hook).
  */
 import * as Sentry from "@sentry/nextjs";
+import {
+  scrubSentryBreadcrumb,
+  scrubSentryEvent,
+} from "./src/lib/observability/sentry-scrub";
 
 const dsn = process.env.SENTRY_DSN;
 
@@ -24,6 +28,8 @@ if (dsn) {
     tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE ?? 0.1),
     // Never send PII (IP addresses, headers, cookies) by default.
     sendDefaultPii: false,
+    beforeSend: (event) => scrubSentryEvent(event),
+    beforeBreadcrumb: (breadcrumb) => scrubSentryBreadcrumb(breadcrumb),
     enabled: true,
   });
 }

@@ -242,7 +242,7 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: "add_action_plan",
     description:
-      "Render an EXECUTABLE action plan in the workspace — this is how Marpin ACTS, not just talks. Use it whenever the user wants to DO something (launch, post, create, fix, grow): a short situation summary, then a PRIORITIZED list of concrete steps the user can run with one click. For each step give: a clear title; the FULL pre-written content ready to ship (the actual post copy, the ad brief, the page description, the SEO fix); the platform key (x_ads, meta_ads, linkedin_ads, tiktok_ads, pinterest_ads, reddit_ads, snapchat_ads, google_ads — or OMIT for SEO/website/email/manual work); and a kind (tweet | post | ad_draft | page | pin | seo_meta | email | manual). Set needsAsset:true when a step needs an image/video. You propose intent ONLY — never claim a step is done; the user's click is the approval and the server decides what actually executes.",
+      "Render a REVIEWABLE action plan in the workspace. Use it whenever the user wants to do something (launch, post, create, fix, grow): a short situation summary, then a prioritized list of concrete steps. For each step give a clear title, the full prepared content, a launch-scope platform key (youtube, instagram, facebook, tiktok, snapchat, reddit, pinterest, google_ads, meta_ads, tiktok_ads — or omit for SEO/website/email/manual work), and a kind (post | video | ad_draft | page | pin | seo_meta | email | manual). Set needsAsset:true when needed. You propose intent only; the server decides whether a step can be copied, opened, scheduled, or executed.",
     input_schema: {
       type: "object",
       properties: {

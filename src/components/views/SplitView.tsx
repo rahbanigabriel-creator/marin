@@ -16,7 +16,12 @@ interface SplitViewProps {
   turns: ChatTurn[];
   typed: string;
   status: { key: AgentStatusKey; label: string } | null;
-  thinking: string;
+  error: string | null;
+  errorAction?: { url: string; label: string } | null;
+  isStreaming: boolean;
+  done: boolean;
+  onStop: () => void;
+  onRetry: () => void;
   question: string;
   scenario: Scenario;
   artifacts: ArtifactPayload[];
@@ -36,6 +41,8 @@ interface SplitViewProps {
   onConnect: (channel: Channel) => void;
   model: string;
   onModelChange: (model: string) => void;
+  canUseOpus?: boolean;
+  readOnly?: boolean;
 }
 
 export function SplitView({
@@ -43,7 +50,12 @@ export function SplitView({
   turns,
   typed,
   status,
-  thinking,
+  error,
+  errorAction,
+  isStreaming,
+  done,
+  onStop,
+  onRetry,
   question,
   scenario,
   artifacts,
@@ -61,13 +73,15 @@ export function SplitView({
   onConnect,
   model,
   onModelChange,
+  canUseOpus = false,
+  readOnly = false,
 }: SplitViewProps) {
   const g = gatesForStep(step, typed.length, scenario.lead.length);
 
   return (
-    <div className="flex min-h-0 flex-1">
+    <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
       {/* chat column */}
-      <div className="flex w-chat flex-none flex-col border-r border-line-2 bg-surface-panel min-h-0">
+      <div className="flex min-h-0 w-full flex-[0_0_56%] flex-col border-b border-line-2 bg-surface-panel lg:w-chat lg:flex-none lg:border-b-0 lg:border-r">
         <div className="flex min-h-0 flex-1 flex-col gap-[20px] overflow-y-auto p-[24px_22px]">
           <PriorTurns turns={turns} variant="split" />
           <UserBubble text={question} variant="split" />
@@ -75,12 +89,37 @@ export function SplitView({
             step={step}
             typed={typed}
             status={status}
-            thinking={thinking}
+            done={done}
             lead={scenario.lead}
             chips={chips}
             closing={closing}
             variant="split"
           />
+          {error && (
+            <div
+              role="alert"
+              data-testid="chat-error"
+              className="flex items-center justify-between gap-[12px] rounded-[8px] border border-neg-700 bg-neg-bg p-[10px_12px]"
+            >
+              <span className="font-sans text-[12.5px] leading-[1.45] text-neg-700">{error}</span>
+              {errorAction ? (
+                <a
+                  href={errorAction.url}
+                  className="flex-none rounded-[8px] border border-neg-700 bg-surface-card px-[10px] py-[6px] font-sans text-[12px] font-semibold text-neg-700"
+                >
+                  {errorAction.label}
+                </a>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onRetry}
+                  className="flex-none cursor-pointer rounded-[8px] border border-neg-700 bg-surface-card px-[10px] py-[6px] font-sans text-[12px] font-semibold text-neg-700"
+                >
+                  Retry
+                </button>
+              )}
+            </div>
+          )}
           {choices && <ChoiceChips questions={choices.questions} onChoose={onChoose} />}
         </div>
         <Composer
@@ -91,6 +130,10 @@ export function SplitView({
           connectedCount={connectedCount}
           model={model}
           onModelChange={onModelChange}
+          isStreaming={isStreaming}
+          onStop={onStop}
+          canUseOpus={canUseOpus}
+          readOnly={readOnly}
         />
       </div>
 
@@ -122,7 +165,11 @@ export function SplitView({
           )}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-[24px]">
-          {g.canvasReady && artifacts.length > 0 ? (
+          {error && artifacts.length === 0 ? (
+            <div className="flex h-full min-h-[340px] items-center justify-center font-sans text-[13px] text-ink-300">
+              Answer stopped. Retry from the conversation.
+            </div>
+          ) : g.canvasReady && artifacts.length > 0 ? (
             <AnswerCanvas step={step} artifacts={artifacts} channels={channels} onConnect={onConnect} />
           ) : g.canvasReady && dataMode === "empty" ? (
             <div className="flex h-full min-h-[340px] flex-col items-center justify-center gap-[10px] rounded-[8px] border border-dashed border-line-2 bg-surface-card p-[24px] text-center">
