@@ -2,6 +2,9 @@
   "name": "marin",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": "22.x"
+  },
   "description": "Marpin — AI marketing copilot",
   "scripts": {
     "dev": "next dev",
