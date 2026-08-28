@@ -3,19 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type { IconType } from "react-icons";
-import {
-  SiFacebook,
-  SiGoogleads,
-  SiGoogleanalytics,
-  SiGooglesearchconsole,
-  SiInstagram,
-  SiMeta,
-  SiPinterest,
-  SiReddit,
-  SiSnapchat,
-  SiTiktok,
-  SiYoutube,
-} from "react-icons/si";
+import { SiGoogleads, SiMeta } from "react-icons/si";
 import { LuRefreshCw, LuUnplug, LuX } from "react-icons/lu";
 
 import type { Channel, ConnectionDisconnectResult } from "@/types/views";
@@ -34,36 +22,14 @@ interface ConnectionsModalProps {
 const ICONS: Record<string, IconType> = {
   google_ads: SiGoogleads,
   meta_ads: SiMeta,
-  tiktok_ads: SiTiktok,
-  youtube: SiYoutube,
-  instagram: SiInstagram,
-  facebook: SiFacebook,
-  tiktok: SiTiktok,
-  snapchat: SiSnapchat,
-  reddit: SiReddit,
-  pinterest: SiPinterest,
-  ga4: SiGoogleanalytics,
-  search_console: SiGooglesearchconsole,
 };
 
 const ICON_COLORS: Record<string, string> = {
   google_ads: "#4285F4",
   meta_ads: "#0866FF",
-  tiktok_ads: "#111111",
-  youtube: "#FF0033",
-  instagram: "#C13584",
-  facebook: "#0866FF",
-  tiktok: "#111111",
-  snapchat: "#E2BD00",
-  reddit: "#FF4500",
-  pinterest: "#BD081C",
-  ga4: "#E37400",
-  search_console: "#4285F4",
 };
 
 const SECTIONS = [
-  { id: "measurement", label: "MEASUREMENT & SEO" },
-  { id: "organic", label: "ORGANIC PUBLISHING" },
   { id: "paid", label: "PAID CAMPAIGNS" },
 ] as const;
 
@@ -173,7 +139,7 @@ export function ConnectionsModal({
               Manage connections
             </h2>
             <p className="mb-[20px] mt-[5px] font-sans text-[13px] leading-[1.5] text-ink-400">
-              Data access and publishing access are tracked separately so every action stays truthful.
+              Connect the ad accounts Marpin can analyze and manage.
             </p>
           </div>
           <button

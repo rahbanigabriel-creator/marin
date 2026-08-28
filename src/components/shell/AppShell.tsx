@@ -33,6 +33,7 @@ import { DistributionAnalytics } from "@/components/analytics/DistributionAnalyt
 import type { BillingSnapshotDto } from "@/lib/billing/types";
 import {
   PRODUCT_PLATFORMS,
+  isLaunchConnectorPlatform,
   type ProductMode,
 } from "@/lib/product/platforms";
 import type {
@@ -59,16 +60,21 @@ type Screen =
   | "clients"
   | "dashboard";
 
-const PRODUCT_CHANNELS: Channel[] = PRODUCT_PLATFORMS.map((platform) => ({
-  name: platform.label,
-  platform: platform.id,
-  connectorPlatform: platform.connectorPlatform,
-  category: platform.section,
-  connectionAvailability: platform.capabilities.connect,
-  description: platform.description,
-  configured: false,
-  status: "disconnected",
-}));
+const PRODUCT_CHANNELS: Channel[] = PRODUCT_PLATFORMS
+  .filter(
+    (platform) =>
+      platform.connectorPlatform && isLaunchConnectorPlatform(platform.connectorPlatform),
+  )
+  .map((platform) => ({
+    name: platform.label,
+    platform: platform.id,
+    connectorPlatform: platform.connectorPlatform,
+    category: platform.section,
+    connectionAvailability: platform.capabilities.connect,
+    description: platform.description,
+    configured: false,
+    status: "disconnected",
+  }));
 
 const DEMO_MODE = process.env.NEXT_PUBLIC_MARPIN_DEMO_MODE === "true";
 
