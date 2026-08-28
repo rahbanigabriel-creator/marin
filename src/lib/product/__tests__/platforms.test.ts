@@ -9,7 +9,7 @@ import {
 } from "../platforms";
 
 test("launch scope contains exactly the approved paid and organic destinations", () => {
-  assert.deepEqual(PAID_PLATFORM_IDS, ["google_ads", "meta_ads", "tiktok_ads"]);
+  assert.deepEqual(PAID_PLATFORM_IDS, ["google_ads", "meta_ads"]);
   assert.deepEqual(ORGANIC_PLATFORM_IDS, [
     "youtube",
     "instagram",
@@ -22,13 +22,7 @@ test("launch scope contains exactly the approved paid and organic destinations",
 });
 
 test("only launch-ready data connectors are exposed", () => {
-  assert.deepEqual(LAUNCH_CONNECTOR_PLATFORMS, [
-    "google_ads",
-    "meta_ads",
-    "tiktok_ads",
-    "ga4",
-    "search_console",
-  ]);
+  assert.deepEqual(LAUNCH_CONNECTOR_PLATFORMS, ["google_ads", "meta_ads"]);
   const ids = PRODUCT_PLATFORMS.map((platform) => String(platform.id));
   assert.equal(ids.includes("linkedin_ads"), false);
   assert.equal(ids.includes("x_ads"), false);
@@ -46,7 +40,7 @@ test("organic platforms can draft and use an honest assisted handoff", () => {
 
 test("paid platforms expose real in-product drafting without claiming provider execution", () => {
   const paid = PRODUCT_PLATFORMS.filter((platform) => platform.section === "paid");
-  assert.equal(paid.length, 3);
+  assert.equal(paid.length, 2);
   for (const platform of paid) {
     assert.equal(platform.capabilities.connect, "available");
     assert.equal(platform.capabilities.draft, "available");

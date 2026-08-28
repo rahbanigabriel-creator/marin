@@ -242,7 +242,7 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: "add_action_plan",
     description:
-      "Render a REVIEWABLE action plan in the workspace. Use it whenever the user wants to do something (launch, post, create, fix, grow): a short situation summary, then a prioritized list of concrete steps. For each step give a clear title, the full prepared content, a launch-scope platform key (youtube, instagram, facebook, tiktok, snapchat, reddit, pinterest, google_ads, meta_ads, tiktok_ads — or omit for SEO/website/email/manual work), and a kind (post | video | ad_draft | page | pin | seo_meta | email | manual). Set needsAsset:true when needed. You propose intent only; the server decides whether a step can be copied, opened, scheduled, or executed.",
+      "Render a REVIEWABLE action plan in the workspace. Use it whenever the user wants to do something (launch, post, create, fix, grow): a short situation summary, then a prioritized list of concrete steps. For each step give a clear title, the full prepared content, a launch-scope platform key (youtube, instagram, facebook, tiktok, snapchat, reddit, pinterest, google_ads, meta_ads — or omit for SEO/website/email/manual work), and a kind (post | video | ad_draft | page | pin | seo_meta | email | manual). Set needsAsset:true when needed. You propose intent only; the server decides whether a step can be copied, opened, scheduled, or executed.",
     input_schema: {
       type: "object",
       properties: {
