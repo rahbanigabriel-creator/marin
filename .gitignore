@@ -13,6 +13,8 @@
 /build
 /playwright-report/
 /test-results/
+/output/
+/tmp/
 
 # misc
 .DS_Store
