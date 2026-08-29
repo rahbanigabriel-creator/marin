@@ -15,13 +15,34 @@ function upstreamHttpStatus(message: string | null): number | null {
   return match ? Number(match[1]) : null;
 }
 
+/** Reads a response without letting an intermediary HTML/error body reach the UI. */
+export async function readAuditResponse<T extends object>(
+  response: Response,
+): Promise<AuditFailurePayload & Partial<T>> {
+  const raw = await response.text();
+  if (!raw) return {};
+
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return parsed as AuditFailurePayload & Partial<T>;
+  } catch {
+    return {};
+  }
+}
+
 /** Converts API failure details into concise, actionable copy for audit forms. */
 export function auditFailureMessage(status: number, payload: AuditFailurePayload): string {
   const code = text(payload.code);
-  const serverMessage = text(payload.message) ?? text(payload.error);
+  const error = text(payload.error);
+  const serverMessage = text(payload.message) ?? error;
 
   if (code === "rate_limit_unavailable" || serverMessage === "service_unavailable") {
     return "The audit service is temporarily unavailable. Please try again in a moment.";
+  }
+
+  if (code === "rate_limit_exceeded" || error === "rate_limited" || status === 429) {
+    return "You have reached the audit limit. Wait a few minutes, then try again.";
   }
 
   if (code === "HTTP_ERROR") {
@@ -34,6 +55,9 @@ export function auditFailureMessage(status: number, payload: AuditFailurePayload
     }
     if (websiteStatus === 429) {
       return "This website is limiting automated requests. Wait a moment, then try again.";
+    }
+    if (websiteStatus !== null && websiteStatus >= 500) {
+      return "This website is temporarily unavailable. Try again later or audit another public page.";
     }
     return "This website did not allow Marpin to inspect the page. Try a public page instead.";
   }
@@ -53,16 +77,20 @@ export function auditFailureMessage(status: number, payload: AuditFailurePayload
     case "FETCH_FAILED":
       return "Marpin could not reach this website. Check that it is public and try again.";
     case "INVALID_URL":
+      return "Enter a valid public website URL and try again.";
     case "UNSAFE_URL":
-      return serverMessage ?? "Enter a public website URL and try again.";
+      return "Enter a public HTTP or HTTPS website URL and try again.";
     default:
       break;
   }
 
   if (status === 401) return "Your session has ended. Sign in again to continue.";
+  if (status === 403 && error === "forbidden") {
+    return "Only a workspace owner or admin can audit a brand.";
+  }
   if (status >= 500) {
     return "The audit service is temporarily unavailable. Please try again in a moment.";
   }
 
-  return serverMessage && !serverMessage.includes("_") ? serverMessage : DEFAULT_AUDIT_ERROR;
+  return DEFAULT_AUDIT_ERROR;
 }
