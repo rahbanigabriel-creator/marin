@@ -43,6 +43,7 @@ import type {
 import { restoreConversation } from "@/lib/conversations/client";
 import type { ResultChip } from "@/types/artifacts";
 import type { BrandDto, BrandWriteInput } from "@/lib/brand/types";
+import { auditFailureMessage, type AuditFailurePayload } from "@/lib/audit/client-error";
 import {
   parseWorkspaceLocation,
   workspaceLocationHref,
@@ -454,9 +455,9 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: candidate }),
       });
-      const payload = (await response.json()) as { brand?: BrandDto; error?: string };
+      const payload = (await response.json()) as AuditFailurePayload & { brand?: BrandDto };
       if (!response.ok || !payload.brand) {
-        throw new Error(payload.error || "Marpin could not audit this website.");
+        throw new Error(auditFailureMessage(response.status, payload));
       }
       setBrand(payload.brand);
       setAuditUrl(payload.brand.websiteUrl ?? candidate);

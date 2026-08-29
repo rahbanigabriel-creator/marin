@@ -13,6 +13,7 @@ import {
   buildAuditSignupHref,
   type PublicAuditPreview,
 } from "@/lib/audit/public-preview";
+import { auditFailureMessage, type AuditFailurePayload } from "@/lib/audit/client-error";
 
 /**
  * The landing hero's interactive entry point. Captures a website URL and deep-
@@ -40,9 +41,9 @@ export function HeroUrlInput() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: v }),
       });
-      const payload = await response.json() as { audit?: PublicAuditPreview; error?: string };
+      const payload = await response.json() as AuditFailurePayload & { audit?: PublicAuditPreview };
       if (!response.ok || !payload.audit) {
-        throw new Error(payload.error || "Marpin could not audit this website.");
+        throw new Error(auditFailureMessage(response.status, payload));
       }
       setAudit(payload.audit);
     } catch (requestError) {
