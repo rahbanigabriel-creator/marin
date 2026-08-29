@@ -3,6 +3,8 @@ import "server-only";
 import { Redis } from "@upstash/redis";
 import { Ratelimit } from "@upstash/ratelimit";
 
+import { resolveRedisRestCredentials } from "@/lib/cache/redis-config";
+
 /**
  * Cache + rate-limiting (Upstash Redis, Stack C). Server-only.
  *
@@ -14,7 +16,8 @@ import { Ratelimit } from "@upstash/ratelimit";
  * src/lib/analytics.ts and src/lib/billing/stripe.ts):
  *   • Importing this module NEVER constructs a client or touches the network.
  *   • The client is lazily created on first use, and ONLY when BOTH
- *     UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are present.
+ *     a complete native Upstash or Vercel Marketplace REST credential pair is
+ *     present.
  *   • With no env the low-level limiter is a no-op and cache reads are misses so
  *     builds and local development remain keyless. Production mutation routes
  *     call enforceEndpointRateLimit(), which rejects requests when Redis is not
@@ -22,7 +25,7 @@ import { Ratelimit } from "@upstash/ratelimit";
  *
  * EU data residency: create the Upstash database in an EU region; the REST URL
  * is bound to that region's endpoint (no host hardcoded here). The SDK targets
- * exactly the URL provided in UPSTASH_REDIS_REST_URL.
+ * exactly the configured REST URL.
  *
  * Security: the REST token is read lazily from env and is NEVER logged.
  */
@@ -30,9 +33,7 @@ import { Ratelimit } from "@upstash/ratelimit";
 /** True when Upstash Redis is configured (both REST URL and token present).
  * Read lazily from env on every call — never at import. */
 export function isRedisConfigured(): boolean {
-  return Boolean(
-    process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN,
-  );
+  return resolveRedisRestCredentials(process.env) !== null;
 }
 
 let redis: Redis | null = null;
@@ -44,11 +45,12 @@ let redis: Redis | null = null;
  * so this is safe to reuse across serverless invocations.
  */
 function getRedis(): Redis | null {
-  if (!isRedisConfigured()) return null;
+  const credentials = resolveRedisRestCredentials(process.env);
+  if (!credentials) return null;
   if (!redis) {
     redis = new Redis({
-      url: process.env.UPSTASH_REDIS_REST_URL as string,
-      token: process.env.UPSTASH_REDIS_REST_TOKEN as string,
+      url: credentials.url,
+      token: credentials.token,
     });
   }
   return redis;
