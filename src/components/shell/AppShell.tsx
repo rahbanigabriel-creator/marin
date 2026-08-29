@@ -178,7 +178,8 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
 
   const dataset = PERSONAS[persona];
   const realProductMode = !DEMO_MODE;
-  const workspaceReadOnly = billing ? !billing.canManage : false;
+  const workspaceCanManage = billing?.canManage !== false;
+  const workspaceReadOnly = !workspaceCanManage;
   const realChannels = channels;
   const connectedCount = realProductMode
     ? new Set(
@@ -333,17 +334,13 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
 
   const refreshBilling = useCallback(async () => {
     if (!realProductMode) return;
-    setBilling(null);
     try {
       const response = await fetch("/api/billing", { cache: "no-store" });
-      if (!response.ok) {
-        setBilling(null);
-        return;
-      }
+      if (!response.ok) return;
       const payload = (await response.json()) as { billing?: BillingSnapshotDto };
-      setBilling(payload.billing ?? null);
+      if (payload.billing) setBilling(payload.billing);
     } catch {
-      setBilling(null);
+      // Keep the last confirmed permissions when a background refresh fails.
     }
   }, [realProductMode]);
 
@@ -921,14 +918,14 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
                 initialUrl={auditUrl}
                 busy={brandBusy}
                 error={brandError}
-                canManage={billing?.canManage === true}
+                canManage={workspaceCanManage}
                 onAudit={auditWebsite}
                 onSave={saveBrand}
               />
             ) : screen === "agents" ? (
               <AgentRunsWorkspace
                 brandId={brand?.id ?? null}
-                canManage={billing?.canManage === true}
+                canManage={workspaceCanManage}
                 onOpenBrand={openBrand}
               />
             ) : screen === "analytics" ? (
@@ -939,7 +936,7 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
                   brandId={brand.id}
                   timezone={brand.timezone}
                   locale={brand.locale}
-                  canManagePlans={billing?.canManage === true}
+                  canManagePlans={workspaceCanManage}
                   onAskAI={askFromOrganicPlanner}
                 />
               ) : (
@@ -982,7 +979,7 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
             ) : screen === "dashboard" ? (
               <CampaignsScreen
                 onOpenConnections={() => setModalOpen(true)}
-                canManage={billing?.canManage === true}
+                canManage={workspaceCanManage}
               />
             ) : (
               <SplitView
@@ -1030,7 +1027,7 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
           onClose={() => setModalOpen(false)}
           onConnect={connectChannel}
           onDisconnect={disconnectChannel}
-          canManage={!workspaceReadOnly}
+          canManage={workspaceCanManage}
         />
       )}
     </div>
