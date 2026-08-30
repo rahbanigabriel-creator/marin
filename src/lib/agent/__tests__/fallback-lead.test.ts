@@ -30,3 +30,13 @@ test("offline recovery uses Brand memory instead of requesting known context aga
   assert.match(lead, /Europe\/Madrid/);
   assert.doesNotMatch(lead, /tell me your website/i);
 });
+
+test("monthly paid campaign answers do not fall into the organic calendar fallback", () => {
+  const lead = buildOfflineBrandLead(
+    "What's your monthly budget for this campaign? Under EUR 500. Lead with Google Search.",
+    brand,
+  );
+
+  assert.match(lead, /anchor the campaign/i);
+  assert.doesNotMatch(lead, /build the week/i);
+});
