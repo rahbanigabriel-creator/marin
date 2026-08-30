@@ -122,6 +122,7 @@ const LEAD_START_MS = 140;
 const WORD_MS = 26;
 const DEMO_MODE = process.env.NEXT_PUBLIC_MARPIN_DEMO_MODE === "true";
 const CHAT_DEADLINE_MS = 70_000;
+const LIVE_AGENT_DEADLINE_MS = 30_000;
 
 function emptyResolution(workspaceId: string | null): {
   source: MetricsSource;
@@ -478,6 +479,10 @@ export async function POST(req: Request): Promise<Response> {
         let streamed = false;
         let liveArtifacts = false;
         if (isLiveAgentEnabled()) {
+          const liveController = new AbortController();
+          const abortLiveAgent = () => liveController.abort();
+          const liveDeadline = setTimeout(abortLiveAgent, LIVE_AGENT_DEADLINE_MS);
+          ac.signal.addEventListener("abort", abortLiveAgent, { once: true });
           try {
             const { system, userContent } = buildAgentPrompt({
               question: body.question,
@@ -493,7 +498,7 @@ export async function POST(req: Request): Promise<Response> {
               source,
               history: body.history,
               workspaceId,
-              signal: ac.signal,
+              signal: liveController.signal,
             })) {
               if (closed) return;
               if (ev.kind === "status") send({ type: "status", key: ev.key, label: ev.label });
@@ -526,15 +531,21 @@ export async function POST(req: Request): Promise<Response> {
                 : "[agent] live generation failed; using fallback lead",
             );
             if (closed) return;
-            if (timedOut || ac.signal.aborted || streamed || liveArtifacts) {
+            if (timedOut || ac.signal.aborted) {
               send({
                 type: "error",
                 message: timedOut
                   ? "This answer took too long, so Marpin stopped it. Retry to continue."
-                  : "Marpin couldn't finish this answer. Your partial work is preserved; retry to continue.",
+                  : "Stopped. Retry whenever you're ready to continue.",
               });
               return;
             }
+            // A provider failure after a card or clarification should not turn
+            // valid visible work into an error. Complete with that partial work;
+            // with no public output, the deterministic fallback below takes over.
+          } finally {
+            clearTimeout(liveDeadline);
+            ac.signal.removeEventListener("abort", abortLiveAgent);
           }
         }
         if (!streamed && !liveArtifacts) {

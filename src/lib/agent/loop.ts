@@ -361,14 +361,18 @@ export async function* runAgentWithTools(opts: {
           // and yield them; the model should then write at most a one-line lead-in.
           if (tu.name === "ask_questions") {
             const parsed = questionsFromInput(tu.input);
-            if (parsed) yield { kind: "choices", questions: parsed.questions };
+            if (parsed) {
+              yield { kind: "choices", questions: parsed.questions };
+              // A clarification is the complete response for this turn. Do not
+              // ask the provider for another round after the user-facing choices
+              // are already visible; doing so can loop until the route deadline.
+              return;
+            }
             results.push({
               type: "tool_result",
               tool_use_id: tu.id,
-              content: parsed
-                ? "Questions shown to the user with clickable options. STOP now and wait for their reply — do not answer for them or call this again."
-                : "ask_questions needs at least one question with options — try again.",
-              is_error: !parsed,
+              content: "ask_questions needs at least one question with options — try again.",
+              is_error: true,
             });
             continue;
           }
