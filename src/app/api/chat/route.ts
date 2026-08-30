@@ -37,7 +37,7 @@ import {
 } from "@/lib/conversations/service";
 import { isPersistenceModelUnavailable } from "@/lib/persistence/errors";
 import { abortableDelay, raceWithAbort } from "@/lib/streaming/deadline";
-import { isArtifactRelevant } from "@/lib/agent/artifact-relevance";
+import { isArtifactRelevant, requiresActionPlan } from "@/lib/agent/artifact-relevance";
 import { getWorkspaceTimeZone } from "@/lib/time/workspace";
 import { resolvePlanningTimeZone } from "@/lib/time/calendar";
 import { LAUNCH_FEATURES } from "@/lib/product/features";
@@ -504,6 +504,7 @@ export async function POST(req: Request): Promise<Response> {
               source,
               history: body.history,
               workspaceId,
+              requireActionPlan: requiresActionPlan(body.question),
               signal: liveController.signal,
             })) {
               if (closed) return;

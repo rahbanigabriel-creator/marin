@@ -153,6 +153,8 @@ export async function* runAgentWithTools(opts: {
   history?: { role: "user" | "assistant"; content: string }[];
   /** Current workspace — actions are persisted under it (null = not executable). */
   workspaceId?: string | null;
+  /** Force direct creative requests into a visible, reviewable action card. */
+  requireActionPlan?: boolean;
   signal?: AbortSignal;
 }): AsyncGenerator<AgentEvent> {
   const client = getClient();
@@ -206,7 +208,10 @@ export async function* runAgentWithTools(opts: {
         ],
         messages,
         tools: AGENT_TOOLS,
-        tool_choice: { type: "auto" as const },
+        tool_choice:
+          opts.requireActionPlan && i === 0
+            ? { type: "tool" as const, name: "add_action_plan" }
+            : { type: "auto" as const },
         ...(useThinking
           ? { thinking: { type: "adaptive" as const, display: "summarized" as const }, output_config: { effort: opts.effort } }
           : {}),

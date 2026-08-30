@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isArtifactRelevant } from "@/lib/agent/artifact-relevance";
+import { isArtifactRelevant, requiresActionPlan } from "@/lib/agent/artifact-relevance";
 
 test("diagnostic cards require a performance or problem intent", () => {
   assert.equal(isArtifactRelevant("Why did my CPA increase this week?", "rootCause"), true);
@@ -25,6 +25,13 @@ test("a bare website can produce market, audit, and action workspaces", () => {
   assert.equal(isArtifactRelevant("https://marpin.ai", "marketScan"), true);
   assert.equal(isArtifactRelevant("www.marpin.ai", "recommendations"), true);
   assert.equal(isArtifactRelevant("marpin.ai", "actionPlan"), true);
+});
+
+test("direct publishable creative requests require a reviewable action plan", () => {
+  assert.equal(requiresActionPlan("Write three Google Search ad headlines"), true);
+  assert.equal(requiresActionPlan("Generate five Instagram captions"), true);
+  assert.equal(requiresActionPlan("Why is my CPA rising?"), false);
+  assert.equal(requiresActionPlan("Plan my paid campaign"), false);
 });
 
 test("a flexible brief remains available for substantive uncategorized work", () => {

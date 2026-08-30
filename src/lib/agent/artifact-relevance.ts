@@ -1,6 +1,9 @@
 import type { ArtifactKind } from "@/lib/streaming/events";
 
 const URL_LIKE = /(?:https?:\/\/|www\.)\S+|\b[a-z0-9-]+\.(?:com|ai|io|co|net|org|app|dev)\b/i;
+const DIRECT_CREATIVE_ACTION = /\b(write|draft|create|generate|prepare)\b/i;
+const PUBLISHABLE_CREATIVE =
+  /\b(ad|ads|headline|headlines|caption|captions|post|posts|tweet|tweets|script|scripts|copy|email|emails|landing page|landing pages)\b/i;
 
 const INTENT: Partial<Record<ArtifactKind, RegExp>> = {
   brief: /\b(brief|strategy|plan|campaign|content|launch|position(?:ing)?|brand|audience|offer|messaging|roadmap|distribution)\b/i,
@@ -34,4 +37,9 @@ export function isArtifactRelevant(question: string, kind: ArtifactKind): boolea
     return kind === "marketScan" || kind === "recommendations" || kind === "actionPlan";
   }
   return false;
+}
+
+/** Direct requests for publishable creative must produce reviewable work. */
+export function requiresActionPlan(question: string): boolean {
+  return DIRECT_CREATIVE_ACTION.test(question) && PUBLISHABLE_CREATIVE.test(question);
 }
