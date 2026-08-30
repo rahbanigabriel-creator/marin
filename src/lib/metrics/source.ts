@@ -34,11 +34,13 @@ export type MetricFactRow = Pick<
 > & Partial<Pick<MetricFact, "connectionId" | "campaignExternalId" | "campaignName" | "currency" | "staleAt">>;
 
 const PAID_PLATFORMS = ["google_ads", "meta_ads", "tiktok_ads"];
+const LAUNCH_METRIC_PLATFORMS = ["google_ads", "meta_ads", "ga4", "search_console"];
 
 function liveMetricWhere(workspaceId: string, since: Date) {
   return {
     workspaceId,
     date: { gte: since },
+    platform: { in: LAUNCH_METRIC_PLATFORMS },
     OR: [
       { platform: { notIn: PAID_PLATFORMS } },
       { platform: { in: PAID_PLATFORMS }, connectionId: { not: null }, staleAt: null },

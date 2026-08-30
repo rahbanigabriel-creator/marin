@@ -143,3 +143,9 @@ export const ORGANIC_PLATFORM_IDS = [
 export function isLaunchConnectorPlatform(platform: string): platform is ConnectorPlatform {
   return (LAUNCH_CONNECTOR_PLATFORMS as readonly string[]).includes(platform);
 }
+
+export function isLaunchPaidPlatform(
+  platform: string,
+): platform is (typeof PAID_PLATFORM_IDS)[number] {
+  return (PAID_PLATFORM_IDS as readonly string[]).includes(platform);
+}

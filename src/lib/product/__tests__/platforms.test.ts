@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   LAUNCH_CONNECTOR_PLATFORMS,
+  isLaunchPaidPlatform,
   ORGANIC_PLATFORM_IDS,
   PAID_PLATFORM_IDS,
   PRODUCT_PLATFORMS,
@@ -10,6 +11,9 @@ import {
 
 test("launch scope contains exactly the approved paid and organic destinations", () => {
   assert.deepEqual(PAID_PLATFORM_IDS, ["google_ads", "meta_ads"]);
+  assert.equal(isLaunchPaidPlatform("google_ads"), true);
+  assert.equal(isLaunchPaidPlatform("meta_ads"), true);
+  assert.equal(isLaunchPaidPlatform("tiktok_ads"), false);
   assert.deepEqual(ORGANIC_PLATFORM_IDS, [
     "youtube",
     "instagram",

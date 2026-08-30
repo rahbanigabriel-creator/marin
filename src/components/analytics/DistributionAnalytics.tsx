@@ -256,7 +256,7 @@ export function DistributionAnalytics({
         </section>
 
         <section className="border-b border-line-2 py-[18px]" aria-labelledby="paid-performance-heading">
-          <SectionHeading headingId="paid-performance-heading" icon={LuChartNoAxesCombined} title="Paid performance" description="Measured outcomes from connected Google Ads, Meta Ads, and TikTok Ads accounts." state={data.paid.state} />
+          <SectionHeading headingId="paid-performance-heading" icon={LuChartNoAxesCombined} title="Paid performance" description="Measured outcomes from connected Google Ads and Meta Ads accounts." state={data.paid.state} />
           {data.paid.mixedCurrency ? <p role="status" className="mb-0 mt-[9px] border-l-2 border-[#b48621] pl-[9px] text-[10.5px] text-ink-500">Multiple or unknown currencies are present. Blended money totals and ROAS remain unavailable.</p> : null}
           <MetricGrid items={[
             { label: "Spend", value: moneyLabel(data.paid.totals.spend, data.paid.currency, data.paid.mixedCurrency) },

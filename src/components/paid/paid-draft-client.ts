@@ -7,6 +7,7 @@ import type {
 import type { PaidCampaignSnapshotV1 } from "@/lib/paid-drafts/types";
 import type { PaidLaunchTemplate } from "@/lib/paid-drafts/types";
 import { PROVIDER_PAUSED_CONFIRMATION } from "@/lib/paid-drafts/parsers";
+import { PAID_PLATFORM_IDS } from "@/lib/product/platforms";
 import { MAX_ASSET_BYTES, MAX_SERVER_ASSET_BYTES } from "@/lib/storage/limits";
 
 import type { PaidConnectionOption } from "./paid-draft-form";
@@ -85,7 +86,7 @@ export async function loadPaidDraft(id: string): Promise<PaidCampaignDraftDto> {
 export async function loadPaidConnections(): Promise<PaidConnectionOption[]> {
   const payload = await fetch("/api/connections", { cache: "no-store" })
     .then((response) => responseJson<{ accounts?: Array<Record<string, unknown>> }>(response));
-  const paidPlatforms = new Set(["google_ads", "meta_ads", "tiktok_ads"]);
+  const paidPlatforms = new Set<string>(PAID_PLATFORM_IDS);
   return (payload.accounts ?? []).flatMap((account) => {
     const platform = account.connectorPlatform;
     if (

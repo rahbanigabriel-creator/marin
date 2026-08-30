@@ -48,7 +48,7 @@ const LEAD_CARDS = [
   {
     kind: "campaign" as const,
     title: "Campaigns, prepared — not hand-waved",
-    body: "Marpin turns strategy into reviewable Google, Meta, and TikTok campaign drafts, then keeps performance in one operating view.",
+    body: "Marpin turns strategy into reviewable Google and Meta campaign drafts, then keeps performance in one operating view.",
   },
   {
     kind: "diagnosis" as const,

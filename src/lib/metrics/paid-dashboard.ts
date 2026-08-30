@@ -1,7 +1,8 @@
 import type { Ad, Campaign, Connection, MetricFact, SyncAttempt } from "@prisma/client";
 
 import { prisma } from "@/lib/db";
-import { PAID_SYNC_PLATFORMS, type PaidSyncPlatform } from "@/lib/connectors/paid-clients";
+import type { PaidSyncPlatform } from "@/lib/connectors/paid-clients";
+import { isLaunchPaidPlatform, PAID_PLATFORM_IDS } from "@/lib/product/platforms";
 
 export const PAID_METRIC_KEYS = [
   "spend", "revenue", "roas", "cpa", "conversions", "clicks",
@@ -240,7 +241,7 @@ function adMetrics(ad: PaidAdRow): PaidMetricRecord {
 }
 
 function normalizePlatform(value: string): PaidSyncPlatform | null {
-  return (PAID_SYNC_PLATFORMS as readonly string[]).includes(value) ? value as PaidSyncPlatform : null;
+  return isLaunchPaidPlatform(value) ? value : null;
 }
 
 export function buildPaidDashboard(input: PaidDashboardInput): PaidDashboardOutput {
@@ -429,7 +430,7 @@ export async function readPaidDashboard(
   const previous = previousRange(range.from, range.to);
   const [connections, attempts, facts, previousFacts, campaigns, ads] = await Promise.all([
     prisma.connection.findMany({
-      where: { workspaceId, platform: { in: [...PAID_SYNC_PLATFORMS] } },
+      where: { workspaceId, platform: { in: [...PAID_PLATFORM_IDS] } },
       select: {
         id: true, platform: true, externalAccountId: true, displayName: true, status: true,
         currency: true, timezone: true, lastSyncAt: true, lastSuccessfulSyncAt: true,
@@ -438,7 +439,7 @@ export async function readPaidDashboard(
       orderBy: [{ platform: "asc" }, { externalAccountId: "asc" }],
     }),
     prisma.syncAttempt.findMany({
-      where: { workspaceId, connection: { platform: { in: [...PAID_SYNC_PLATFORMS] } } },
+      where: { workspaceId, connection: { platform: { in: [...PAID_PLATFORM_IDS] } } },
       select: {
         id: true, connectionId: true, status: true, requestedFrom: true, requestedTo: true,
         observedFrom: true, observedTo: true, currency: true, timezone: true, errorCode: true,
@@ -449,7 +450,7 @@ export async function readPaidDashboard(
     }),
     prisma.metricFact.findMany({
       where: {
-        workspaceId, platform: { in: [...PAID_SYNC_PLATFORMS] }, connectionId: { not: null },
+        workspaceId, platform: { in: [...PAID_PLATFORM_IDS] }, connectionId: { not: null },
         staleAt: null, date: { gte: range.from, lte: range.to },
       },
       select: {
@@ -460,7 +461,7 @@ export async function readPaidDashboard(
     }),
     prisma.metricFact.findMany({
       where: {
-        workspaceId, platform: { in: [...PAID_SYNC_PLATFORMS] }, connectionId: { not: null },
+        workspaceId, platform: { in: [...PAID_PLATFORM_IDS] }, connectionId: { not: null },
         staleAt: null, date: { gte: previous.from, lte: previous.to },
       },
       select: {
@@ -470,14 +471,14 @@ export async function readPaidDashboard(
       orderBy: { date: "asc" },
     }),
     prisma.campaign.findMany({
-      where: { workspaceId, platform: { in: [...PAID_SYNC_PLATFORMS] }, connectionId: { not: null }, staleAt: null },
+      where: { workspaceId, platform: { in: [...PAID_PLATFORM_IDS] }, connectionId: { not: null }, staleAt: null },
       select: {
         connectionId: true, platform: true, providerExternalId: true, name: true, status: true,
         objective: true, budget: true, budgetType: true, currency: true,
       },
     }),
     prisma.ad.findMany({
-      where: { workspaceId, platform: { in: [...PAID_SYNC_PLATFORMS] }, connectionId: { not: null }, staleAt: null },
+      where: { workspaceId, platform: { in: [...PAID_PLATFORM_IDS] }, connectionId: { not: null }, staleAt: null },
       select: {
         connectionId: true, platform: true, providerExternalId: true, campaignExternalId: true,
         name: true, status: true, creativeType: true, thumbnailUrl: true, title: true, body: true,

@@ -453,7 +453,7 @@ export function CampaignsScreen({
         <div className="mb-[8px] flex flex-wrap items-start justify-between gap-[10px]">
           <div>
             <h1 className="font-serif text-[24px] font-medium text-ink-900">Paid command center</h1>
-            <p className="mt-[2px] font-sans text-[12.5px] text-ink-400">Google Ads, Meta Ads, and TikTok Ads across every connected account.</p>
+            <p className="mt-[2px] font-sans text-[12.5px] text-ink-400">Google Ads and Meta Ads across every connected account.</p>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-[10px]">
             <StatusBadge mode={mode} state={data.state} />
@@ -564,7 +564,7 @@ export function CampaignsScreen({
             <p className="mx-auto mt-[10px] max-w-[460px] font-sans text-[14px] leading-[1.6] text-ink-400">
               {mode === "failed"
                 ? "The dashboard request failed, so Marpin cannot confirm whether connected accounts have data."
-                : "Connect Google Ads, Meta Ads, or TikTok Ads, then sync to pull observed campaign performance."}
+                : "Connect Google Ads or Meta Ads, then sync to pull observed campaign performance."}
             </p>
             <div className="mt-[18px] flex flex-wrap justify-center gap-[10px]">
               <button type="button" onClick={sync} disabled={syncing} className="inline-flex cursor-pointer items-center gap-[6px] rounded-[8px] border border-line-3 bg-white px-[14px] py-[9px] font-sans text-[13px] font-semibold text-ink-600 disabled:opacity-60">
