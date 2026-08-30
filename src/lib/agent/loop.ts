@@ -189,8 +189,9 @@ export async function* runAgentWithTools(opts: {
     for (let i = 0; i < MAX_ITERATIONS; i++) {
       // No tool is forced: the model decides (system prompt says retrieve
       // doctrine first; read account data only when a real connection is
-      // relevant). Extended thinking is on for non-Haiku tiers from turn 0.
-      const useThinking = opts.model !== TIER_MODEL.low;
+      // relevant). Adaptive thinking is reserved for explicitly high-effort
+      // synthesis; standard Sonnet turns need to reach the UI promptly.
+      const useThinking = opts.model !== TIER_MODEL.low && opts.effort === "high";
       if (i === 1) yield status("analyzing");
 
       // Cache the growing message prefix (incl. large web_fetch content) so loop
