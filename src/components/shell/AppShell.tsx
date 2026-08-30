@@ -822,7 +822,7 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
   );
 
   const retryCurrent = useCallback(() => {
-    if (!turnId) {
+    if (restoredTurnInterrupted || !turnId) {
       setTurnId(globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`);
     }
     setRestoredAnswer("");
@@ -833,7 +833,7 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
     setRestoredDataMode("empty");
     setStreamEnabled(true);
     replay();
-  }, [replay, turnId]);
+  }, [replay, restoredTurnInterrupted, turnId]);
 
   const askFromOrganicPlanner = useCallback(
     (prompt: string) => {

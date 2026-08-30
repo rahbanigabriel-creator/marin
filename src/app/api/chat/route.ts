@@ -434,13 +434,19 @@ export async function POST(req: Request): Promise<Response> {
               }));
             }
             persistedConversationId = conversation.id;
-            await bounded(persistMessage({
-              workspaceId,
-              conversationId: conversation.id,
-              turnId: body.turnId,
-              role: "user",
-              content: body.question,
-            }));
+            const latestMessage = conversation.messages.at(-1);
+            const resumesPendingQuestion =
+              latestMessage?.role === "user" &&
+              latestMessage.content.trim() === body.question.trim();
+            if (!resumesPendingQuestion) {
+              await bounded(persistMessage({
+                workspaceId,
+                conversationId: conversation.id,
+                turnId: body.turnId,
+                role: "user",
+                content: body.question,
+              }));
+            }
             send({ type: "conversation", id: conversation.id, title: conversation.title });
           } catch (error) {
             if (ac.signal.aborted) throw error;
