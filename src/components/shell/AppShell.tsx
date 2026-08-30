@@ -255,9 +255,14 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
   const displayChoices = streamEnabled ? choices : restoredChoices;
   const displayClosing = streamEnabled ? closing : restoredClosing;
   const displayDataMode = streamEnabled ? dataMode : restoredDataMode;
+  const restoredTurnInterrupted = !streamEnabled && hasAsked && !restoredAnswer.trim();
   const displayStatus = streamEnabled ? status : null;
-  const displayError = streamEnabled ? error : null;
-  const displayDone = streamEnabled ? done : Boolean(restoredAnswer);
+  const displayError = streamEnabled
+    ? error
+    : restoredTurnInterrupted
+      ? "This answer did not finish. Retry to continue."
+      : null;
+  const displayDone = streamEnabled ? done : Boolean(restoredAnswer) || restoredTurnInterrupted;
   const liveSuggestions = useMemo(
     () =>
       productMode === "organic"
