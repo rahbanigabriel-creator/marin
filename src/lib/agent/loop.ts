@@ -373,7 +373,7 @@ export async function* runAgentWithTools(opts: {
               tool_use_id: tu.id,
               content: planInput
                 ? "Action plan rendered with reviewable steps and server-owned capability labels."
-                : "Action plan needs a title and at least one step — try again.",
+                : "Action plan needs a title and at least one valid step. Paid steps must use Google Ads or Meta Ads only; rewrite unsupported paid recommendations.",
               is_error: !planInput,
             });
             continue;

@@ -3,13 +3,14 @@ import { retrieveDoctrine, formatRetrieved } from "@/lib/rag/retrieve";
 import type {
   BriefData,
   MarketScanData,
-  ProposedStep,
   RootCauseData,
   RecommendationsData,
   RecommendationTag,
   Tone,
 } from "@/types/artifacts";
-import type { ActionPlanInput } from "@/lib/actions/persist";
+import { actionPlanInputFromTool } from "@/lib/actions/plan-input";
+
+export { actionPlanInputFromTool } from "@/lib/actions/plan-input";
 
 /**
  * The agent's tool catalog + dispatcher (architecture §4).
@@ -242,7 +243,7 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: "add_action_plan",
     description:
-      "Render a REVIEWABLE action plan in the workspace. Use it whenever the user wants to do something (launch, post, create, fix, grow): a short situation summary, then a prioritized list of concrete steps. For each step give a clear title, the full prepared content, a launch-scope platform key (youtube, instagram, facebook, tiktok, snapchat, reddit, pinterest, google_ads, meta_ads — or omit for SEO/website/email/manual work), and a kind (post | video | ad_draft | page | pin | seo_meta | email | manual). Set needsAsset:true when needed. You propose intent only; the server decides whether a step can be copied, opened, scheduled, or executed.",
+      "Render a REVIEWABLE action plan in the workspace. Use it whenever the user wants to do something (launch, post, create, fix, grow): a short situation summary, then a prioritized list of concrete steps. For each step give a clear title, the full prepared content, a launch-scope platform key (youtube, instagram, facebook, tiktok, snapchat, reddit, pinterest, google_ads, meta_ads — or omit for SEO/website/email/manual work), and a kind (post | video | ad_draft | page | pin | seo_meta | email | manual). Paid ad steps MUST use google_ads or meta_ads only; never recommend another paid network. TikTok and the other social keys are organic destinations only. Set needsAsset:true when needed. You propose intent only; the server decides whether a step can be copied, opened, scheduled, or executed.",
     input_schema: {
       type: "object",
       properties: {
@@ -469,45 +470,6 @@ export function auditFromInput(input: unknown): { kind: "recommendations"; data:
 }
 
 /**
- * Coerce an `add_action_plan` tool input into a validated ActionPlanInput (intent
- * only — title, optional situation, ProposedStep[]). The loop hands this to
- * persistActionPlan, which is the trust boundary that computes execMode/approval.
- */
-export function actionPlanInputFromTool(input: unknown): ActionPlanInput | null {
-  const o = (input ?? {}) as Record<string, unknown>;
-  const title = typeof o.title === "string" ? o.title.trim() : "";
-  const steps: ProposedStep[] = (Array.isArray(o.steps) ? o.steps : [])
-    .map((s) => {
-      const obj = (s ?? {}) as Record<string, unknown>;
-      return {
-        title: typeof obj.title === "string" ? obj.title.trim() : "",
-        description: typeof obj.description === "string" ? obj.description.trim() : "",
-        platform: typeof obj.platform === "string" && obj.platform.trim() ? obj.platform.trim() : undefined,
-        kind: typeof obj.kind === "string" && obj.kind.trim() ? obj.kind.trim() : "manual",
-        needsAsset: typeof obj.needsAsset === "boolean" ? obj.needsAsset : undefined,
-      };
-    })
-    .filter((s) => s.title.length > 0 && s.description.length > 0);
-  const situation = (Array.isArray(o.situation) ? o.situation : [])
-    .map((sec) => {
-      const obj = (sec ?? {}) as Record<string, unknown>;
-      const heading = typeof obj.heading === "string" ? obj.heading.trim() : "";
-      const points = Array.isArray(obj.points)
-        ? obj.points.filter((p): p is string => typeof p === "string" && p.trim().length > 0).map((p) => p.trim())
-        : [];
-      return { heading, points };
-    })
-    .filter((sec) => sec.heading.length > 0 || sec.points.length > 0);
-  if (!title || steps.length === 0) return null;
-  return {
-    title,
-    subtitle: typeof o.subtitle === "string" && o.subtitle.trim() ? o.subtitle.trim() : undefined,
-    situation: situation.length ? situation : undefined,
-    steps,
-  };
-}
-
-/**
  * Coerce an `ask_question` tool input into a validated question + clickable
  * options (the Claude-style multiple-choice prompt), or null if unusable.
  */
@@ -627,7 +589,7 @@ export async function dispatchTool(
     return {
       content: ok
         ? "Action plan rendered with executable steps."
-        : "Action plan needs a title and at least one step.",
+        : "Action plan needs a title and at least one valid step. Paid steps must use Google Ads or Meta Ads only; rewrite unsupported paid recommendations.",
       isError: !ok,
     };
   }

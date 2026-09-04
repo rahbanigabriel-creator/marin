@@ -1,3 +1,5 @@
+import type { Prisma } from "@prisma/client";
+
 import { prisma } from "@/lib/db";
 import { readPaidDashboard, type PaidDashboardOutput, type PaidMetricRecord } from "@/lib/metrics/paid-dashboard";
 
@@ -299,13 +301,12 @@ export function buildDistributionAnalytics(input: {
 async function readOrganic(workspaceId: string, range: AnalyticsRangeInternal): Promise<OrganicAnalyticsInput> {
   const activityWhere = {
     workspaceId,
-    verificationStatus: { not: "superseded" },
     OR: [
       { scheduledAt: { gte: range.from, lt: range.toExclusive } },
       { publishedAt: { gte: range.from, lt: range.toExclusive } },
       { updatedAt: { gte: range.from, lt: range.toExclusive } },
     ],
-  };
+  } satisfies Prisma.PublicationWhereInput;
   const [
     total,
     stateGroups,
@@ -366,11 +367,12 @@ async function readOrganic(workspaceId: string, range: AnalyticsRangeInternal): 
 async function readSeo(workspaceId: string, range: AnalyticsRangeInternal): Promise<SeoAnalyticsInput> {
   const activityWhere = {
     workspaceId,
+    verificationStatus: { not: "superseded" },
     OR: [
       { analyzedAt: { gte: range.from, lt: range.toExclusive } },
       { updatedAt: { gte: range.from, lt: range.toExclusive } },
     ],
-  };
+  } satisfies Prisma.SeoTaskWhereInput;
   const [
     total,
     statuses,
