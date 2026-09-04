@@ -225,8 +225,9 @@ export function ConnectionsModal({
                   const needsAttention = channel.status === "error" || channel.status === "revoked";
                   const planned = channel.connectionAvailability === "planned";
                   const existingConnection = Boolean(channel.connectionId);
+                  const reconnectable = existingConnection || on || needsAttention;
                   const availableConnector = Boolean(channel.connectorPlatform && channel.configured);
-                  const blockedByLimit = limitReached && !existingConnection && availableConnector;
+                  const blockedByLimit = limitReached && !reconnectable && availableConnector;
                   const canConnect = canManage && availableConnector && !blockedByLimit;
                   const Icon = channel.platform ? ICONS[channel.platform] : undefined;
                   const rowKey = channel.connectionId ?? channel.platform ?? channel.name;
@@ -277,7 +278,7 @@ export function ConnectionsModal({
                             disabled={!canConnect || busy}
                             className="min-w-[72px] flex-none cursor-pointer rounded-[8px] px-[9px] py-[6px] font-sans text-[11.5px] font-semibold disabled:cursor-not-allowed disabled:opacity-55"
                             style={
-                              existingConnection
+                              reconnectable
                                 ? { border: "1px solid #DDDBD2", background: "transparent", color: "#746B5F" }
                                 : canConnect
                                   ? { border: "none", background: "#9A3D63", color: "#fff" }
@@ -286,7 +287,7 @@ export function ConnectionsModal({
                           >
                             {!canManage
                               ? "Read only"
-                              : existingConnection
+                              : reconnectable
                               ? "Reconnect"
                               : blockedByLimit
                                 ? "Limit reached"
