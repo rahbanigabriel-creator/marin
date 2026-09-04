@@ -10,14 +10,21 @@ import {
   AgentRunNotFoundError,
 } from "@/lib/agent-runs/errors";
 import { agentSnapshotHash } from "@/lib/agent-runs/hash";
+import {
+  isPaidMonitorPlatform,
+  isRecentPaidMonitorWindow,
+  paidMonitorWindow,
+} from "@/lib/agent-runs/paid-monitor";
 import { appendAgentRunEvent, lockAgentRun } from "@/lib/agent-runs/persistence";
 import { agentPlanForRequest } from "@/lib/agent-runs/registry";
 import type {
   AgentApprovalBinding,
   AgentApprovalDecisionRequest,
+  AgentPaidMonitorBinding,
   AgentRunCommandRequest,
   AgentRunListQuery,
   AgentRunRequest,
+  PaidMonitorConnectionDto,
 } from "@/lib/agent-runs/types";
 import { boundedRunLimits } from "@/lib/agent-runs/validation";
 import { resolveWorkspaceBillingPolicy } from "@/lib/billing/entitlements";
@@ -145,7 +152,21 @@ export async function createAgentRun(input: {
   const replay = await replayCreate(input.workspaceId, input.request.requestId, requestHash);
   if (replay) return replay;
   const now = input.now ?? new Date();
-  const plan = agentPlanForRequest(input.request.mode, Boolean(input.request.target));
+  const requestedTarget = input.request.target;
+  const plan = agentPlanForRequest(input.request.mode, requestedTarget);
+  const monitorWindow =
+    requestedTarget?.kind === "paid_monitor"
+      ? paidMonitorWindow(requestedTarget)
+      : null;
+  if (
+    requestedTarget?.kind === "paid_monitor" &&
+    (!monitorWindow || !isRecentPaidMonitorWindow(monitorWindow, now))
+  ) {
+    throw new AgentRunConflictError(
+      "monitor_window_not_recent",
+      "The paid monitor window must end within the most recent seven days",
+    );
+  }
 
   try {
     const runId = await prisma.$transaction(async (tx) => {
@@ -166,9 +187,38 @@ export async function createAgentRun(input: {
         if (!conversation) throw new AgentRunNotFoundError();
       }
       let target: Prisma.InputJsonValue | undefined;
-      if (input.request.target) {
+      if (requestedTarget?.kind === "paid_monitor") {
+        const connection = await tx.connection.findFirst({
+          where: { id: requestedTarget.connectionId, workspaceId: input.workspaceId },
+          select: {
+            id: true,
+            platform: true,
+            externalAccountId: true,
+            displayName: true,
+            status: true,
+          },
+        });
+        if (!connection) throw new AgentRunNotFoundError();
+        if (connection.status !== "connected" || !isPaidMonitorPlatform(connection.platform)) {
+          throw new AgentRunConflictError(
+            "monitor_connection_unavailable",
+            "The selected paid account is not an active Google Ads or Meta Ads connection",
+          );
+        }
+        const binding: AgentPaidMonitorBinding = {
+          kind: "paid_monitor",
+          connectionId: connection.id,
+          platform: connection.platform,
+          accountId: connection.externalAccountId,
+          accountName: connection.displayName ?? connection.externalAccountId,
+          from: requestedTarget.from,
+          to: requestedTarget.to,
+          boundAt: now.toISOString(),
+        };
+        target = binding as unknown as Prisma.InputJsonValue;
+      } else if (requestedTarget) {
         const draft = await tx.paidCampaignDraft.findFirst({
-          where: { id: input.request.target.objectId, workspaceId: input.workspaceId },
+          where: { id: requestedTarget.objectId, workspaceId: input.workspaceId },
           select: {
             id: true,
             state: true,
@@ -179,7 +229,7 @@ export async function createAgentRun(input: {
         });
         if (!draft) throw new AgentRunNotFoundError();
         const expectedState =
-          input.request.target.kind === "paid_create_paused"
+          requestedTarget.kind === "paid_create_paused"
             ? "ready"
             : "provider_paused";
         if (draft.state !== expectedState) {
@@ -190,7 +240,7 @@ export async function createAgentRun(input: {
           );
         }
         target = {
-          kind: input.request.target.kind,
+          kind: requestedTarget.kind,
           objectType: "paid_campaign_draft",
           objectId: draft.id,
           objectVersion: draft.version,
@@ -242,6 +292,41 @@ export async function createAgentRun(input: {
     }
     throw error;
   }
+}
+
+export async function listPaidMonitorConnections(
+  workspaceId: string,
+): Promise<PaidMonitorConnectionDto[]> {
+  const rows = await prisma.connection.findMany({
+    where: {
+      workspaceId,
+      status: "connected",
+      platform: { in: ["google_ads", "meta_ads"] },
+    },
+    select: {
+      id: true,
+      platform: true,
+      externalAccountId: true,
+      displayName: true,
+      currency: true,
+      timezone: true,
+      lastSuccessfulSyncAt: true,
+    },
+    orderBy: [{ platform: "asc" }, { displayName: "asc" }, { externalAccountId: "asc" }],
+  });
+  return rows.flatMap((row) =>
+    isPaidMonitorPlatform(row.platform)
+      ? [{
+          id: row.id,
+          platform: row.platform,
+          accountId: row.externalAccountId,
+          accountName: row.displayName ?? row.externalAccountId,
+          currency: row.currency,
+          timezone: row.timezone,
+          lastSuccessfulSyncAt: row.lastSuccessfulSyncAt?.toISOString() ?? null,
+        }]
+      : [],
+  );
 }
 
 export async function listAgentRuns(input: {

@@ -2,12 +2,19 @@ import "server-only";
 
 import { Inngest } from "inngest";
 
+import {
+  clampPaidBackfillDays,
+  isBackgroundPaidPlatform,
+  PAID_SYNC_JOB_TRIGGERS,
+  runPaidSyncJob,
+} from "./paid-sync";
+
 /**
  * Inngest client + background-sync functions (Stack C). Server-only.
  *
- * Background metric ingestion: a scheduled cron pull (every 6h) plus an
- * event-triggered backfill ("connection/connected") that, for a workspace,
- * walks its connected accounts and runs connector.fetchMetrics → ingestMetrics.
+ * Background metric ingestion: a scheduled cron pull (every 6h) plus
+ * event-triggered syncs. Google and Meta use the canonical account-scoped paid
+ * sync, while the legacy writer remains only for non-paid connectors.
  *
  * Graceful without keys (mirrors src/lib/agent/provider.ts, src/lib/db.ts and
  * src/lib/observability/llm-trace.ts):
@@ -212,8 +219,12 @@ async function runSync(
   let metricsWritten = 0;
 
   for (const connection of connections) {
-    // Only sync platforms we have a connector for; ignore unknown rows.
-    if (!isConnectorPlatform(connection.platform)) continue;
+    // Paid reporting must use syncPaidWorkspace so every row is account-scoped
+    // and every pull has a SyncAttempt health record.
+    if (
+      isBackgroundPaidPlatform(connection.platform)
+      || !isConnectorPlatform(connection.platform)
+    ) continue;
 
     let touched = false;
     for (const range of ranges) {
@@ -242,8 +253,8 @@ function isoDay(d: Date): string {
 }
 
 /**
- * Routine sync — every connected account over the recent {@link SYNC_WINDOW_DAYS}
- * window. Used by the cron, the on-connect backfill, and the "Sync now" button.
+ * Compatibility sync for non-paid connectors over the recent
+ * {@link SYNC_WINDOW_DAYS} window. Paid connectors use runPaidSyncJob instead.
  */
 export async function syncWorkspace(
   workspaceId: string,
@@ -282,7 +293,10 @@ export async function syncCampaignConfig(
 
   let upserted = 0;
   for (const connection of connections) {
-    if (!isConnectorPlatform(connection.platform)) continue;
+    if (
+      isBackgroundPaidPlatform(connection.platform)
+      || !isConnectorPlatform(connection.platform)
+    ) continue;
     const client = getConnectorClient(connection.platform);
     if (!client.fetchCampaigns) continue;
     try {
@@ -345,7 +359,10 @@ export async function syncAds(
 
   let upserted = 0;
   for (const connection of connections) {
-    if (!isConnectorPlatform(connection.platform)) continue;
+    if (
+      isBackgroundPaidPlatform(connection.platform)
+      || !isConnectorPlatform(connection.platform)
+    ) continue;
     const client = getConnectorClient(connection.platform);
     if (!client.fetchAds) continue;
     try {
@@ -394,7 +411,7 @@ export async function backfillWorkspace(
   workspaceId: string,
   opts?: { days?: number; platformFilter?: string },
 ): Promise<{ connections: number; metrics: number; chunks: number }> {
-  const days = Math.max(1, Math.min(opts?.days ?? BACKFILL_WINDOW_DAYS, BACKFILL_WINDOW_DAYS));
+  const days = clampPaidBackfillDays(opts?.days, BACKFILL_WINDOW_DAYS);
   const ranges = chunkRanges(days, BACKFILL_CHUNK_DAYS);
   const { connections, metrics } = await runSync(workspaceId, ranges, opts?.platformFilter);
   return { connections, metrics, chunks: ranges.length };
@@ -422,9 +439,14 @@ export const scheduledSync = inngest.createFunction(
       let connectionsProcessed = 0;
       let metricsWritten = 0;
       for (const ws of workspaces) {
-        const { connections, metrics } = await syncWorkspace(ws.id);
-        connectionsProcessed += connections;
-        metricsWritten += metrics;
+        const paid = await runPaidSyncJob({
+          workspaceId: ws.id,
+          range: recentRange(SYNC_WINDOW_DAYS),
+          trigger: PAID_SYNC_JOB_TRIGGERS.scheduled,
+        });
+        const nonPaid = await syncWorkspace(ws.id);
+        connectionsProcessed += paid.connections + nonPaid.connections;
+        metricsWritten += paid.metrics + nonPaid.metrics;
       }
 
       return {
@@ -458,15 +480,18 @@ export const syncOnConnection = inngest.createFunction(
     }
 
     return step.run("sync-workspace", async (): Promise<SyncResult> => {
-      const { connections, metrics } = await syncWorkspace(
-        data.workspaceId,
-        data.platform,
-      );
+      const paid = await runPaidSyncJob({
+        workspaceId: data.workspaceId,
+        range: recentRange(SYNC_WINDOW_DAYS),
+        trigger: PAID_SYNC_JOB_TRIGGERS.connected,
+        platformFilter: data.platform,
+      });
+      const nonPaid = await syncWorkspace(data.workspaceId, data.platform);
       return {
         ran: true,
         workspacesProcessed: 1,
-        connectionsProcessed: connections,
-        metricsWritten: metrics,
+        connectionsProcessed: paid.connections + nonPaid.connections,
+        metricsWritten: paid.metrics + nonPaid.metrics,
       };
     });
   },
@@ -474,8 +499,9 @@ export const syncOnConnection = inngest.createFunction(
 
 /**
  * Event-triggered historical backfill for one workspace, fired on
- * {@link CONNECTION_BACKFILL_EVENT}. Pulls deep history in chunks so the date
- * picker has real depth. Inert without a database.
+ * {@link CONNECTION_BACKFILL_EVENT}. Paid accounts use one capped account-scoped
+ * batch; the non-paid compatibility path retains bounded chunks. Inert without
+ * a database.
  */
 export const backfillOnConnection = inngest.createFunction(
   { id: "backfill-on-connection", name: "Backfill history on connection" },
@@ -492,15 +518,22 @@ export const backfillOnConnection = inngest.createFunction(
     }
 
     return step.run("backfill-workspace", async (): Promise<SyncResult> => {
-      const { connections, metrics } = await backfillWorkspace(data.workspaceId, {
-        days: data.days,
+      const days = clampPaidBackfillDays(data.days, BACKFILL_WINDOW_DAYS);
+      const paid = await runPaidSyncJob({
+        workspaceId: data.workspaceId,
+        range: recentRange(days),
+        trigger: PAID_SYNC_JOB_TRIGGERS.backfill,
+        platformFilter: data.platform,
+      });
+      const nonPaid = await backfillWorkspace(data.workspaceId, {
+        days,
         platformFilter: data.platform,
       });
       return {
         ran: true,
         workspacesProcessed: 1,
-        connectionsProcessed: connections,
-        metricsWritten: metrics,
+        connectionsProcessed: paid.connections + nonPaid.connections,
+        metricsWritten: paid.metrics + nonPaid.metrics,
       };
     });
   },

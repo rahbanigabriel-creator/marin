@@ -3,7 +3,12 @@ import test from "node:test";
 
 import type { Connection } from "@prisma/client";
 
-import { createPaidReadClient } from "../paid-clients";
+import {
+  createPaidReadClient,
+  isPaidSyncPlatform,
+  PAID_SYNC_PLATFORMS,
+  safePaidClient,
+} from "../paid-clients";
 import { PaidProviderError } from "../paid-errors";
 import { META_GRAPH_VERSION } from "../registry";
 
@@ -43,6 +48,44 @@ function json(value: unknown, status = 200): Response {
 }
 
 const tokenProvider = async () => "mock-access-token";
+
+test("default paid sync scope contains only Google Ads and Meta Ads", () => {
+  assert.deepEqual(PAID_SYNC_PLATFORMS, ["google_ads", "meta_ads"]);
+  assert.equal(isPaidSyncPlatform("google_ads"), true);
+  assert.equal(isPaidSyncPlatform("meta_ads"), true);
+  assert.equal(isPaidSyncPlatform("tiktok_ads"), false);
+  assert.throws(
+    () => safePaidClient("tiktok_ads"),
+    (error: unknown) => error instanceof PaidProviderError && error.code === "not_supported",
+  );
+});
+
+test("Google direct-account reporting never applies a process-global manager account", async () => {
+  const previousDeveloperToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
+  const previousLoginCustomer = process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID;
+  process.env.GOOGLE_ADS_DEVELOPER_TOKEN = "developer-token-for-test";
+  process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID = "999-999-9999";
+  const headers: Headers[] = [];
+  try {
+    const fetchMock = (async (_request: string | URL | Request, init?: RequestInit) => {
+      headers.push(new Headers(init?.headers));
+      const query = JSON.parse(String(init?.body ?? "{}")) as { query?: string };
+      return query.query?.includes("FROM customer")
+        ? json([{ results: [{ customer: { currencyCode: "EUR", timeZone: "Europe/Madrid" } }] }])
+        : json([{ results: [] }]);
+    }) as typeof fetch;
+
+    await createPaidReadClient("google_ads", fetchMock, tokenProvider)
+      .fetchMetricsSnapshot(connection("google_ads", "2222222222"), RANGE);
+    assert.ok(headers.length >= 2);
+    assert.ok(headers.every((value) => value.get("login-customer-id") === null));
+  } finally {
+    if (previousDeveloperToken === undefined) delete process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
+    else process.env.GOOGLE_ADS_DEVELOPER_TOKEN = previousDeveloperToken;
+    if (previousLoginCustomer === undefined) delete process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID;
+    else process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID = previousLoginCustomer;
+  }
+});
 
 test("Meta metrics follows every page without putting the token in the URL", async () => {
   const urls: string[] = [];

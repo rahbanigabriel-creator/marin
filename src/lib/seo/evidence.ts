@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { isAppleAppStoreListingUrl } from "@/lib/audit/document";
 import type {
   DerivedSeoTask,
   SeoEvidenceDto,
@@ -36,6 +37,7 @@ type SeoSourceResolutionState =
   | "selected"
   | "ambiguous"
   | "error"
+  | "not_applicable"
   | "unavailable"
   | "unmatched";
 
@@ -66,6 +68,8 @@ interface AuditFindingShape {
 }
 
 interface AuditSnapshotShape {
+  documentType: "website" | "apple_app_store";
+  finalUrl: string | null;
   findings: AuditFindingShape[];
 }
 
@@ -110,7 +114,24 @@ export function parseAuditSnapshot(value: unknown): AuditSnapshotShape | null {
   if (!snapshot || !Array.isArray(snapshot.findings)) return null;
   const findings = snapshot.findings.map(parseAuditFinding);
   if (findings.some((finding) => finding === null)) return null;
-  return { findings: findings as AuditFindingShape[] };
+  const finalUrl = bounded(snapshot.finalUrl, 2_048);
+  const inferredType = finalUrl && isAppleAppStoreListingUrl(finalUrl)
+    ? "apple_app_store"
+    : "website";
+  const declaredType = snapshot.documentType;
+  if (
+    declaredType !== undefined &&
+    declaredType !== "website" &&
+    declaredType !== "apple_app_store"
+  ) {
+    return null;
+  }
+  if (declaredType !== undefined && declaredType !== inferredType) return null;
+  return {
+    documentType: declaredType ?? inferredType,
+    finalUrl,
+    findings: findings as AuditFindingShape[],
+  };
 }
 
 function iso(value: Date): string {
@@ -220,6 +241,15 @@ export function selectSeoEvidenceSources(input: {
   facts: readonly SeoMetricRow[];
   connections: readonly SeoConnectionState[];
 }): SeoEvidenceSelection {
+  if (input.websiteUrl && isAppleAppStoreListingUrl(input.websiteUrl)) {
+    return {
+      facts: [],
+      resolutions: {
+        search_console: { source: "search_console", state: "not_applicable", connectionId: null },
+        ga4: { source: "ga4", state: "not_applicable", connectionId: null },
+      },
+    };
+  }
   const searchConsole = resolveMetricSource(
     "search_console",
     input.websiteUrl,
@@ -289,6 +319,17 @@ function metricSource(
       rowCount: null,
     };
   }
+  if (resolution.state === "not_applicable") {
+    return {
+      id: source,
+      label: SOURCE_LABELS[source],
+      state: "unavailable",
+      detail: `${SOURCE_LABELS[source]} cannot measure an Apple-owned App Store listing. Use the product website as the brand URL to add first-party website evidence.`,
+      observedFrom: null,
+      observedTo: null,
+      rowCount: null,
+    };
+  }
   return {
     id: source,
     label: SOURCE_LABELS[source],
@@ -310,14 +351,18 @@ export function buildSeoSources(
   let crawl: SeoSourceDto;
   if (audit && brand.auditedAt) {
     const observedAt = iso(brand.auditedAt);
+    const appStore = audit.documentType === "apple_app_store";
+    const findings = actionableCrawlFindings(audit);
     crawl = {
       id: "crawl",
-      label: SOURCE_LABELS.crawl,
+      label: appStore ? "App Store listing" : SOURCE_LABELS.crawl,
       state: "available",
-      detail: "Crawl findings are available from the latest persisted website audit.",
+      detail: appStore
+        ? "Public app metadata is available. Apple controls the page's technical HTML; audit a product website separately for technical SEO."
+        : "Crawl findings are available from the latest persisted website audit.",
       observedFrom: observedAt,
       observedTo: observedAt,
-      rowCount: audit.findings.length,
+      rowCount: findings.length,
     };
   } else if (brand.auditSnapshot !== null && brand.auditSnapshot !== undefined) {
     crawl = {
@@ -374,6 +419,12 @@ function categoryForFinding(category: string): "technical" | "content" {
 
 function stableKey(parts: readonly string[]): string {
   return createHash("sha256").update(parts.join("\u001f")).digest("hex").slice(0, 32);
+}
+
+function actionableCrawlFindings(audit: AuditSnapshotShape): AuditFindingShape[] {
+  if (audit.documentType !== "apple_app_store") return audit.findings;
+  return audit.findings.filter((finding) =>
+    finding.code.startsWith("app-store-") && finding.code !== "app-store-managed-page");
 }
 
 function exactMetricEvidence(
@@ -466,7 +517,10 @@ export function deriveSeoTasks(
   const audit = parseAuditSnapshot(brand.auditSnapshot);
   if (audit && brand.auditedAt) {
     const observedAt = iso(brand.auditedAt);
-    for (const finding of audit.findings.slice(0, 50)) {
+    const crawlLabel = audit.documentType === "apple_app_store"
+      ? "App Store listing"
+      : SOURCE_LABELS.crawl;
+    for (const finding of actionableCrawlFindings(audit).slice(0, 50)) {
       const severity = severityForFinding(finding.severity);
       tasks.push({
         fingerprint: `crawl:${stableKey([finding.code, finding.category, finding.title])}`,
@@ -479,7 +533,7 @@ export function deriveSeoTasks(
         recommendedFix: finding.recommendation,
         evidence: [{
           source: "crawl",
-          label: SOURCE_LABELS.crawl,
+          label: crawlLabel,
           metric: `finding:${finding.code}`,
           value: finding.evidence,
           dateRange: { from: observedAt, to: observedAt },

@@ -3,6 +3,12 @@ import type { Prisma } from "@prisma/client";
 import type { WorkspaceRole } from "@/lib/auth";
 import { canInvokeAgentTool, requiresHumanApproval } from "@/lib/agent-runs/capabilities";
 import { agentSnapshotHash, agentToolIdempotencyKey } from "@/lib/agent-runs/hash";
+import {
+  analyzePaidMonitor,
+  exactPaidMonitorBinding,
+  isRecentPaidMonitorWindow,
+  paidMonitorWindow,
+} from "@/lib/agent-runs/paid-monitor";
 import { appendAgentRunEvent, lockAgentRun } from "@/lib/agent-runs/persistence";
 import { agentPlanByKey } from "@/lib/agent-runs/registry";
 import type { AgentApprovalBinding, AgentRunLimits, AgentRunStatus } from "@/lib/agent-runs/types";
@@ -175,6 +181,7 @@ async function executeLockedAgentRun(input: {
       planKey: plan.key,
       brandId: run.brandId,
       goal: run.goal,
+      target: run.target,
     });
     const limits = asLimits(run.limits);
     if (run.stepsUsed >= limits.maxSteps || run.toolCallsUsed >= limits.maxToolCalls) {
@@ -390,6 +397,234 @@ async function executeLockedAgentRun(input: {
       ordinal,
       toolName: plan.tool.name,
     });
+
+    if (plan.behavior === "monitor_paid_campaigns") {
+      const binding = exactPaidMonitorBinding(run.target);
+      const window = binding ? paidMonitorWindow(binding) : null;
+      if (!binding || !window || !isRecentPaidMonitorWindow(window, input.now)) {
+        return failRun(tx, {
+          workspaceId: input.workspaceId,
+          runId: run.id,
+          attempt: run.attempt,
+          code: "monitor_binding_invalid",
+          message: "The exact paid account or recent monitoring window is no longer valid",
+          now: input.now,
+          toolName: plan.tool.name,
+          risk: plan.tool.risk,
+          inputHash,
+        });
+      }
+
+      const connection = await tx.connection.findFirst({
+        where: {
+          id: binding.connectionId,
+          workspaceId: input.workspaceId,
+          status: "connected",
+          platform: binding.platform,
+          externalAccountId: binding.accountId,
+        },
+        select: {
+          id: true,
+          platform: true,
+          externalAccountId: true,
+          displayName: true,
+          currency: true,
+          timezone: true,
+          lastSuccessfulSyncAt: true,
+        },
+      });
+      if (!connection) {
+        return failRun(tx, {
+          workspaceId: input.workspaceId,
+          runId: run.id,
+          attempt: run.attempt,
+          code: "monitor_connection_unavailable",
+          message: "The selected paid account is no longer actively connected",
+          now: input.now,
+          toolName: plan.tool.name,
+          risk: plan.tool.risk,
+          inputHash,
+        });
+      }
+
+      // Keep this plan provider-isolated: only canonical persisted paid data is read.
+      const [attempts, facts, campaigns] = await Promise.all([
+        tx.syncAttempt.findMany({
+          where: { workspaceId: input.workspaceId, connectionId: connection.id },
+          select: {
+            id: true,
+            status: true,
+            requestedFrom: true,
+            requestedTo: true,
+            observedFrom: true,
+            observedTo: true,
+            startedAt: true,
+            completedAt: true,
+          },
+          orderBy: [{ startedAt: "desc" }, { id: "desc" }],
+          take: 50,
+        }),
+        tx.metricFact.findMany({
+          where: {
+            workspaceId: input.workspaceId,
+            connectionId: connection.id,
+            platform: binding.platform,
+            staleAt: null,
+            date: { gte: window.from, lte: window.to },
+            metric: {
+              in: ["spend", "revenue", "conversions", "clicks", "impressions"],
+            },
+          },
+          select: {
+            id: true,
+            date: true,
+            campaignExternalId: true,
+            campaignName: true,
+            metric: true,
+            value: true,
+            currency: true,
+          },
+          orderBy: [{ date: "asc" }, { id: "asc" }],
+          take: 20_001,
+        }),
+        tx.campaign.findMany({
+          where: {
+            workspaceId: input.workspaceId,
+            connectionId: connection.id,
+            platform: binding.platform,
+            staleAt: null,
+          },
+          select: {
+            id: true,
+            providerExternalId: true,
+            name: true,
+            status: true,
+            objective: true,
+            budget: true,
+            currency: true,
+          },
+          orderBy: [{ name: "asc" }, { id: "asc" }],
+          take: 501,
+        }),
+      ]);
+      if (facts.length > 20_000 || campaigns.length > 500) {
+        return failRun(tx, {
+          workspaceId: input.workspaceId,
+          runId: run.id,
+          attempt: run.attempt,
+          code: "monitor_data_limit",
+          message: "The persisted paid dataset exceeds this bounded monitor run",
+          now: input.now,
+          toolName: plan.tool.name,
+          risk: plan.tool.risk,
+          inputHash,
+        });
+      }
+
+      const latestAttempt = attempts[0] ?? null;
+      const latestUsableAttempt =
+        attempts.find((attempt) => attempt.status === "succeeded" || attempt.status === "partial") ?? null;
+      const report = analyzePaidMonitor({
+        now: input.now,
+        window,
+        connection: {
+          id: connection.id,
+          platform: binding.platform,
+          accountId: connection.externalAccountId,
+          accountName: connection.displayName ?? connection.externalAccountId,
+          currency: connection.currency,
+          timezone: connection.timezone,
+          lastSuccessfulSyncAt: connection.lastSuccessfulSyncAt,
+        },
+        latestAttempt,
+        latestUsableAttempt,
+        facts,
+        campaigns,
+      });
+      const outputHash = agentSnapshotHash(report);
+      await tx.agentRunStep.create({
+        data: {
+          workspaceId: input.workspaceId,
+          runId: run.id,
+          ordinal,
+          attempt: run.attempt,
+          toolName: plan.tool.name,
+          risk: plan.tool.risk,
+          status: "succeeded",
+          idempotencyKey: stepKey,
+          inputHash,
+          outputObjectType: "paid_monitor_report",
+          outputObjectId: run.id,
+          outputObjectVersion: run.attempt,
+          outputSnapshotHash: outputHash,
+          completedAt: input.now,
+        },
+      });
+      await appendAgentRunEvent(tx, {
+        workspaceId: input.workspaceId,
+        runId: run.id,
+        eventKey: `monitor:source:${run.attempt}`,
+        event: {
+          type: "evidence_observed",
+          label: "Persisted paid source inspected",
+          detail: `Read ${report.summary.factCount} canonical metric facts and ${report.summary.campaignCount} campaign records for ${binding.from} to ${binding.to}. Source observed through ${report.source.observedTo ?? "an unavailable timestamp"}; sync recorded ${report.source.syncedAt ?? "at an unavailable timestamp"}.`,
+          objectType: "connection",
+          objectId: connection.id,
+          evidenceIds: report.source.evidenceIds,
+        },
+      });
+      for (const [index, finding] of report.findings.entries()) {
+        await appendAgentRunEvent(tx, {
+          workspaceId: input.workspaceId,
+          runId: run.id,
+          eventKey: `monitor:finding:${run.attempt}:${index + 1}`,
+          event: {
+            type: "evidence_observed",
+            label: `${finding.kind === "alert" ? "Alert" : "Recommendation"}: ${finding.label}`,
+            detail: finding.detail,
+            objectType: finding.objectType,
+            objectId: finding.objectId,
+            evidenceIds: finding.evidenceIds,
+          },
+        });
+      }
+      const updated = await tx.agentRun.update({
+        where: { id: run.id },
+        data: {
+          status: "succeeded",
+          stepsUsed: { increment: 1 },
+          toolCallsUsed: { increment: 1 },
+          completedAt: input.now,
+          failureCode: null,
+          failureMessage: null,
+          version: { increment: 1 },
+        },
+      });
+      await appendAgentRunEvent(tx, {
+        workspaceId: input.workspaceId,
+        runId: run.id,
+        eventKey: `monitor:completed:${run.attempt}`,
+        event: {
+          type: "step_succeeded",
+          label: "One-time paid campaign monitor completed",
+          detail: `${report.summary.alerts} alerts and ${report.summary.recommendations} recommendations were recorded. Read-only analysis completed; no provider request was made.`,
+          objectType: "paid_monitor_report",
+          objectId: run.id,
+          evidenceIds: report.source.evidenceIds,
+        },
+      });
+      await appendAgentRunEvent(tx, {
+        workspaceId: input.workspaceId,
+        runId: run.id,
+        eventKey: `run:succeeded:${updated.version}`,
+        event: {
+          type: "run_succeeded",
+          label: "Agent run completed",
+          detail: "This was a one-time check; no recurring monitor was scheduled.",
+        },
+      });
+      return { ran: true, status: "succeeded" };
+    }
 
     if (plan.behavior === "request_input") {
       await tx.agentRunStep.create({

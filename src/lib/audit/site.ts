@@ -6,6 +6,15 @@ import { Readable } from "node:stream";
 
 import { parse as parseHtml } from "node-html-parser";
 
+import {
+  appleAppStoreListingId,
+  isAppleAppStoreListingUrl,
+  type AuditDocumentType,
+} from "@/lib/audit/document";
+
+export { appleAppStoreListingId, isAppleAppStoreListingUrl } from "@/lib/audit/document";
+export type { AuditDocumentType } from "@/lib/audit/document";
+
 export const DEFAULT_AUDIT_TIMEOUT_MS = 12_000;
 export const DEFAULT_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_MAX_REDIRECTS = 5;
@@ -21,6 +30,16 @@ const HEADING_TEXT_LIMIT = 240;
 
 export type AuditSeverity = "critical" | "warning" | "info";
 
+export interface AppStoreListingMetadata {
+  appId: string;
+  name: string;
+  description: string | null;
+  valueProposition: string | null;
+  features: string[];
+  developer: string | null;
+  categories: string[];
+}
+
 export type SiteAuditErrorCode =
   | "INVALID_URL"
   | "UNSAFE_URL"
@@ -29,6 +48,7 @@ export type SiteAuditErrorCode =
   | "REDIRECT_ERROR"
   | "TOO_MANY_REDIRECTS"
   | "HTTP_ERROR"
+  | "APP_STORE_LISTING_UNAVAILABLE"
   | "NOT_HTML"
   | "RESPONSE_TOO_LARGE"
   | "FETCH_FAILED";
@@ -83,6 +103,9 @@ export interface AuditFinding {
 }
 
 export interface SiteAuditResult {
+  /** Optional for backwards compatibility with audit snapshots created before source classification. */
+  documentType?: AuditDocumentType;
+  appStore?: AppStoreListingMetadata;
   sourceUrl: string;
   finalUrl: string;
   title: string | null;
@@ -413,6 +436,16 @@ export async function auditSite(input: string | URL, options: SiteAuditOptions =
       }
 
       if (!response.ok) {
+        if (
+          isAppleAppStoreListingUrl(currentUrl) &&
+          (response.status === 404 || response.status === 410)
+        ) {
+          throw new SiteAuditError(
+            "APP_STORE_LISTING_UNAVAILABLE",
+            `The App Store listing is not available in this storefront (HTTP ${response.status}).`,
+            { status: response.status },
+          );
+        }
         throw new SiteAuditError("HTTP_ERROR", `The website returned HTTP ${response.status}.`, {
           status: response.status,
         });
@@ -429,7 +462,15 @@ export async function auditSite(input: string | URL, options: SiteAuditOptions =
       }
 
       const html = await readBoundedHtml(response, maxResponseBytes, contentTypeHeader, deadline);
-      return extractSiteAudit(html, { sourceUrl, finalUrl: currentUrl });
+      const audit = extractSiteAudit(html, { sourceUrl, finalUrl: currentUrl });
+      if (audit.documentType === "apple_app_store" && !audit.appStore) {
+        throw new SiteAuditError(
+          "APP_STORE_LISTING_UNAVAILABLE",
+          "Apple responded, but Marpin could not verify public metadata for this app listing.",
+          { status: response.status },
+        );
+      }
+      return audit;
     }
   } catch (error) {
     if (error instanceof SiteAuditError) throw error;
@@ -456,31 +497,52 @@ export function extractSiteAudit(
   });
 
   const baseUrl = resolveDocumentBase(root, finalUrl);
-  const title = cleanText(root.querySelector("title")?.textContent);
-  const metaDescription = findMetaContent(root, "description");
+  const documentType: AuditDocumentType = isAppleAppStoreListingUrl(finalUrl)
+    ? "apple_app_store"
+    : "website";
+  const pageTitle = cleanText(root.querySelector("title")?.textContent);
+  const pageMetaDescription = findMetaContent(root, "description");
   const canonical = findCanonical(root, baseUrl);
   const lang = cleanText(root.querySelector("html")?.getAttribute("lang"))?.toLowerCase() ?? null;
   const h1Elements = root.querySelectorAll("h1");
   const h2Elements = root.querySelectorAll("h2");
   const robots = extractRobots(root);
   const jsonLd = extractJsonLd(root);
+  const appId = appleAppStoreListingId(finalUrl);
+  const appStore = documentType === "apple_app_store" && appId
+    ? normalizeAppStoreListing(jsonLd.softwareApplication, appId)
+    : null;
+  const title = appStore?.name ?? pageTitle;
+  const metaDescription = appStore?.valueProposition ?? appStore?.description ?? pageMetaDescription;
   const links = countLinks(root, baseUrl, finalUrl);
   const images = countImages(root);
-  const wordCount = countVisibleWords(root);
+  const wordCount = appStore?.description
+    ? countWords(appStore.description)
+    : countVisibleWords(root);
+  const headings = appStore
+    ? {
+        h1: [appStore.name],
+        h2: appStore.features,
+        h1Count: 1,
+        h2Count: appStore.features.length,
+      }
+    : {
+        h1: summarizeHeadings(h1Elements),
+        h2: summarizeHeadings(h2Elements),
+        h1Count: h1Elements.length,
+        h2Count: h2Elements.length,
+      };
 
   const signals: AuditSignals = {
+    documentType,
+    ...(appStore ? { appStore } : {}),
     sourceUrl: sourceUrl.href,
     finalUrl: finalUrl.href,
     title,
     metaDescription,
     canonical,
     lang,
-    headings: {
-      h1: summarizeHeadings(h1Elements),
-      h2: summarizeHeadings(h2Elements),
-      h1Count: h1Elements.length,
-      h2Count: h2Elements.length,
-    },
+    headings,
     wordCount,
     links,
     images,
@@ -497,6 +559,10 @@ export function extractSiteAudit(
 export function assessSiteSignals(
   signals: AuditSignals,
 ): Pick<SiteAuditResult, "score" | "findings"> {
+  if (signals.documentType === "apple_app_store") {
+    return assessAppleAppStoreSignals(signals);
+  }
+
   const findings: AuditFinding[] = [];
   let score = 100;
 
@@ -684,6 +750,63 @@ export function assessSiteSignals(
       title: "No JSON-LD structured data was found",
       evidence: "The page contains no application/ld+json script block.",
       recommendation: "Add relevant structured data only when it accurately describes visible page content.",
+    });
+  }
+
+  return { score: Math.max(0, Math.min(100, score)), findings };
+}
+
+function assessAppleAppStoreSignals(
+  signals: AuditSignals,
+): Pick<SiteAuditResult, "score" | "findings"> {
+  const findings: AuditFinding[] = [];
+  let score = 100;
+  const addFinding = (finding: AuditFinding) => {
+    score -= Math.max(0, Math.round(finding.scoreImpact));
+    findings.push(finding);
+  };
+
+  if (!signals.appStore) {
+    addFinding({
+      code: "app-store-metadata-unavailable",
+      category: "structured-data",
+      severity: "critical",
+      title: "App Store listing metadata could not be verified",
+      evidence: "The page did not expose a valid SoftwareApplication record for this app id.",
+      recommendation: "Check that the public App Store link opens in this storefront, then retry the audit.",
+      scoreImpact: 50,
+    });
+  } else {
+    if (!signals.appStore.description) {
+      addFinding({
+        code: "app-store-description-missing",
+        category: "content",
+        severity: "warning",
+        title: "App Store description is unavailable",
+        evidence: `Apple's public metadata for app ${signals.appStore.appId} contains no description.`,
+        recommendation: "Add or restore the app description in App Store Connect, then run the audit again.",
+        scoreImpact: 20,
+      });
+    }
+    if (signals.appStore.categories.length === 0) {
+      addFinding({
+        code: "app-store-category-missing",
+        category: "metadata",
+        severity: "warning",
+        title: "App Store category is unavailable",
+        evidence: `Apple's public metadata for app ${signals.appStore.appId} contains no category.`,
+        recommendation: "Confirm the app's primary category in App Store Connect, then run the audit again.",
+        scoreImpact: 10,
+      });
+    }
+    addFinding({
+      code: "app-store-managed-page",
+      category: "metadata",
+      severity: "info",
+      title: "Apple controls this page's technical markup",
+      evidence: `Marpin verified App Store app ${signals.appStore.appId} from Apple's public structured metadata.`,
+      recommendation: "Use this audit for app and brand context. Audit a product website separately for technical SEO and first-party analytics.",
+      scoreImpact: 0,
     });
   }
 
@@ -1008,23 +1131,27 @@ function extractJsonLd(root: ParsedHtmlElement): {
   types: string[];
   blockCount: number;
   invalidBlockCount: number;
+  softwareApplication: Record<string, unknown> | null;
 } {
   const types = new Set<string>();
   let blockCount = 0;
   let invalidBlockCount = 0;
+  let softwareApplication: Record<string, unknown> | null = null;
 
   for (const script of root.querySelectorAll("script")) {
     const type = script.getAttribute("type")?.split(";", 1)[0].trim().toLowerCase();
     if (type !== "application/ld+json") continue;
     blockCount += 1;
     try {
-      collectJsonLdTypes(JSON.parse(script.textContent), types, new Set<object>());
+      const parsed: unknown = JSON.parse(script.textContent);
+      collectJsonLdTypes(parsed, types, new Set<object>());
+      softwareApplication ??= findJsonLdType(parsed, "SoftwareApplication", new Set<object>());
     } catch {
       invalidBlockCount += 1;
     }
   }
 
-  return { types: [...types].sort(), blockCount, invalidBlockCount };
+  return { types: [...types].sort(), blockCount, invalidBlockCount, softwareApplication };
 }
 
 function collectJsonLdTypes(value: unknown, types: Set<string>, seen: Set<object>): void {
@@ -1048,21 +1175,132 @@ function collectJsonLdTypes(value: unknown, types: Set<string>, seen: Set<object
   for (const nested of Object.values(record)) collectJsonLdTypes(nested, types, seen);
 }
 
+function findJsonLdType(
+  value: unknown,
+  expectedType: string,
+  seen: Set<object>,
+): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || seen.has(value as object)) return null;
+  seen.add(value as object);
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const match = findJsonLdType(item, expectedType, seen);
+      if (match) return match;
+    }
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const schemaType = record["@type"];
+  if (
+    schemaType === expectedType ||
+    (Array.isArray(schemaType) && schemaType.includes(expectedType))
+  ) {
+    return record;
+  }
+  for (const nested of Object.values(record)) {
+    const match = findJsonLdType(nested, expectedType, seen);
+    if (match) return match;
+  }
+  return null;
+}
+
+function normalizeAppStoreListing(
+  value: Record<string, unknown> | null,
+  appId: string,
+): AppStoreListingMetadata | null {
+  if (!value) return null;
+  const name = boundedCleanText(value.name, 240);
+  if (!name) return null;
+  const description = appStoreDescription(value.description);
+  const author = value.author && typeof value.author === "object" && !Array.isArray(value.author)
+    ? value.author as Record<string, unknown>
+    : null;
+  const genres = boundedTextList(value.genre, 20, 120);
+  const categories = Array.from(new Set(
+    genres.length ? genres : boundedTextList(value.applicationCategory, 20, 120),
+  )).slice(0, 20);
+  return {
+    appId,
+    name,
+    description: description.full,
+    valueProposition: description.valueProposition,
+    features: description.features,
+    developer: boundedCleanText(author?.name, 240),
+    categories,
+  };
+}
+
+function boundedCleanText(value: unknown, maximum: number): string | null {
+  return typeof value === "string"
+    ? cleanText(stripDirectionalFormatting(value))?.slice(0, maximum) ?? null
+    : null;
+}
+
+function boundedTextList(value: unknown, maxItems: number, maxLength: number): string[] {
+  const values = Array.isArray(value) ? value : [value];
+  return values
+    .slice(0, maxItems)
+    .map((item) => boundedCleanText(item, maxLength))
+    .filter((item): item is string => item !== null);
+}
+
+function stripDirectionalFormatting(value: string): string {
+  return value.replace(/[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "");
+}
+
+function appStoreDescription(value: unknown): {
+  full: string | null;
+  valueProposition: string | null;
+  features: string[];
+} {
+  if (typeof value !== "string") {
+    return { full: null, valueProposition: null, features: [] };
+  }
+  const raw = stripDirectionalFormatting(value).replace(/\r\n?/g, "\n");
+  const blocks = raw
+    .split(/\n{2,}/)
+    .map((block) => cleanText(block))
+    .filter((block): block is string => block !== null);
+  const headingBlocks = blocks.filter(isAppStoreSectionHeading);
+  const features = Array.from(new Set(headingBlocks.map(sentenceCase))).slice(0, 12);
+  const valueProposition = blocks.find((block) => !isAppStoreSectionHeading(block))?.slice(0, 500) ?? null;
+  return {
+    full: cleanText(raw)?.slice(0, 4_000) ?? null,
+    valueProposition,
+    features,
+  };
+}
+
+function isAppStoreSectionHeading(value: string): boolean {
+  if (value.length < 3 || value.length > 120 || /[.!?]$/.test(value)) return false;
+  return value === value.toLocaleUpperCase() && value !== value.toLocaleLowerCase();
+}
+
+function sentenceCase(value: string): string {
+  const lower = value.toLocaleLowerCase();
+  return `${lower.charAt(0).toLocaleUpperCase()}${lower.slice(1)}`;
+}
+
 function countVisibleWords(root: ParsedHtmlElement): number {
   for (const tag of ["script", "style", "noscript", "template", "svg", "head"]) {
     for (const element of root.querySelectorAll(tag)) element.remove();
   }
   const visibleText = cleanText(root.querySelector("body")?.structuredText ?? root.structuredText) ?? "";
-  if (!visibleText) return 0;
+  return countWords(visibleText);
+}
+
+function countWords(value: string): number {
+  if (!value) return 0;
 
   if (typeof Intl.Segmenter === "function") {
     const segmenter = new Intl.Segmenter(undefined, { granularity: "word" });
     let words = 0;
-    for (const segment of segmenter.segment(visibleText)) {
+    for (const segment of segmenter.segment(value)) {
       if (segment.isWordLike) words += 1;
     }
     return words;
   }
 
-  return visibleText.match(/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu)?.length ?? 0;
+  return value.match(/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu)?.length ?? 0;
 }

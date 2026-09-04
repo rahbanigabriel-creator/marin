@@ -104,6 +104,9 @@ const FAILURE_MESSAGES: Record<string, string> = {
   deadline_exceeded: "The run reached its time limit and stopped safely.",
   internal_tool_failed: "A reviewed internal step could not be completed.",
   limit_reached: "The run reached its configured usage limit and stopped safely.",
+  monitor_binding_invalid: "The selected paid account or recent monitoring window is no longer valid.",
+  monitor_connection_unavailable: "The selected Google Ads or Meta Ads account is no longer connected.",
+  monitor_data_limit: "The paid dataset is too large for this bounded monitor run.",
   plan_unavailable: "This reviewed agent workflow is temporarily unavailable.",
 };
 

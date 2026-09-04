@@ -33,7 +33,7 @@ export function DataPrivacySettings() {
             <h2 id="export-heading" className="m-0 text-[18px] font-semibold text-ink-900">Workspace export</h2>
           </div>
           <p className="mb-0 mt-[7px] max-w-[610px] text-[13px] leading-[1.55] text-ink-500">
-            Download a JSON copy of brand context, conversations, calendar content, SEO work, paid reporting and drafts, agent runs, influencer CRM, usage, and billing references. OAuth credentials and private storage keys are excluded.
+            Download a JSON copy of audit context, conversations, calendar content, SEO work, paid reporting and drafts, agent runs, influencer CRM, usage, and billing references. OAuth credentials and private storage keys are excluded.
           </p>
         </div>
         <a href="/api/settings/export" className={`inline-flex h-[38px] items-center justify-center gap-[7px] rounded-[7px] bg-ink-900 px-[13px] text-[12px] font-semibold text-white no-underline ${focusRing}`}>

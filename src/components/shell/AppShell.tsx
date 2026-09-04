@@ -32,6 +32,10 @@ import { AgentRunsWorkspace } from "@/components/agents";
 import { DistributionAnalytics } from "@/components/analytics/DistributionAnalytics";
 import type { BillingSnapshotDto } from "@/lib/billing/types";
 import {
+  connectorStatusFeedback,
+  type ConnectorUiFeedback,
+} from "@/lib/connectors/status-copy";
+import {
   PRODUCT_PLATFORMS,
   isLaunchConnectorPlatform,
   type ProductMode,
@@ -145,6 +149,7 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
   const [channels, setChannels] = useState<Channel[]>(PRODUCT_CHANNELS);
   const [workspaceName, setWorkspaceName] = useState("Personal workspace");
   const [modalOpen, setModalOpen] = useState(false);
+  const [connectionFeedback, setConnectionFeedback] = useState<ConnectorUiFeedback | null>(null);
   const [activeChat, setActiveChat] = useState(0);
   const [activeClient, setActiveClient] = useState<string | null>(null);
   const [founderConfig, setFounderConfig] = useState<ForecastConfig>(DEFAULT_FORECAST);
@@ -176,15 +181,25 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
   const [auditUrl, setAuditUrl] = useState("");
   const [billing, setBilling] = useState<BillingSnapshotDto | null>(null);
 
+  const openConnections = useCallback(() => {
+    setConnectionFeedback(null);
+    setModalOpen(true);
+  }, []);
+
+  const closeConnections = useCallback(() => {
+    setModalOpen(false);
+    setConnectionFeedback(null);
+  }, []);
+
   const dataset = PERSONAS[persona];
   const realProductMode = !DEMO_MODE;
-  const workspaceCanManage = billing?.canManage !== false;
+  const workspaceCanManage = billing?.canManage === true;
   const workspaceReadOnly = !workspaceCanManage;
   const realChannels = channels;
   const connectedCount = realProductMode
     ? new Set(
         realChannels
-          .filter((channel) => channel.connectionId && channel.status !== "disconnected")
+          .filter((channel) => channel.connectionId && channel.status === "connected")
           .map((channel) => channel.connectionId),
       ).size
     : realChannels.filter((channel) => channel.status === "connected").length;
@@ -388,15 +403,20 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
     void refreshConnections();
     // A platform just connected → pull its data now rather than waiting for the
     // 6-hourly Inngest cron, then refresh the connection list again.
-    if (params.get("connect") === "connected") {
+    const connectStatus = params.get("connect");
+    setConnectionFeedback(connectorStatusFeedback(connectStatus, params.get("platform")));
+    setModalOpen(true);
+    if (connectStatus === "connected") {
       void fetch("/api/sync", { method: "POST" })
         .then(() => refreshConnections())
         .catch(() => {});
-    } else if (params.get("connect") === "connection_limit") {
-      setModalOpen(true);
+    } else if (connectStatus === "connection_limit") {
       void refreshBilling();
     }
-    window.history.replaceState({}, "", window.location.pathname);
+    params.delete("connect");
+    params.delete("platform");
+    const remaining = params.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${remaining ? `?${remaining}` : ""}`);
   }, [realProductMode, refreshBilling, refreshConnections]);
 
   const ask = useCallback(
@@ -450,7 +470,7 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
     setBrandBusy(true);
     setBrandError(null);
     setScreen("brand");
-    writeWorkspaceLocation({ area: "brand" });
+    writeWorkspaceLocation({ area: "assistant" });
     try {
       const response = await fetch("/api/brands/audit", {
         method: "POST",
@@ -586,13 +606,13 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
     writeWorkspaceLocation({ area: "organic", view: "calendar" });
   }, [parkCurrentAnswer, productMode, screen]);
 
-  const openBrand = useCallback(() => {
+  const openWebsiteAudit = useCallback(() => {
     if (screen === "brand") return;
     stop();
     setScreen("brand");
     setActiveClient(null);
     setBrandError(null);
-    writeWorkspaceLocation({ area: "brand" });
+    writeWorkspaceLocation({ area: "assistant" });
   }, [screen, stop]);
 
   const openPaid = useCallback(() => {
@@ -626,10 +646,7 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
       const location = parseWorkspaceLocation(window.location.search);
       stop();
       setActiveClient(null);
-      if (location.area === "brand") {
-        setProductMode("assistant");
-        setScreen("brand");
-      } else if (location.area === "organic") {
+      if (location.area === "organic") {
         setProductMode("organic");
         setScreen(location.view === "assistant" ? "chat" : "organic");
       } else if (location.area === "paid") {
@@ -856,9 +873,9 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
         onViewDashboard={realProductMode ? openPaid : undefined}
         onViewAssistant={realProductMode ? openAssistant : undefined}
         onViewOrganic={realProductMode ? openOrganic : undefined}
-        onViewBrand={realProductMode ? openBrand : undefined}
         onViewAnalytics={realProductMode ? openAnalytics : undefined}
         onViewAgents={realProductMode ? openAgents : undefined}
+        onOpenWebsiteAudit={realProductMode ? openWebsiteAudit : undefined}
         activeArea={screen === "brand"
           ? "brand"
           : screen === "analytics"
@@ -867,8 +884,8 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
               ? "agents"
               : productMode}
         onNewChat={newChat}
-        onStartPlan={() => (realProductMode ? setModalOpen(true) : setScreen("onboarding"))}
-        onOpenModal={() => setModalOpen(true)}
+        onStartPlan={() => (realProductMode ? openConnections() : setScreen("onboarding"))}
+        onOpenModal={openConnections}
         primaryActionLabel={realProductMode ? "Manage connections" : "New plan"}
         collapsed={sidebarCollapsed}
         onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
@@ -903,7 +920,7 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
                       : screen === "agents"
                         ? "Agent runs"
                       : screen === "brand"
-                        ? "Brand"
+                        ? "Website audit"
                         : screen === "organic"
                           ? "Content planner"
                       : scenario.title
@@ -931,7 +948,7 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
               <AgentRunsWorkspace
                 brandId={brand?.id ?? null}
                 canManage={workspaceCanManage}
-                onOpenBrand={openBrand}
+                onStartAudit={openWebsiteAudit}
               />
             ) : screen === "analytics" ? (
               <DistributionAnalytics />
@@ -962,7 +979,7 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
               <WelcomeScreen
                 onSend={submitWelcome}
                 onSuggest={ask}
-                // True first-run stays URL-first. Once Brand memory exists, the
+                // True first-run stays URL-first. Once audit context exists, the
                 // clean welcome becomes a contextual strategy launchpad.
                 suggestions={
                   realProductMode ? (brand ? liveSuggestions : []) : dataset.suggestions
@@ -983,7 +1000,7 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
               />
             ) : screen === "dashboard" ? (
               <CampaignsScreen
-                onOpenConnections={() => setModalOpen(true)}
+                onOpenConnections={openConnections}
                 canManage={workspaceCanManage}
               />
             ) : (
@@ -1009,7 +1026,7 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
                 onSuggest={ask}
                 suggestions={realProductMode ? liveSuggestions : dataset.suggestions}
                 dataMode={displayDataMode}
-                onOpenConnections={() => setModalOpen(true)}
+                onOpenConnections={openConnections}
                 connectedCount={connectedCount}
                 channels={realChannels}
                 onConnect={connectChannel}
@@ -1029,10 +1046,11 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
           connectedCount={billing?.resources.connections ?? connectedCount}
           maxConnections={billing?.entitlements.maxConnections}
           planName={billing?.plan.name}
-          onClose={() => setModalOpen(false)}
+          onClose={closeConnections}
           onConnect={connectChannel}
           onDisconnect={disconnectChannel}
           canManage={workspaceCanManage}
+          initialFeedback={connectionFeedback}
         />
       )}
     </div>

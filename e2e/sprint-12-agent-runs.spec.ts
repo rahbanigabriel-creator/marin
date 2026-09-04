@@ -157,6 +157,15 @@ function approvalRun(): AgentRunDto {
 async function mockApp(page: Page, canManage: boolean) {
   let runs = [approvalRun(), run()];
   const mutations: Array<{ path: string; body: Record<string, unknown> }> = [];
+  const paidConnection = {
+    id: "connection_google_ads",
+    platform: "google_ads",
+    accountId: "1234567890",
+    accountName: "Fitura Ads",
+    currency: "EUR",
+    timezone: "Europe/Madrid",
+    lastSuccessfulSyncAt: NOW,
+  };
 
   await page.route(/\/api\/connections(?:\?.*)?$/, (route) =>
     json(route, { workspace: { name: "Solo Founder" }, connections: [] }),
@@ -185,10 +194,30 @@ async function mockApp(page: Page, canManage: boolean) {
       await json(route, { runs });
       return;
     }
+    if (path === "/api/agent-runs/paid-connections" && method === "GET") {
+      await json(route, { connections: [paidConnection] });
+      return;
+    }
     if (path === "/api/agent-runs" && method === "POST") {
+      const paidTarget = body.target as Record<string, unknown> | null;
+      const isPaidMonitor = body.mode === "paid" && paidTarget?.kind === "paid_monitor";
       const created = run({
-        id: "run_created",
+        id: isPaidMonitor ? "run_paid_created" : "run_created",
+        mode: isPaidMonitor ? "paid" : "organic",
         goal: String(body.goal),
+        planKey: isPaidMonitor ? "paid.monitor.v1" : "organic.weekly_plan.v1",
+        target: isPaidMonitor
+          ? {
+              kind: "paid_monitor",
+              connectionId: paidConnection.id,
+              platform: "google_ads",
+              accountId: paidConnection.accountId,
+              accountName: paidConnection.accountName,
+              from: String(paidTarget.from),
+              to: String(paidTarget.to),
+              boundAt: NOW,
+            }
+          : null,
         status: "queued",
         dispatchStatus: "sent",
         usage: { steps: 0, toolCalls: 0, modelTurns: 0, webReads: 0, credits: 0 },
@@ -316,11 +345,50 @@ test("owner can inspect, approve, start, and cancel exact bounded runs", async (
   expect(overflow).toBeLessThanOrEqual(0);
 });
 
+test("owner can start an account-bound one-time paid monitor", async ({ page }) => {
+  const harness = await mockApp(page, true);
+  await page.goto("/app?mode=agents");
+
+  await page.getByRole("button", { name: "Monitor paid campaigns" }).click();
+  const dialog = page.getByRole("dialog", { name: "Monitor paid campaigns" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText(/One-time, read-only check/)).toBeVisible();
+  await expect(dialog.getByLabel("Connected account")).toHaveValue("connection_google_ads");
+  await dialog.getByLabel("Recent window").selectOption("7");
+  await dialog.getByLabel("Monitoring goal").fill("Find paid delivery risks for Fitura");
+  await dialog.getByRole("button", { name: "Run health check" }).click();
+
+  await expect(page.getByRole("heading", { name: "Find paid delivery risks for Fitura" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "One-time paid campaign monitor" })).toBeVisible();
+  await expect(page.getByText(/does not contact providers/)).toBeVisible();
+
+  const mutation = harness.mutations.find(
+    (entry) => entry.path === "/api/agent-runs" && entry.body.mode === "paid",
+  );
+  expect(mutation?.body).toMatchObject({
+    brandId: BRAND.id,
+    conversationId: null,
+    goal: "Find paid delivery risks for Fitura",
+    mode: "paid",
+    target: {
+      kind: "paid_monitor",
+      connectionId: "connection_google_ads",
+    },
+  });
+  const target = mutation?.body.target as Record<string, unknown>;
+  expect(String(target.from)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  expect(String(target.to)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  const from = new Date(`${String(target.from)}T00:00:00.000Z`);
+  const to = new Date(`${String(target.to)}T00:00:00.000Z`);
+  expect(Math.round((to.getTime() - from.getTime()) / 86_400_000)).toBe(6);
+});
+
 test("member view exposes history without mutation controls", async ({ page }) => {
   await mockApp(page, false);
   await page.goto("/app?mode=agents");
 
   await expect(page.getByText("Read-only access.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Monitor paid campaigns" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "New organic plan" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Review and approve" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Reject", exact: true })).toHaveCount(0);

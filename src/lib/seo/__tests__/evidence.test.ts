@@ -82,6 +82,90 @@ test("source coverage distinguishes selected evidence, unavailable sources, and 
   assert.match(sources[2]?.detail ?? "", /No metric value is assumed/);
 });
 
+test("App Store brands expose listing evidence without pretending GA4 or Search Console applies", () => {
+  const websiteUrl = "https://apps.apple.com/es/app/fitura/id6743079022";
+  const selection = selectSeoEvidenceSources({
+    websiteUrl,
+    connections: [
+      connection({
+        id: "search_console-connection",
+        platform: "search_console",
+        externalAccountId: "sc-domain:apps.apple.com",
+      }),
+      connection({
+        id: "ga4-connection",
+        platform: "ga4",
+        displayName: "apps.apple.com",
+      }),
+    ],
+    facts: [
+      metric({ platform: "search_console", metric: "clicks", value: 999 }),
+      metric({ platform: "ga4", metric: "sessions", value: 999 }),
+    ],
+  });
+  const sources = buildSeoSources({
+    auditedAt: AUDITED_AT,
+    auditSnapshot: {
+      documentType: "apple_app_store",
+      finalUrl: websiteUrl,
+      findings: [{
+        code: "app-store-managed-page",
+        category: "metadata",
+        severity: "info",
+        title: "Apple controls this page's technical markup",
+        evidence: "Verified from Apple's public metadata.",
+        recommendation: "Audit a product website separately.",
+        scoreImpact: 0,
+      }],
+    },
+  }, selection);
+
+  assert.equal(selection.facts.length, 0);
+  assert.equal(selection.resolutions.search_console.state, "not_applicable");
+  assert.equal(selection.resolutions.ga4.state, "not_applicable");
+  assert.equal(sources[0]?.label, "App Store listing");
+  assert.equal(sources[0]?.rowCount, 0);
+  assert.match(sources[0]?.detail ?? "", /Apple controls/i);
+  assert.match(sources[1]?.detail ?? "", /cannot measure an Apple-owned App Store listing/i);
+  assert.match(sources[2]?.detail ?? "", /product website/i);
+});
+
+test("App Store crawl tasks include listing metadata work but suppress storefront HTML findings", () => {
+  const auditSnapshot = {
+    finalUrl: "https://apps.apple.com/es/app/fitura/id6743079022",
+    findings: [{
+      code: "title-length",
+      category: "metadata",
+      severity: "warning",
+      title: "Page title length needs attention",
+      evidence: "Apple generated a short storefront title.",
+      recommendation: "Rewrite Apple's title element.",
+      scoreImpact: 5,
+    }, {
+      code: "app-store-managed-page",
+      category: "metadata",
+      severity: "info",
+      title: "Apple controls this page's technical markup",
+      evidence: "Verified from Apple's public metadata.",
+      recommendation: "Audit a product website separately.",
+      scoreImpact: 0,
+    }, {
+      code: "app-store-description-missing",
+      category: "content",
+      severity: "warning",
+      title: "App Store description is unavailable",
+      evidence: "The public app record contains no description.",
+      recommendation: "Restore the description in App Store Connect.",
+      scoreImpact: 20,
+    }],
+  };
+  const tasks = deriveSeoTasks({ auditSnapshot, auditedAt: AUDITED_AT }, []);
+
+  assert.deepEqual(tasks.map((task) => task.title), ["App Store description is unavailable"]);
+  assert.equal(tasks[0]?.evidence[0]?.label, "App Store listing");
+  assert.equal(tasks.some((task) => /title length/i.test(task.title)), false);
+});
+
 test("domain identities match the brand while URL-prefix identities require an exact URL", () => {
   const websiteUrl = "https://www.marpin.ai/pricing";
   assert.equal(seoConnectionMatchesWebsite(websiteUrl, connection({

@@ -18,10 +18,33 @@ test("AI proposal parsing accepts exactly one bounded recommended fix", () => {
   );
 });
 
+test("AI proposal parsing normalizes bounded text wrappers and text blocks", () => {
+  assert.deepEqual(
+    parseSeoProposalOutput(JSON.stringify({
+      recommendedFix: { type: "text", text: " Replace the generic title with the app value proposition. " },
+    })),
+    { recommendedFix: "Replace the generic title with the app value proposition." },
+  );
+  assert.deepEqual(
+    validateSeoProposalOutput({
+      recommendedFix: {
+        content: [
+          { type: "text", text: "Draft the replacement." },
+          { type: "text", text: "Review it before publishing." },
+        ],
+      },
+    }),
+    { recommendedFix: "Draft the replacement.\nReview it before publishing." },
+  );
+});
+
 test("AI proposal parsing rejects extra claims and malformed output shapes", () => {
   for (const value of [
     { recommendedFix: "Valid", applied: true },
     { recommendedFix: "" },
+    { recommendedFix: { text: "Valid", applied: true } },
+    { recommendedFix: [{ type: "tool_use", text: "Not a text block" }] },
+    { recommendedFix: Array.from({ length: 21 }, () => "Too many blocks") },
     { fix: "Wrong field" },
     ["Wrong shape"],
   ]) {

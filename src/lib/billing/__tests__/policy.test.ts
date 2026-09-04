@@ -25,7 +25,7 @@ test("only a current active or trialing Solo period grants paid entitlements", (
     );
     assert.equal(policy.planId, "solo");
     assert.equal(policy.entitlements.canUseOpus, false);
-    assert.equal(policy.entitlements.maxConnections, 4);
+    assert.equal(policy.entitlements.maxConnections, 2);
     assert.equal(policy.periodStart.toISOString(), "2026-07-01T00:00:00.000Z");
     assert.equal(policy.periodEnd.toISOString(), "2026-08-01T00:00:00.000Z");
   }

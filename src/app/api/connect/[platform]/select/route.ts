@@ -22,7 +22,9 @@ import { decryptToken, isVaultConfigured, tokenAad } from "@/lib/security/vault"
 import { emitConnectionBackfill, emitConnectionConnected } from "@/lib/jobs/inngest";
 import { isEntitlementDeniedError } from "@/lib/billing/errors";
 import { requestBodyErrorResponse } from "@/lib/security/request-body";
+import { isLaunchConnectorPlatform } from "@/lib/product/platforms";
 import { readSelectedAccountId } from "./_lib/request";
+import { connectorReturnUrl } from "../../_lib/urls";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,17 +36,17 @@ interface RouteParams {
 const PENDING_ACCOUNT_ID = "__pending__";
 
 function appRedirect(req: NextRequest, status: string, platform?: string): NextResponse {
-  const base = process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin;
-  const url = new URL("/", base);
-  url.searchParams.set("connect", status);
-  if (platform) url.searchParams.set("platform", platform);
-  const res = NextResponse.redirect(url);
+  const res = NextResponse.redirect(connectorReturnUrl(req.url, status, platform));
+  res.headers.set("Cache-Control", "no-store");
   res.cookies.delete(OAUTH_PENDING_COOKIE);
   return res;
 }
 
 export async function POST(req: NextRequest, { params }: RouteParams): Promise<Response> {
   const { platform } = await params;
+  if (!isLaunchConnectorPlatform(platform)) {
+    return NextResponse.json({ error: "platform_not_in_launch_scope", platform }, { status: 404 });
+  }
   const config = getConnectorConfig(platform);
   if (!config) {
     return NextResponse.json({ error: "unknown_platform", platform }, { status: 404 });
@@ -53,7 +55,7 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<R
     return appRedirect(req, "unsupported_callback", config.id);
   }
   if (!isConnectorConfigured(config.id)) {
-    return NextResponse.json({ error: "not_configured", platform: config.id }, { status: 503 });
+    return appRedirect(req, "not_configured", config.id);
   }
 
   const pending = verifyPendingSelection(req.cookies.get(OAUTH_PENDING_COOKIE)?.value);
@@ -100,26 +102,32 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<R
   if (!selectedId) return appRedirect(req, "account_unavailable", config.id);
 
   const oauthPlatform = config.id as Exclude<ConnectorPlatform, "apple_search_ads">;
-  const accessToken = decryptToken(
-    pending.encAccessToken,
-    tokenAad({
-      workspaceId: workspace.id,
-      platform: oauthPlatform,
-      externalAccountId: PENDING_ACCOUNT_ID,
-      tokenKind: "access",
-    }),
-  );
-  const refreshToken = pending.encRefreshToken
-    ? decryptToken(
-        pending.encRefreshToken,
-        tokenAad({
-          workspaceId: workspace.id,
-          platform: oauthPlatform,
-          externalAccountId: PENDING_ACCOUNT_ID,
-          tokenKind: "refresh",
-        }),
-      )
-    : undefined;
+  let accessToken: string;
+  let refreshToken: string | undefined;
+  try {
+    accessToken = decryptToken(
+      pending.encAccessToken,
+      tokenAad({
+        workspaceId: workspace.id,
+        platform: oauthPlatform,
+        externalAccountId: PENDING_ACCOUNT_ID,
+        tokenKind: "access",
+      }),
+    );
+    refreshToken = pending.encRefreshToken
+      ? decryptToken(
+          pending.encRefreshToken,
+          tokenAad({
+            workspaceId: workspace.id,
+            platform: oauthPlatform,
+            externalAccountId: PENDING_ACCOUNT_ID,
+            tokenKind: "refresh",
+          }),
+        )
+      : undefined;
+  } catch {
+    return appRedirect(req, "state_mismatch", config.id);
+  }
 
   let account;
   try {

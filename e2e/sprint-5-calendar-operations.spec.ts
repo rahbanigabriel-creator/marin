@@ -645,6 +645,7 @@ test("mobile month paging reaches every loaded week while month navigation stays
   }
   await expect(previousWeek).toBeDisabled();
   await expect(page.getByText("Week 1 of 6", { exact: true })).toBeVisible();
+  await page.locator(`[data-mobile-calendar-day="${grid.start}"]`).click();
   await expect(page.getByRole("button", { name: "Edit First loaded week on Instagram" })).toBeVisible();
 
   for (let index = 0; index < 5; index += 1) await nextWeek.click();

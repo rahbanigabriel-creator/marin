@@ -86,17 +86,38 @@ export function parseAgentRunRequest(value: unknown): AgentRunRequest {
   let target: AgentRunRequest["target"] = null;
   if (body.target !== undefined && body.target !== null) {
     const targetBody = object(body.target);
-    exactKeys(targetBody, ["kind", "objectId"]);
-    if (targetBody.kind !== "paid_create_paused" && targetBody.kind !== "paid_activate") {
-      throw new AgentRunValidationError("invalid_target_kind", "target kind is invalid");
+    if (targetBody.kind === "paid_monitor") {
+      exactKeys(targetBody, ["kind", "connectionId", "from", "to"]);
+      const from = requiredText(targetBody.from, "target.from", 10);
+      const to = requiredText(targetBody.to, "target.to", 10);
+      const fromDate = exactCalendarDate(from);
+      const toDate = exactCalendarDate(to);
+      const days = Math.round((toDate.getTime() - fromDate.getTime()) / 86_400_000) + 1;
+      if (days < 1 || days > 30) {
+        throw new AgentRunValidationError(
+          "invalid_monitor_window",
+          "The paid monitor window must contain 1 to 30 calendar days",
+        );
+      }
+      target = {
+        kind: "paid_monitor",
+        connectionId: requiredText(targetBody.connectionId, "target.connectionId", 191),
+        from,
+        to,
+      };
+    } else {
+      exactKeys(targetBody, ["kind", "objectId"]);
+      if (targetBody.kind !== "paid_create_paused" && targetBody.kind !== "paid_activate") {
+        throw new AgentRunValidationError("invalid_target_kind", "target kind is invalid");
+      }
+      target = {
+        kind: targetBody.kind,
+        objectId: requiredText(targetBody.objectId, "target.objectId", 191),
+      };
     }
-    target = {
-      kind: targetBody.kind,
-      objectId: requiredText(targetBody.objectId, "target.objectId", 191),
-    };
   }
   if (target && body.mode !== "paid") {
-    throw new AgentRunValidationError("invalid_target", "Only paid runs accept a paid draft target");
+    throw new AgentRunValidationError("invalid_target", "Only paid runs accept a paid target");
   }
   return {
     brandId: requiredText(body.brandId, "brandId", 191),
@@ -106,6 +127,17 @@ export function parseAgentRunRequest(value: unknown): AgentRunRequest {
     requestId: parsedRequestId,
     target,
   };
+}
+
+function exactCalendarDate(value: string): Date {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new AgentRunValidationError("invalid_monitor_window", "Paid monitor dates are invalid");
+  }
+  const date = new Date(`${value}T00:00:00.000Z`);
+  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
+    throw new AgentRunValidationError("invalid_monitor_window", "Paid monitor dates are invalid");
+  }
+  return date;
 }
 
 export function parseAgentRunCommand(value: unknown): AgentRunCommandRequest {

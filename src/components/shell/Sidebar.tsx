@@ -9,7 +9,6 @@ import type { ProductMode } from "@/lib/product/platforms";
 import {
   LuChevronLeft,
   LuChevronRight,
-  LuBuilding2,
   LuBot,
   LuChartNoAxesCombined,
   LuLeaf,
@@ -17,6 +16,7 @@ import {
   LuMessageSquare,
   LuPlus,
   LuPlug,
+  LuScanSearch,
   LuSettings,
   LuUsers,
 } from "react-icons/lu";
@@ -35,9 +35,9 @@ interface SidebarProps {
   onViewDashboard?: () => void;
   onViewAssistant?: () => void;
   onViewOrganic?: () => void;
-  onViewBrand?: () => void;
   onViewAnalytics?: () => void;
   onViewAgents?: () => void;
+  onOpenWebsiteAudit?: () => void;
   activeArea?: ProductMode | "assistant" | "brand" | "analytics" | "agents";
   hideRecent?: boolean;
   primaryActionLabel?: string;
@@ -59,9 +59,9 @@ export function Sidebar({
   onViewDashboard,
   onViewAssistant,
   onViewOrganic,
-  onViewBrand,
   onViewAnalytics,
   onViewAgents,
+  onOpenWebsiteAudit,
   activeArea = "assistant",
   hideRecent = false,
   primaryActionLabel = "New plan",
@@ -76,7 +76,6 @@ export function Sidebar({
     onViewDashboard
       && onViewAssistant
       && onViewOrganic
-      && onViewBrand
       && onViewAnalytics
       && onViewAgents,
   );
@@ -167,7 +166,6 @@ export function Sidebar({
       {realProductNavigation ? (
         <nav aria-label="Workspace" className="mb-[10px]">
           {navButton("Assistant", "assistant", onViewAssistant, <LuMessageSquare aria-hidden />)}
-          {navButton("Brand", "brand", onViewBrand, <LuBuilding2 aria-hidden />)}
           {navButton("Organic + SEO", "organic", onViewOrganic, <LuLeaf aria-hidden />)}
           {navButton("Paid campaigns", "paid", onViewDashboard, <LuMegaphone aria-hidden />)}
           {navButton("Analytics", "analytics", onViewAnalytics, <LuChartNoAxesCombined aria-hidden />)}
@@ -283,6 +281,19 @@ export function Sidebar({
               >
                 New conversation
               </button>
+              {onOpenWebsiteAudit ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onOpenWebsiteAudit();
+                  }}
+                  className="flex w-full cursor-pointer items-center gap-[7px] border-none bg-transparent p-[9px_12px] text-left font-sans text-[12.5px] font-medium text-ink-800 hover:bg-surface-chip"
+                >
+                  <LuScanSearch aria-hidden />
+                  Website audit
+                </button>
+              ) : null}
               <Link
                 href="/settings/billing"
                 className="block w-full p-[9px_12px] text-left font-sans text-[12.5px] font-medium text-ink-800 no-underline hover:bg-surface-chip"

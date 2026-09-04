@@ -22,11 +22,13 @@ import {
  * NO env at import time and constructs NO SDK/client — it only declares config
  * and exposes lazy lookups, mirroring the graceful-without-keys pattern in
  * src/lib/agent/provider.ts. Feature-detect with isConnectorConfigured() before
- * starting an OAuth flow; the /api/connect route returns a 503 when it's false.
+ * starting an OAuth flow; the /api/connect route returns a stable app redirect
+ * when it's false.
  *
- * Round 1 ships three platforms. google_ads and ga4 share ONE Google OAuth app
- * (same authorize/token endpoints + client id/secret) but request DIFFERENT
- * scopes (AdWords vs Analytics read-only). Meta uses Facebook Login / Graph.
+ * The launch OAuth surface exposes Google Ads and Meta Ads. Other registry
+ * entries remain dormant so their adapters can be developed without making
+ * them connectable. Google-family entries share one Google OAuth app but ask
+ * for platform-specific scopes. Meta uses Facebook Login / Graph.
  *
  * Endpoints + scopes below are the REAL production values (reviewer spot-check):
  *   • Google OAuth 2.0:
@@ -51,6 +53,8 @@ import {
  * v25.0 — the latest Graph API version; bump deliberately, never float.
  */
 export const META_GRAPH_VERSION = "v25.0";
+/** Google Ads REST major version; intentionally pinned and upgraded deliberately. */
+export const GOOGLE_ADS_API_VERSION = "v25";
 
 /** Static, declarative config for one connector platform's OAuth + API. */
 export interface ConnectorConfig {
@@ -288,7 +292,7 @@ export function getConnectorConfig(
  * True when this platform's OAuth client id AND secret env vars are both
  * present. Read lazily from env on every call — never at import — so the gate
  * reflects the runtime environment and the build stays green with no keys.
- * The /api/connect route uses this to 503 gracefully when not configured.
+ * The /api/connect route uses this to fail gracefully when not configured.
  */
 export function isConnectorConfigured(platform: ConnectorPlatform): boolean {
   const cfg = CONNECTORS[platform];

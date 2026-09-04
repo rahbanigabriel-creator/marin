@@ -18,6 +18,7 @@ import {
   buildAuthorizeUrl,
   deriveCodeChallenge,
   generateCodeVerifier,
+  OAUTH_PENDING_COOKIE,
   OAUTH_TX_COOKIE,
   OAUTH_TX_MAX_AGE,
   randomToken,
@@ -28,6 +29,7 @@ import { emitConnectionConnected } from "@/lib/jobs/inngest";
 import { isLaunchConnectorPlatform } from "@/lib/product/platforms";
 import { persistEncryptedConnection } from "@/lib/connectors/persist";
 import { isEntitlementDeniedError } from "@/lib/billing/errors";
+import { connectorCallbackUrl, connectorReturnUrl } from "../_lib/urls";
 
 /**
  * GET /api/connect/[platform] — start a connector OAuth flow.
@@ -108,7 +110,7 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Re
   }
 
   const { clientId } = getConnectorCredentials(config.id);
-  const redirectUri = buildRedirectUri(req, config.id);
+  const redirectUri = connectorCallbackUrl(req.url, config.id);
 
   const authorizeUrl = buildAuthorizeUrl({
     config,
@@ -119,6 +121,8 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Re
   });
 
   const res = NextResponse.redirect(authorizeUrl);
+  res.headers.set("Cache-Control", "no-store");
+  res.cookies.delete(OAUTH_PENDING_COOKIE);
   res.cookies.set(OAUTH_TX_COOKIE, signedTx, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -130,11 +134,11 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Re
 }
 
 function appRedirect(req: NextRequest, status: string, platform?: string): NextResponse {
-  const base = process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin;
-  const url = new URL("/", base);
-  url.searchParams.set("connect", status);
-  if (platform) url.searchParams.set("platform", platform);
-  return NextResponse.redirect(url);
+  const res = NextResponse.redirect(connectorReturnUrl(req.url, status, platform));
+  res.headers.set("Cache-Control", "no-store");
+  res.cookies.delete(OAUTH_TX_COOKIE);
+  res.cookies.delete(OAUTH_PENDING_COOKIE);
+  return res;
 }
 
 async function connectAppleSearchAds(req: NextRequest, workspace: WorkspaceRef): Promise<Response> {
@@ -175,15 +179,4 @@ async function connectAppleSearchAds(req: NextRequest, workspace: WorkspaceRef):
     console.warn(`[connect] Apple Search Ads connection failed: ${err instanceof Error ? err.name : "error"}`);
     return appRedirect(req, "account_unavailable", platform);
   }
-}
-
-/**
- * The callback URL the provider must redirect back to. Honors a configured
- * public base URL (APP_URL / NEXT_PUBLIC_APP_URL) for prod; otherwise derives
- * the origin from the incoming request so dev works without extra env.
- */
-function buildRedirectUri(req: NextRequest, platform: string): string {
-  const base =
-    process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin;
-  return new URL(`/api/connect/${platform}/callback`, base).toString();
 }

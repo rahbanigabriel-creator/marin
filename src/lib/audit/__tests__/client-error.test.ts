@@ -33,6 +33,16 @@ test("audit failures distinguish missing pages from blocked pages", () => {
   );
 });
 
+test("audit failures explain unavailable App Store storefront listings", () => {
+  assert.equal(
+    auditFailureMessage(422, {
+      error: "The App Store listing is not available in this storefront (HTTP 404).",
+      code: "APP_STORE_LISTING_UNAVAILABLE",
+    }),
+    "Marpin reached Apple but could not verify this app listing. Check that the link opens publicly in that country or region, then try again.",
+  );
+});
+
 test("audit failures provide safe URL validation guidance", () => {
   assert.equal(
     auditFailureMessage(400, {

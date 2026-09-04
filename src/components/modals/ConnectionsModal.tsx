@@ -7,6 +7,7 @@ import { SiGoogleads, SiMeta } from "react-icons/si";
 import { LuRefreshCw, LuUnplug, LuX } from "react-icons/lu";
 
 import type { Channel, ConnectionDisconnectResult } from "@/types/views";
+import type { ConnectorUiFeedback } from "@/lib/connectors/status-copy";
 
 interface ConnectionsModalProps {
   channels: Channel[];
@@ -17,6 +18,7 @@ interface ConnectionsModalProps {
   onConnect: (channel: Channel) => void;
   onDisconnect: (channel: Channel) => Promise<ConnectionDisconnectResult>;
   canManage?: boolean;
+  initialFeedback?: ConnectorUiFeedback | null;
 }
 
 const ICONS: Record<string, IconType> = {
@@ -50,15 +52,13 @@ export function ConnectionsModal({
   onConnect,
   onDisconnect,
   canManage = true,
+  initialFeedback = null,
 }: ConnectionsModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const confirmationCancelRef = useRef<HTMLButtonElement>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<{
-    tone: "success" | "warning" | "error";
-    message: string;
-  } | null>(null);
+  const [feedback, setFeedback] = useState<ConnectorUiFeedback | null>(initialFeedback);
   const limitKnown = typeof maxConnections === "number";
   const limitReached = limitKnown && connectedCount >= maxConnections;
 
@@ -95,6 +95,10 @@ export function ConnectionsModal({
   useEffect(() => {
     if (confirmingId) confirmationCancelRef.current?.focus();
   }, [confirmingId]);
+
+  useEffect(() => {
+    setFeedback(initialFeedback);
+  }, [initialFeedback]);
 
   const confirmDisconnect = async (channel: Channel) => {
     if (!channel.connectionId || busyId) return;

@@ -1,20 +1,24 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LuBot, LuPlus, LuRefreshCw } from "react-icons/lu";
+import { LuActivity, LuBot, LuPlus, LuRefreshCw } from "react-icons/lu";
 
 import type { AgentRunDto } from "@/lib/agent-runs/dto";
+import type { PaidMonitorConnectionDto } from "@/lib/agent-runs/types";
 
 import { AgentRunDetail } from "./AgentRunDetail";
-import { StartAgentRunDialog } from "./AgentRunDialogs";
+import { StartAgentRunDialog, StartPaidMonitorDialog } from "./AgentRunDialogs";
 import {
   AgentRunClientError,
+  type PaidMonitorWindowDays,
   cancelAgentRun,
   decideAgentRunApproval,
   getAgentRun,
   listAgentRuns,
+  listPaidMonitorConnections,
   retryAgentRun,
   startOrganicAgentRun,
+  startPaidMonitorAgentRun,
 } from "./agent-run-client";
 import {
   agentRunStatusLabel,
@@ -26,7 +30,7 @@ import {
 interface AgentRunsWorkspaceProps {
   brandId: string | null;
   canManage: boolean;
-  onOpenBrand: () => void;
+  onStartAudit: () => void;
 }
 
 interface BusyAction {
@@ -108,7 +112,7 @@ const TONE_DOT_CLASSES = {
 export function AgentRunsWorkspace({
   brandId,
   canManage,
-  onOpenBrand,
+  onStartAudit,
 }: AgentRunsWorkspaceProps) {
   const [runs, setRuns] = useState<AgentRunDto[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -119,9 +123,15 @@ export function AgentRunsWorkspace({
   const [startOpen, setStartOpen] = useState(false);
   const [startBusy, setStartBusy] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+  const [paidStartOpen, setPaidStartOpen] = useState(false);
+  const [paidStartBusy, setPaidStartBusy] = useState(false);
+  const [paidStartLoading, setPaidStartLoading] = useState(false);
+  const [paidStartError, setPaidStartError] = useState<string | null>(null);
+  const [paidConnections, setPaidConnections] = useState<PaidMonitorConnectionDto[]>([]);
   const [busyAction, setBusyAction] = useState<BusyAction | null>(null);
   const actionInFlight = useRef(false);
   const startInFlight = useRef(false);
+  const paidStartInFlight = useRef(false);
 
   const load = useCallback(
     async (options: { signal?: AbortSignal; polling?: boolean } = {}): Promise<boolean> => {
@@ -257,6 +267,53 @@ export function AgentRunsWorkspace({
     [applyReturnedRun, brandId, canManage],
   );
 
+  const openPaidMonitor = useCallback(async () => {
+    if (!brandId || !canManage) return;
+    setPaidStartOpen(true);
+    setPaidStartLoading(true);
+    setPaidStartError(null);
+    try {
+      setPaidConnections(await listPaidMonitorConnections());
+    } catch (error) {
+      setPaidConnections([]);
+      setPaidStartError(clientMessage(error));
+    } finally {
+      setPaidStartLoading(false);
+    }
+  }, [brandId, canManage]);
+
+  const startPaidMonitor = useCallback(
+    async (monitor: {
+      connectionId: string;
+      goal: string;
+      days: PaidMonitorWindowDays;
+    }) => {
+      if (!brandId || !canManage || paidStartInFlight.current) return;
+      paidStartInFlight.current = true;
+      setPaidStartBusy(true);
+      setPaidStartError(null);
+      setNotice(null);
+      try {
+        const run = await startPaidMonitorAgentRun({ brandId, ...monitor });
+        applyReturnedRun(run);
+        setPaidStartOpen(false);
+        setNotice({
+          tone: "status",
+          message:
+            run.dispatchStatus === "unavailable"
+              ? "The monitor was saved, but the worker is unavailable. It did not start."
+              : "The one-time paid campaign monitor was started against saved metrics.",
+        });
+      } catch (error) {
+        setPaidStartError(clientMessage(error));
+      } finally {
+        paidStartInFlight.current = false;
+        setPaidStartBusy(false);
+      }
+    },
+    [applyReturnedRun, brandId, canManage],
+  );
+
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-surface-page">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line-1 bg-surface-panel px-4 py-3 sm:px-6">
@@ -266,7 +323,7 @@ export function AgentRunsWorkspace({
             Bounded workflows with visible steps, limits, and exact approvals.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
           <button
             type="button"
             onClick={() => void load()}
@@ -280,11 +337,21 @@ export function AgentRunsWorkspace({
           {canManage && brandId && (
             <button
               type="button"
+              onClick={() => void openPaidMonitor()}
+              className="flex h-9 items-center gap-2 rounded-[8px] border-none bg-plum px-3 font-sans text-[12.5px] font-semibold text-white hover:bg-plum-deep"
+            >
+              <LuActivity aria-hidden />
+              Monitor paid campaigns
+            </button>
+          )}
+          {canManage && brandId && (
+            <button
+              type="button"
               onClick={() => {
                 setStartError(null);
                 setStartOpen(true);
               }}
-              className="flex h-9 items-center gap-2 rounded-[8px] border-none bg-plum px-3 font-sans text-[12.5px] font-semibold text-white hover:bg-plum-deep"
+              className="flex h-9 items-center gap-2 rounded-[8px] border border-line-2 bg-white px-3 font-sans text-[12.5px] font-semibold text-ink-700 hover:bg-surface-chip"
             >
               <LuPlus aria-hidden />
               New organic plan
@@ -293,10 +360,10 @@ export function AgentRunsWorkspace({
           {canManage && !brandId && (
             <button
               type="button"
-              onClick={onOpenBrand}
+              onClick={onStartAudit}
               className="h-9 rounded-[8px] border border-line-2 bg-white px-3 font-sans text-[12.5px] font-semibold text-ink-700 hover:bg-surface-chip"
             >
-              Audit a website first
+              Audit a website or app first
             </button>
           )}
         </div>
@@ -366,7 +433,7 @@ export function AgentRunsWorkspace({
                 <p className="mt-3 font-sans text-[13px] font-semibold text-ink-700">No agent runs yet</p>
                 <p className="mt-1 font-sans text-[12px] leading-5 text-ink-400">
                   {canManage
-                    ? "Start a bounded organic planning run for the current brand."
+                    ? "Start an organic plan or a one-time paid campaign health check."
                     : "An owner or admin can start the first bounded workflow."}
                 </p>
               </div>
@@ -461,6 +528,20 @@ export function AgentRunsWorkspace({
           }
         }}
         onStart={startRun}
+      />
+      <StartPaidMonitorDialog
+        open={paidStartOpen}
+        busy={paidStartBusy}
+        loading={paidStartLoading}
+        error={paidStartError}
+        connections={paidConnections}
+        onDismiss={() => {
+          if (!paidStartBusy) {
+            setPaidStartOpen(false);
+            setPaidStartError(null);
+          }
+        }}
+        onStart={startPaidMonitor}
       />
     </div>
   );

@@ -3,8 +3,11 @@ import { createHash, randomBytes } from "node:crypto";
 import { Prisma } from "@prisma/client";
 
 import {
+  appleAppStoreListingId,
   auditSite,
   normalizeSiteUrl,
+  type AppStoreListingMetadata,
+  type AuditDocumentType,
   type AuditFinding,
   type SiteAuditResult,
 } from "@/lib/audit/site";
@@ -136,6 +139,41 @@ function finiteNumber(value: Prisma.JsonValue | undefined): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function parseAppStoreListing(
+  value: Prisma.JsonValue | undefined,
+  expectedAppId: string,
+): AppStoreListingMetadata | null {
+  const listing = record(value ?? null);
+  if (!listing) return null;
+  const appId = boundedString(listing.appId, 32);
+  const name = boundedString(listing.name, 240);
+  const description = nullableString(listing.description, 4_000);
+  const valueProposition = nullableString(listing.valueProposition, 500);
+  const features = stringList(listing.features, 12, 120);
+  const developer = nullableString(listing.developer, 240);
+  const categories = stringList(listing.categories, 20, 120);
+  if (
+    appId !== expectedAppId ||
+    name === null ||
+    description === undefined ||
+    valueProposition === undefined ||
+    !features ||
+    developer === undefined ||
+    !categories
+  ) {
+    return null;
+  }
+  return {
+    appId,
+    name,
+    description,
+    valueProposition,
+    features,
+    developer,
+    categories,
+  };
+}
+
 function parseFindings(value: Prisma.JsonValue | undefined): AuditFinding[] | null {
   if (!Array.isArray(value) || value.length > 50) return null;
   const categories = new Set<AuditFinding["category"]>([
@@ -264,7 +302,22 @@ function parseStoredAudit(value: Prisma.JsonValue): SiteAuditResult | null {
   }
   if (sourceUrl !== rawSourceUrl || finalUrl !== rawFinalUrl) return null;
 
+  const inferredDocumentType: AuditDocumentType = appleAppStoreListingId(finalUrl)
+    ? "apple_app_store"
+    : "website";
+  const storedDocumentType = audit.documentType === undefined
+    ? inferredDocumentType
+    : boundedString(audit.documentType, 40);
+  if (storedDocumentType !== inferredDocumentType) return null;
+  const appId = appleAppStoreListingId(finalUrl);
+  const appStore = appId && audit.appStore !== undefined
+    ? parseAppStoreListing(audit.appStore, appId)
+    : null;
+  if (audit.appStore !== undefined && !appStore) return null;
+
   return {
+    documentType: inferredDocumentType,
+    ...(appStore ? { appStore } : {}),
     sourceUrl,
     finalUrl,
     title,

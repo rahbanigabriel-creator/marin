@@ -1,7 +1,7 @@
 import type { Connection } from "@prisma/client";
 
-import { META_GRAPH_VERSION } from "./registry";
-import { getConnectionAccessToken } from "./clients";
+import { GOOGLE_ADS_API_VERSION, META_GRAPH_VERSION } from "./registry";
+import { getConnectionAccessToken, metaAppSecretProof } from "./clients";
 import { PaidProviderError, providerHttpError, sanitizePaidProviderError } from "./paid-errors";
 import {
   boundedPages,
@@ -19,15 +19,21 @@ import type {
   MetricRange,
 } from "./types";
 
-export const PAID_SYNC_PLATFORMS = ["google_ads", "meta_ads", "tiktok_ads"] as const;
-export type PaidSyncPlatform = (typeof PAID_SYNC_PLATFORMS)[number];
+/** Dormant read adapters may remain implemented without entering launch syncs. */
+export const PAID_READ_PLATFORMS = ["google_ads", "meta_ads", "tiktok_ads"] as const;
+export type PaidReadPlatform = (typeof PAID_READ_PLATFORMS)[number];
+/** Compatibility type for explicit dormant-adapter tests and maintenance. */
+export type PaidSyncPlatform = PaidReadPlatform;
+
+/** Paid accounts included in every default/manual production sync. */
+export const PAID_SYNC_PLATFORMS = ["google_ads", "meta_ads"] as const satisfies readonly PaidSyncPlatform[];
 
 export function isPaidSyncPlatform(value: string): value is PaidSyncPlatform {
   return (PAID_SYNC_PLATFORMS as readonly string[]).includes(value);
 }
 
 export interface PaidReadClient {
-  readonly platform: PaidSyncPlatform;
+  readonly platform: PaidReadPlatform;
   fetchMetricsSnapshot(connection: Connection, range: MetricRange): Promise<FetchSnapshot<CanonicalMetric>>;
   fetchCampaignsSnapshot(connection: Connection): Promise<FetchSnapshot<CampaignConfig>>;
   fetchAdsSnapshot(connection: Connection, range: MetricRange): Promise<FetchSnapshot<AdCreative>>;
@@ -55,7 +61,7 @@ function snapshot<T>(input: {
 
 type ProviderRecord = Record<string, unknown>;
 
-function invalidResponse(platform: PaidSyncPlatform): never {
+function invalidResponse(platform: PaidReadPlatform): never {
   throw new PaidProviderError(platform, "invalid_response", true);
 }
 
@@ -63,24 +69,24 @@ function isRecord(value: unknown): value is ProviderRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function requiredId(platform: PaidSyncPlatform, value: unknown): string {
+function requiredId(platform: PaidReadPlatform, value: unknown): string {
   if (typeof value === "string" && value.trim()) return value;
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   return invalidResponse(platform);
 }
 
-function requiredText(platform: PaidSyncPlatform, value: unknown): string {
+function requiredText(platform: PaidReadPlatform, value: unknown): string {
   if (typeof value === "string" && value.trim()) return value;
   return invalidResponse(platform);
 }
 
-function optionalText(platform: PaidSyncPlatform, value: unknown): string | undefined {
+function optionalText(platform: PaidReadPlatform, value: unknown): string | undefined {
   if (value == null) return undefined;
   if (typeof value === "string") return value;
   return invalidResponse(platform);
 }
 
-function strictDay(platform: PaidSyncPlatform, value: unknown): Date {
+function strictDay(platform: PaidReadPlatform, value: unknown): Date {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     return invalidResponse(platform);
   }
@@ -89,25 +95,25 @@ function strictDay(platform: PaidSyncPlatform, value: unknown): Date {
   return date;
 }
 
-function optionalNumber(platform: PaidSyncPlatform, value: unknown): number | null {
+function optionalNumber(platform: PaidReadPlatform, value: unknown): number | null {
   if (value == null) return null;
   const parsed = parseProviderNumber(value as string | number);
   return parsed == null ? invalidResponse(platform) : parsed;
 }
 
-function optionalRecord(platform: PaidSyncPlatform, value: unknown): ProviderRecord | undefined {
+function optionalRecord(platform: PaidReadPlatform, value: unknown): ProviderRecord | undefined {
   if (value == null) return undefined;
   return isRecord(value) ? value : invalidResponse(platform);
 }
 
-function optionalRecordArray(platform: PaidSyncPlatform, value: unknown): ProviderRecord[] | undefined {
+function optionalRecordArray(platform: PaidReadPlatform, value: unknown): ProviderRecord[] | undefined {
   if (value == null) return undefined;
   if (!Array.isArray(value) || !value.every(isRecord)) return invalidResponse(platform);
   return value;
 }
 
 export function addMetricRows(input: {
-  platform: PaidSyncPlatform;
+  platform: PaidReadPlatform;
   date: Date;
   campaignExternalId: string;
   campaignName: string | null;
@@ -145,7 +151,7 @@ export function addMetricRows(input: {
 }
 
 async function responseJson<T>(
-  platform: PaidSyncPlatform,
+  platform: PaidReadPlatform,
   fetchImpl: FetchLike,
   url: string,
   init: RequestInit,
@@ -168,7 +174,7 @@ interface GoogleBatch<T> { results?: T[] }
 
 class GooglePaidClient implements PaidReadClient {
   readonly platform = "google_ads" as const;
-  private readonly apiVersion = "v24";
+  private readonly apiVersion = GOOGLE_ADS_API_VERSION;
 
   constructor(
     private readonly fetchImpl: FetchLike,
@@ -183,8 +189,6 @@ class GooglePaidClient implements PaidReadClient {
       "developer-token": developerToken,
       "Content-Type": "application/json",
     };
-    const loginCustomerId = process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID?.replace(/-/g, "");
-    if (loginCustomerId) headers["login-customer-id"] = loginCustomerId;
     return headers;
   }
 
@@ -422,7 +426,7 @@ function prettyToken(value: string | undefined): string | null {
 
 interface MetaPage<T> { data?: T[]; paging?: { next?: string } }
 
-function metaActions(platform: PaidSyncPlatform, value: unknown): MetaAction[] | undefined {
+function metaActions(platform: PaidReadPlatform, value: unknown): MetaAction[] | undefined {
   const rows = optionalRecordArray(platform, value);
   if (!rows) return undefined;
   return rows.map((row) => ({
@@ -446,7 +450,10 @@ class MetaPaidClient implements PaidReadClient {
   }
 
   private async get<T>(token: string, url: URL): Promise<T> {
-    return responseJson<T>(this.platform, this.fetchImpl, url.toString(), {
+    const requestUrl = this.pageUrl(url.toString());
+    const proof = metaAppSecretProof(token);
+    if (proof) requestUrl.searchParams.set("appsecret_proof", proof);
+    return responseJson<T>(this.platform, this.fetchImpl, requestUrl.toString(), {
       headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
     });
   }
@@ -471,6 +478,8 @@ class MetaPaidClient implements PaidReadClient {
     ) {
       return invalidResponse(this.platform);
     }
+    url.searchParams.delete("access_token");
+    url.searchParams.delete("appsecret_proof");
     return url;
   }
 
@@ -924,7 +933,7 @@ interface TikTokAd {
 }
 
 export function createPaidReadClient(
-  platform: PaidSyncPlatform,
+  platform: PaidReadPlatform,
   fetchImpl: FetchLike = fetch,
   tokenProvider: ConnectionTokenProvider = getConnectionAccessToken,
 ): PaidReadClient {

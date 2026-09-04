@@ -70,7 +70,19 @@
     "typescript": "5.7.3"
   },
   "overrides": {
+    "browserslist": "4.28.8",
+    "deepmerge-ts": "8.0.2",
+    "fflate": "0.4.9",
     "postcss": "8.5.26",
     "sharp": "0.35.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "browserslist": "4.28.8",
+      "deepmerge-ts": "8.0.2",
+      "fflate": "0.4.9",
+      "postcss": "8.5.26",
+      "sharp": "0.35.3"
+    }
   }
 }

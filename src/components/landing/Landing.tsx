@@ -268,7 +268,7 @@ export function Landing() {
               One operating system for distribution
             </h2>
             <p className="mx-auto mt-[12px] max-w-[600px] font-sans text-[16px] leading-[1.6] text-ink-500">
-              Research, organic planning, paid reporting, SEO, and creative share one brand context and one
+              Research, organic planning, paid reporting, SEO, and creative share one business context and one
               set of editable records.
             </p>
           </div>

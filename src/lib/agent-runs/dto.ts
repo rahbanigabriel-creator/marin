@@ -8,9 +8,11 @@ import type {
   AgentRunLimits,
   AgentRunMode,
   AgentRunStatus,
+  AgentRunTargetBinding,
   AgentStepStatus,
   AgentToolRisk,
 } from "@/lib/agent-runs/types";
+import { exactPaidMonitorBinding } from "@/lib/agent-runs/paid-monitor";
 
 export const agentRunInclude = {
   steps: { orderBy: [{ ordinal: "asc" as const }] },
@@ -74,7 +76,7 @@ export interface AgentRunDto {
   mode: AgentRunMode;
   goal: string;
   planKey: string;
-  target: AgentApprovalBinding | null;
+  target: AgentRunTargetBinding | null;
   status: AgentRunStatus;
   dispatchStatus: AgentRunDispatchStatus;
   dispatchErrorCode: string | null;
@@ -121,6 +123,10 @@ function exactBinding(value: Prisma.JsonValue | null): AgentApprovalBinding | nu
   return row as unknown as AgentApprovalBinding;
 }
 
+function exactRunTarget(value: Prisma.JsonValue | null): AgentRunTargetBinding | null {
+  return exactPaidMonitorBinding(value) ?? exactBinding(value);
+}
+
 export function toAgentRunDto(row: AgentRunRow): AgentRunDto {
   return {
     id: row.id,
@@ -129,7 +135,7 @@ export function toAgentRunDto(row: AgentRunRow): AgentRunDto {
     mode: row.mode as AgentRunMode,
     goal: row.goal,
     planKey: row.planKey,
-    target: exactBinding(row.target),
+    target: exactRunTarget(row.target),
     status: row.status as AgentRunStatus,
     dispatchStatus: row.dispatchStatus as AgentRunDispatchStatus,
     dispatchErrorCode: row.dispatchErrorCode,

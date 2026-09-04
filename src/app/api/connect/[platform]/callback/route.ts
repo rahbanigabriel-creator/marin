@@ -30,13 +30,15 @@ import { listOAuthAccounts, type AccountSelection } from "@/lib/connectors/clien
 import { persistOAuthConnection } from "@/lib/connectors/persist";
 import { emitConnectionBackfill, emitConnectionConnected } from "@/lib/jobs/inngest";
 import { isEntitlementDeniedError } from "@/lib/billing/errors";
+import { isLaunchConnectorPlatform } from "@/lib/product/platforms";
+import { connectorCallbackUrl, connectorReturnUrl } from "../../_lib/urls";
 
 /**
  * GET /api/connect/[platform]/callback — finish a connector OAuth flow.
  *
  * Steps (every external/DB touch guarded so a missing-config path returns a
  * graceful error, never a build/import throw — architecture §7/§8):
- *   1. Resolve + validate the platform; bail to 503 if not configured.
+ *   1. Resolve + validate the platform; redirect safely if not configured.
  *   2. Verify the signed CSRF transaction cookie and that `state` round-trips
  *      (constant-time). Reject mismatches (replay / forgery / expired).
  *   3. Exchange the authorization code → tokens at the provider (PKCE verifier
@@ -58,11 +60,8 @@ interface RouteParams {
 
 /** Redirect back into the app with a status flag the UI can surface. */
 function appRedirect(req: NextRequest, status: string, platform?: string): NextResponse {
-  const base = process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin;
-  const url = new URL("/", base);
-  url.searchParams.set("connect", status);
-  if (platform) url.searchParams.set("platform", platform);
-  const res = NextResponse.redirect(url);
+  const res = NextResponse.redirect(connectorReturnUrl(req.url, status, platform));
+  res.headers.set("Cache-Control", "no-store");
   // Single-use transaction cookie — always clear it on the way out.
   res.cookies.delete(OAUTH_TX_COOKIE);
   res.cookies.delete(OAUTH_PENDING_COOKIE);
@@ -163,7 +162,13 @@ function selectionResponse(input: {
 </html>`;
 
   const res = new NextResponse(body, {
-    headers: { "Content-Type": "text/html; charset=utf-8" },
+    headers: {
+      "Cache-Control": "no-store",
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+      "Content-Type": "text/html; charset=utf-8",
+      "Referrer-Policy": "no-referrer",
+      "X-Frame-Options": "DENY",
+    },
   });
   res.cookies.delete(OAUTH_TX_COOKIE);
   res.cookies.set(OAUTH_PENDING_COOKIE, signed, {
@@ -179,6 +184,10 @@ function selectionResponse(input: {
 export async function GET(req: NextRequest, { params }: RouteParams): Promise<Response> {
   const { platform } = await params;
 
+  if (!isLaunchConnectorPlatform(platform)) {
+    return NextResponse.json({ error: "platform_not_in_launch_scope", platform }, { status: 404 });
+  }
+
   const config = getConnectorConfig(platform);
   if (!config) {
     return NextResponse.json({ error: "unknown_platform", platform }, { status: 404 });
@@ -187,35 +196,35 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Re
     return appRedirect(req, "unsupported_callback", config.id);
   }
   if (!isConnectorConfigured(config.id)) {
-    return NextResponse.json(
-      { error: "not_configured", platform: config.id },
-      { status: 503 },
+    return appRedirect(req, "not_configured", config.id);
+  }
+
+  const returnedState = req.nextUrl.searchParams.get("state");
+  // ── CSRF: verify the signed transaction cookie + state round-trip ──
+  const tx = verifyTransaction(req.cookies.get(OAUTH_TX_COOKIE)?.value);
+  if (
+    !returnedState
+    || !tx
+    || tx.platform !== config.id
+    || !statesMatch(tx.state, returnedState)
+    || (config.usesPkce && !tx.codeVerifier)
+  ) {
+    return appRedirect(req, "state_mismatch", config.id);
+  }
+
+  // Validate state before accepting even a provider-side denial. Otherwise a
+  // cross-site request could erase another in-flight OAuth transaction.
+  const providerError = req.nextUrl.searchParams.get("error");
+  if (providerError) {
+    return appRedirect(
+      req,
+      providerError === "access_denied" ? "consent_denied" : "provider_error",
+      config.id,
     );
   }
 
-  // Provider-side error (user denied consent, etc.) → graceful redirect.
-  const providerError = req.nextUrl.searchParams.get("error");
-  if (providerError) {
-    return appRedirect(req, "error", config.id);
-  }
-
-  // TikTok returns `auth_code` (alongside a DIFFERENT `code`); its token endpoint
-  // wants auth_code, so prefer it for the TikTok dialect. Standard providers
-  // only ever return `code`.
-  const code =
-    config.oauthStyle === "tiktok"
-      ? req.nextUrl.searchParams.get("auth_code") ?? req.nextUrl.searchParams.get("code")
-      : req.nextUrl.searchParams.get("code");
-  const returnedState = req.nextUrl.searchParams.get("state");
-  if (!code || !returnedState) {
-    return appRedirect(req, "error", config.id);
-  }
-
-  // ── CSRF: verify the signed transaction cookie + state round-trip ──
-  const tx = verifyTransaction(req.cookies.get(OAUTH_TX_COOKIE)?.value);
-  if (!tx || tx.platform !== config.id || !statesMatch(tx.state, returnedState)) {
-    return appRedirect(req, "state_mismatch", config.id);
-  }
+  const code = req.nextUrl.searchParams.get("code");
+  if (!code) return appRedirect(req, "missing_code", config.id);
 
   // A valid OAuth transaction still belongs to a shared workspace. Only its
   // owner/admin may exchange and persist credentials for that tenant.
@@ -254,12 +263,10 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Re
       config,
       clientId,
       clientSecret,
-      redirectUri: new URL(
-        `/api/connect/${config.id}/callback`,
-        process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin,
-      ).toString(),
+      redirectUri: connectorCallbackUrl(req.url, config.id),
       code,
       codeVerifier: tx.codeVerifier,
+      signal: AbortSignal.timeout(20_000),
     });
   } catch (err) {
     // exchange failed (provider error / network) — never leak secrets.

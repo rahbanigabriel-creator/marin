@@ -62,6 +62,10 @@ export function auditFailureMessage(status: number, payload: AuditFailurePayload
     return "This website did not allow Marpin to inspect the page. Try a public page instead.";
   }
 
+  if (code === "APP_STORE_LISTING_UNAVAILABLE") {
+    return "Marpin reached Apple but could not verify this app listing. Check that the link opens publicly in that country or region, then try again.";
+  }
+
   switch (code) {
     case "DNS_LOOKUP_FAILED":
       return "Marpin could not find this website. Check the address and try again.";

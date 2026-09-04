@@ -20,7 +20,11 @@ import {
   parseAgentRunListQuery,
   parseAgentRunRequest,
 } from "@/lib/agent-runs/validation";
-import { agentPlanForMode } from "@/lib/agent-runs/registry";
+import {
+  agentPlanByKey,
+  agentPlanForMode,
+  agentPlanForRequest,
+} from "@/lib/agent-runs/registry";
 
 test("run input is bounded and rejects client-owned execution fields", () => {
   assert.deepEqual(parseAgentRunRequest({
@@ -44,6 +48,73 @@ test("run input is bounded and rejects client-owned execution fields", () => {
     mode: "paid",
     requestId: "run_request_123",
     execute: true,
+  }), /unsupported field/);
+});
+
+test("paid monitor input binds one account and bounded calendar window", () => {
+  const request = parseAgentRunRequest({
+    brandId: "brand-1",
+    conversationId: null,
+    goal: "Review recent campaign health",
+    mode: "paid",
+    requestId: "monitor_request_123",
+    target: {
+      kind: "paid_monitor",
+      connectionId: "connection-1",
+      from: "2026-08-01",
+      to: "2026-08-14",
+    },
+  });
+  assert.deepEqual(request.target, {
+    kind: "paid_monitor",
+    connectionId: "connection-1",
+    from: "2026-08-01",
+    to: "2026-08-14",
+  });
+  assert.equal(agentPlanForRequest("paid", request.target).key, "paid.monitor.v1");
+  assert.equal(agentPlanForRequest("paid", request.target).behavior, "monitor_paid_campaigns");
+  assert.equal(agentPlanForRequest("paid", request.target).tool.risk, "read");
+  assert.equal(agentPlanByKey("paid.monitor.v1")?.behavior, "monitor_paid_campaigns");
+
+  assert.throws(() => parseAgentRunRequest({
+    brandId: "brand-1",
+    conversationId: null,
+    goal: "Review recent campaign health",
+    mode: "paid",
+    requestId: "monitor_request_456",
+    target: {
+      kind: "paid_monitor",
+      connectionId: "connection-1",
+      from: "2026-07-01",
+      to: "2026-08-01",
+    },
+  }), /1 to 30 calendar days/);
+  assert.throws(() => parseAgentRunRequest({
+    brandId: "brand-1",
+    conversationId: null,
+    goal: "Review recent campaign health",
+    mode: "paid",
+    requestId: "monitor_request_789",
+    target: {
+      kind: "paid_monitor",
+      connectionId: "connection-1",
+      from: "2026-02-30",
+      to: "2026-03-01",
+    },
+  }), /dates are invalid/);
+  assert.throws(() => parseAgentRunRequest({
+    brandId: "brand-1",
+    conversationId: null,
+    goal: "Review recent campaign health",
+    mode: "paid",
+    requestId: "monitor_request_999",
+    target: {
+      kind: "paid_monitor",
+      connectionId: "connection-1",
+      from: "2026-08-01",
+      to: "2026-08-14",
+      providerPayload: { mutate: true },
+    },
   }), /unsupported field/);
 });
 

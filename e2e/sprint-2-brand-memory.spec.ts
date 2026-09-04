@@ -45,7 +45,7 @@ function auditedBrand(version: number): BrandDto {
   };
 }
 
-test("website audit becomes durable Brand memory and restores contextual work without rerunning AI", async ({ page }) => {
+test("website audit becomes durable planning context and restores contextual work without rerunning AI", async ({ page }) => {
   let brand: BrandDto | null = null;
   let conversations: ConversationSummaryDto[] = [];
   let conversation: ConversationDto | null = null;
@@ -209,7 +209,7 @@ test("website audit becomes durable Brand memory and restores contextual work wi
   await page.getByRole("button", { name: "Send message" }).click();
 
   await expect(page.getByRole("heading", { name: "Marpin", exact: true })).toBeVisible();
-  await expect(page.getByText("BRAND MEMORY · VERSION 1")).toBeVisible();
+  await expect(page.getByText("AUDIT CONTEXT · VERSION 1")).toBeVisible();
   await expect(page.getByText("Meta description length needs attention")).toBeVisible();
 
   await page.getByRole("textbox", { name: "Brand name" }).fill("Marpin Distribution OS");
@@ -221,19 +221,19 @@ test("website audit becomes durable Brand memory and restores contextual work wi
     .fill("Solo software founders\nTechnical indie hackers");
   await page.getByRole("textbox", { name: /voice/i }).fill("Direct\nEvidence-led\nPractical");
   await page.getByRole("textbox", { name: "Locale" }).fill("en-ES");
-  await page.getByRole("button", { name: "Save brand" }).click();
-  await expect(page.getByText("BRAND MEMORY · VERSION 2")).toBeVisible();
+  await page.getByRole("button", { name: "Save context" }).click();
+  await expect(page.getByText("AUDIT CONTEXT · VERSION 2")).toBeVisible();
 
   await page.reload();
-  await expect(page.getByText("BRAND MEMORY · VERSION 2")).toBeVisible();
-  await page.getByRole("button", { name: "Assistant", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Brand", exact: true })).toHaveCount(0);
   await expect(
     page.getByRole("heading", { name: "What should we work on for Marpin Distribution OS?" }),
   ).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Ask Marpin what to do next" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Brand", exact: true }).click();
-  await expect(page.getByText("BRAND MEMORY · VERSION 2")).toBeVisible();
+  await page.getByRole("button", { name: "Account menu" }).click();
+  await page.getByRole("button", { name: "Website audit" }).click();
+  await expect(page.getByText("AUDIT CONTEXT · VERSION 2")).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Brand name" })).toHaveValue("Marpin Distribution OS");
   await expect(page.getByRole("textbox", { name: /audience/i })).toHaveValue(
     "Solo software founders\nTechnical indie hackers",
@@ -259,7 +259,7 @@ test("website audit becomes durable Brand memory and restores contextual work wi
   expect(chatRequests).toBe(1);
 });
 
-test("workspace members can inspect brand memory without mutating shared context", async ({ page }) => {
+test("workspace members can inspect website audit context without mutating it", async ({ page }) => {
   await page.route(/\/api\/connections(?:\?.*)?$/, (route) =>
     route.fulfill({
       status: 200,
@@ -295,11 +295,13 @@ test("workspace members can inspect brand memory without mutating shared context
     }),
   );
 
-  await page.goto("/app?mode=brand");
+  await page.goto("/app");
+  await page.getByRole("button", { name: "Account menu" }).click();
+  await page.getByRole("button", { name: "Website audit" }).click();
   await expect(page.getByText("Read-only · owner or admin access is required")).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Brand name" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Re-audit" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Save brand" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Save context" })).toBeDisabled();
 
   const accessibility = await new AxeBuilder({ page }).analyze();
   expect(
@@ -309,7 +311,7 @@ test("workspace members can inspect brand memory without mutating shared context
   ).toEqual([]);
 });
 
-test("Brand memory remains usable without horizontal overflow on mobile", async ({ page }) => {
+test("website audit context remains usable without horizontal overflow on mobile", async ({ page }) => {
   const brand = auditedBrand(2);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.route(/\/api\/connections(?:\?.*)?$/, async (route) => {
@@ -348,9 +350,10 @@ test("Brand memory remains usable without horizontal overflow on mobile", async 
   });
 
   await page.goto("/app");
-  await page.getByRole("button", { name: "Brand", exact: true }).click();
+  await page.getByRole("button", { name: "Account menu" }).click();
+  await page.getByRole("button", { name: "Website audit" }).click();
   await expect(page.getByRole("heading", { name: "Marpin Distribution OS" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Save brand" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save context" })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Brand name" })).toBeVisible();
 
   const layout = await page.evaluate(() => {

@@ -42,7 +42,7 @@ function commonBrandFailure(error: unknown): NextResponse | null {
   }
   if (error instanceof WorkspaceAuthorizationError) {
     return NextResponse.json(
-      { error: "forbidden", message: "Owner or admin access is required to manage brand memory." },
+      { error: "forbidden", message: "Owner or admin access is required to manage audit context." },
       { status: 403 },
     );
   }

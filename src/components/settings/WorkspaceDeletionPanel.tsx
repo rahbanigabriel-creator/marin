@@ -132,7 +132,7 @@ function DeleteConfirmationDialog({
           <div>
             <h3 id={titleId} className="m-0 text-[18px] font-semibold">Delete this workspace</h3>
             <p id={descriptionId} className="mb-0 mt-1 text-[12.5px] leading-5 text-ink-400">
-              This permanently removes brand memory, conversations, plans, drafts, reports, assets, and connected-account tokens.
+              This permanently removes audit context, conversations, plans, drafts, reports, assets, and connected-account tokens.
             </p>
           </div>
           <button

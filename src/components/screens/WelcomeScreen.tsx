@@ -42,7 +42,7 @@ export function WelcomeScreen({
       ? "Plan content, improve SEO, or turn one idea into a week of distribution."
       : "Start with your URL or describe the audience and channels you want to plan."
     : hasBrand
-      ? "Ask for a strategy, campaign, audit, or next move. Marpin already knows your brand."
+      ? "Ask for a strategy, campaign, audit, or next move. Marpin already knows your business."
       : "Drop your URL and I'll map the market, competitors, and first moves.";
   const placeholder = organic
     ? hasBrand

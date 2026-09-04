@@ -1,4 +1,4 @@
-export type WorkspaceArea = "assistant" | "brand" | "organic" | "paid" | "analytics" | "agents";
+export type WorkspaceArea = "assistant" | "organic" | "paid" | "analytics" | "agents";
 export type OrganicWorkspaceView = "calendar" | "studio" | "seo" | "influencers" | "assistant";
 export type PaidWorkspaceView = "campaigns";
 
@@ -9,7 +9,6 @@ export interface WorkspaceLocation {
 
 const AREA_SET = new Set<WorkspaceArea>([
   "assistant",
-  "brand",
   "organic",
   "paid",
   "analytics",

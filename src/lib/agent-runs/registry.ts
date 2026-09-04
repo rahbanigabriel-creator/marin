@@ -1,7 +1,12 @@
-import type { AgentRunMode, AgentToolPolicy } from "@/lib/agent-runs/types";
+import type {
+  AgentRunMode,
+  AgentRunTargetRequest,
+  AgentToolPolicy,
+} from "@/lib/agent-runs/types";
 
 export type AgentPlanKey =
   | "organic.weekly_plan.v1"
+  | "paid.monitor.v1"
   | "paid.approval_gate.v1"
   | `input.required.${Exclude<AgentRunMode, "organic">}.v1`;
 
@@ -9,7 +14,11 @@ export interface RegisteredAgentPlan {
   key: AgentPlanKey;
   mode: AgentRunMode;
   tool: AgentToolPolicy;
-  behavior: "create_weekly_content_plan" | "request_input" | "request_paid_approval";
+  behavior:
+    | "create_weekly_content_plan"
+    | "monitor_paid_campaigns"
+    | "request_input"
+    | "request_paid_approval";
 }
 
 const MANAGERS = ["owner", "admin"] as const;
@@ -21,6 +30,19 @@ const PAID_APPROVAL_PLAN: RegisteredAgentPlan = Object.freeze({
   tool: Object.freeze({
     name: "paid.operation.approval_gate",
     risk: "spend",
+    roles: MANAGERS,
+    entitlement: "canExecuteActions",
+    maxCalls: 1,
+  }),
+});
+
+const PAID_MONITOR_PLAN: RegisteredAgentPlan = Object.freeze({
+  key: "paid.monitor.v1",
+  mode: "paid",
+  behavior: "monitor_paid_campaigns",
+  tool: Object.freeze({
+    name: "paid.metrics.monitor",
+    risk: "read",
     roles: MANAGERS,
     entitlement: "canExecuteActions",
     maxCalls: 1,
@@ -68,13 +90,15 @@ export function agentPlanForMode(mode: AgentRunMode): RegisteredAgentPlan {
 
 export function agentPlanForRequest(
   mode: AgentRunMode,
-  hasTarget: boolean,
+  target: AgentRunTargetRequest | null,
 ): RegisteredAgentPlan {
-  if (mode !== "paid" || !hasTarget) return agentPlanForMode(mode);
+  if (mode !== "paid" || !target) return agentPlanForMode(mode);
+  if (target.kind === "paid_monitor") return PAID_MONITOR_PLAN;
   return PAID_APPROVAL_PLAN;
 }
 
 export function agentPlanByKey(key: string): RegisteredAgentPlan | null {
+  if (key === PAID_MONITOR_PLAN.key) return PAID_MONITOR_PLAN;
   if (key === PAID_APPROVAL_PLAN.key) return PAID_APPROVAL_PLAN;
   return Object.values(REGISTRY).find((plan) => plan.key === key) ?? null;
 }

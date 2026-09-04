@@ -187,13 +187,13 @@ export function BrandWorkspace({ brand, initialUrl = "", busy, error, canManage,
           }}
         >
           <LuScanSearch className="mb-[18px] text-[28px] text-plum" aria-hidden />
-          <h1 className="font-serif text-[34px] font-medium text-ink-900">Build your brand memory</h1>
+          <h1 className="font-serif text-[34px] font-medium text-ink-900">Audit your website or app</h1>
           <p className="mt-[10px] max-w-[560px] font-sans text-[14px] leading-[1.65] text-ink-300">
-            Start with your website. Marpin will inspect the page, show its evidence, and turn what it learns into editable context.
+            Paste a website or public App Store URL. Marpin will inspect the page, show its evidence, and keep the useful context for planning.
           </p>
           {!canManage ? (
             <p className="mt-[12px] font-sans text-[12.5px] text-ink-400">
-              This workspace is read-only for members. An owner or admin can create brand memory.
+              This workspace is read-only for members. An owner or admin can run the audit.
             </p>
           ) : null}
           <div className="mt-[28px] flex gap-[8px]">
@@ -224,14 +224,14 @@ export function BrandWorkspace({ brand, initialUrl = "", busy, error, canManage,
     <div
       tabIndex={0}
       role="region"
-      aria-label="Brand memory details"
+      aria-label="Website audit details"
       className="min-h-0 flex-1 overflow-y-auto bg-surface-page focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-plum"
     >
       <div className="mx-auto w-full max-w-[1080px] px-[28px] py-[30px]">
         <div className="flex flex-wrap items-start justify-between gap-[18px] border-b border-line-1 pb-[24px]">
           <div>
             <div className="font-mono text-[10px] font-semibold tracking-[0.09em] text-plum-muted2">
-              BRAND MEMORY · VERSION {brand.contextVersion}
+              AUDIT CONTEXT · VERSION {brand.contextVersion}
             </div>
             <h1 className="mt-[7px] font-serif text-[32px] font-medium text-ink-900">{brand.name}</h1>
             <p className="mt-[6px] font-sans text-[13px] text-ink-300">
@@ -239,7 +239,7 @@ export function BrandWorkspace({ brand, initialUrl = "", busy, error, canManage,
             </p>
             {!canManage ? (
               <p className="mt-[5px] font-sans text-[12px] font-medium text-ink-400">
-                Read-only · owner or admin access is required to update brand memory.
+                Read-only · owner or admin access is required to update audit context.
               </p>
             ) : null}
           </div>
@@ -274,7 +274,7 @@ export function BrandWorkspace({ brand, initialUrl = "", busy, error, canManage,
               className="flex items-center gap-[7px] rounded-[8px] border-none bg-plum px-[13px] py-[9px] font-sans text-[12.5px] font-semibold text-white disabled:opacity-50"
             >
               <LuSave aria-hidden />
-              {busy ? "Saving" : "Save brand"}
+              {busy ? "Saving" : "Save context"}
             </button>
           </div>
         </div>

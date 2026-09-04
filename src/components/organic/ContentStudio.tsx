@@ -11,6 +11,7 @@ import {
 import {
   LuCalendarDays,
   LuCheck,
+  LuChartNoAxesCombined,
   LuExternalLink,
   LuFileImage,
   LuImagePlus,
@@ -22,6 +23,7 @@ import {
   LuSparkles,
   LuTrash2,
   LuUpload,
+  LuUsers,
   LuX,
 } from "react-icons/lu";
 
@@ -103,6 +105,8 @@ interface ImageDraft {
 
 type PendingStudioNavigation =
   | { kind: "calendar" }
+  | { kind: "seo" }
+  | { kind: "influencers" }
   | { kind: "new" }
   | { kind: "select"; contentItemId: string };
 
@@ -436,6 +440,8 @@ export function ContentStudio({
   canManage,
   initialContentId,
   onCalendar,
+  onSeo,
+  onInfluencers,
   onAskAI,
 }: {
   brandId: string;
@@ -444,6 +450,8 @@ export function ContentStudio({
   canManage: boolean;
   initialContentId?: string;
   onCalendar: () => void;
+  onSeo: () => void;
+  onInfluencers: () => void;
   onAskAI: (prompt: string) => void | Promise<void>;
 }) {
   const [items, setItems] = useState<ContentStudioItemDto[]>([]);
@@ -563,6 +571,16 @@ export function ContentStudio({
       onCalendar();
       return;
     }
+    if (navigation.kind === "seo") {
+      setMasterCreateRequestId(null);
+      onSeo();
+      return;
+    }
+    if (navigation.kind === "influencers") {
+      setMasterCreateRequestId(null);
+      onInfluencers();
+      return;
+    }
     if (navigation.kind === "new") {
       setCreating(true);
       setMasterCreateRequestId(globalThis.crypto.randomUUID());
@@ -573,7 +591,7 @@ export function ContentStudio({
     setCreating(false);
     setMasterCreateRequestId(null);
     setSelectedId(navigation.contentItemId);
-  }, [onCalendar]);
+  }, [onCalendar, onInfluencers, onSeo]);
 
   const requestNavigation = useCallback((navigation: PendingStudioNavigation) => {
     if (
@@ -1291,9 +1309,11 @@ export function ContentStudio({
             </button>
           </div>
         </div>
-        <div className="mt-[12px] inline-grid h-[36px] grid-cols-2 rounded-[8px] bg-track-1 p-[3px]" aria-label="Organic workspace view">
-          <button type="button" disabled={busy} onClick={() => requestNavigation({ kind: "calendar" })} className={`flex min-w-[104px] items-center justify-center gap-[6px] rounded-[6px] px-[10px] text-[12px] font-semibold text-ink-400 disabled:opacity-45 ${focusRing}`}><LuCalendarDays aria-hidden /> Calendar</button>
-          <button type="button" aria-pressed="true" className={`flex min-w-[104px] items-center justify-center gap-[6px] rounded-[6px] bg-surface-card px-[10px] text-[12px] font-semibold text-ink-900 shadow-sm ${focusRing}`}><LuLayoutGrid aria-hidden /> Studio</button>
+        <div className="mt-[12px] grid h-[36px] w-full max-w-[480px] grid-cols-4 rounded-[8px] bg-track-1 p-[3px]" aria-label="Organic workspace view">
+          <button type="button" disabled={busy} onClick={() => requestNavigation({ kind: "calendar" })} className={`flex min-w-0 items-center justify-center gap-[5px] rounded-[6px] px-[6px] text-[11px] font-semibold text-ink-400 disabled:opacity-45 sm:text-[12px] ${focusRing}`}><LuCalendarDays aria-hidden /><span className="hidden min-[430px]:inline">Calendar</span></button>
+          <button type="button" aria-pressed="true" className={`flex min-w-0 items-center justify-center gap-[5px] rounded-[6px] bg-surface-card px-[6px] text-[11px] font-semibold text-ink-900 shadow-sm sm:text-[12px] ${focusRing}`}><LuLayoutGrid aria-hidden /><span className="hidden min-[430px]:inline">Studio</span></button>
+          <button type="button" disabled={busy} onClick={() => requestNavigation({ kind: "seo" })} className={`flex min-w-0 items-center justify-center gap-[5px] rounded-[6px] px-[6px] text-[11px] font-semibold text-ink-400 disabled:opacity-45 sm:text-[12px] ${focusRing}`}><LuChartNoAxesCombined aria-hidden /><span className="hidden min-[430px]:inline">SEO</span></button>
+          <button type="button" disabled={busy} onClick={() => requestNavigation({ kind: "influencers" })} className={`flex min-w-0 items-center justify-center gap-[5px] rounded-[6px] px-[6px] text-[11px] font-semibold text-ink-400 disabled:opacity-45 sm:text-[12px] ${focusRing}`}><LuUsers aria-hidden /><span className="hidden min-[430px]:inline">Influencers</span></button>
         </div>
       </header>
 

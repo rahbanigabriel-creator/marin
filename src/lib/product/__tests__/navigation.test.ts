@@ -27,7 +27,7 @@ test("workspace routes restore every launch area", () => {
     area: "paid",
     view: "campaigns",
   });
-  assert.deepEqual(parseWorkspaceLocation("mode=brand"), { area: "brand" });
+  assert.deepEqual(parseWorkspaceLocation("mode=brand"), { area: "assistant" });
   assert.deepEqual(parseWorkspaceLocation("mode=agents"), { area: "agents" });
   assert.deepEqual(parseWorkspaceLocation("mode=analytics"), { area: "analytics" });
   assert.deepEqual(parseWorkspaceLocation("mode=assistant"), { area: "assistant" });
@@ -53,7 +53,6 @@ test("workspace hrefs use canonical view names", () => {
     workspaceLocationHref({ area: "paid" }),
     "/app?mode=paid&view=campaigns",
   );
-  assert.equal(workspaceLocationHref({ area: "brand" }), "/app?mode=brand");
   assert.equal(workspaceLocationHref({ area: "agents" }), "/app?mode=agents");
   assert.equal(workspaceLocationHref({ area: "analytics" }), "/app?mode=analytics");
 });

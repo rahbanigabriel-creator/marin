@@ -253,7 +253,7 @@ function EmptyState({
         <h2 className="mb-0 mt-[15px] text-[18px] font-semibold text-ink-900">No posts planned yet</h2>
         <p className="mb-0 mt-[7px] text-[13px] leading-[1.55] text-ink-400">
           {canManage
-            ? `Add the first post manually, or let Marpin prepare a reviewable ${period} from your brand memory.`
+            ? `Add the first post manually, or let Marpin prepare a reviewable ${period} from your saved audit context.`
             : "This calendar is read-only for your workspace role."}
         </p>
         {canManage ? <div className="mt-[18px] flex flex-wrap justify-center gap-[8px]">
@@ -1628,7 +1628,7 @@ export function OrganicPlanner({
     const period = view === "week"
       ? `the week of ${formatCalendarDate(range.start, locale, { day: "numeric", month: "long", year: "numeric" })}`
       : formatCalendarDate(cursor, locale, { month: "long", year: "numeric" });
-    void onAskAI(`Help me plan organic content for ${period}. Focus on ${active || "my organic channels"}, use my brand context, and suggest post ideas I can review before adding them to the calendar.`);
+    void onAskAI(`Help me plan organic content for ${period}. Focus on ${active || "my organic channels"}, use my saved business context, and suggest post ideas I can review before adding them to the calendar.`);
   };
 
   const generateNextPeriod = useCallback(async () => {
@@ -1723,6 +1723,8 @@ export function OrganicPlanner({
           setReloadKey((current) => current + 1);
           setSurface("calendar");
         }}
+        onSeo={() => setSurface("seo")}
+        onInfluencers={() => setSurface("influencers")}
         onAskAI={onAskAI}
       />
     );
@@ -1738,6 +1740,7 @@ export function OrganicPlanner({
           setSurface("calendar");
         }}
         onStudio={() => setSurface("studio")}
+        onInfluencers={() => setSurface("influencers")}
         onAskAI={onAskAI}
       />
     );

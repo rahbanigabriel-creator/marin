@@ -3,6 +3,7 @@ import type {
   AgentRunStepDto,
 } from "@/lib/agent-runs/dto";
 import type { AgentApprovalDecision } from "@/lib/agent-runs/types";
+import type { PaidMonitorConnectionDto } from "@/lib/agent-runs/types";
 
 interface ApiFailureBody {
   code?: unknown;
@@ -13,6 +14,9 @@ interface AgentRunMutationResponse {
   run: AgentRunDto;
   replayed?: boolean;
 }
+
+export const PAID_MONITOR_WINDOW_DAYS = [7, 14, 30] as const;
+export type PaidMonitorWindowDays = (typeof PAID_MONITOR_WINDOW_DAYS)[number];
 
 export class AgentRunClientError extends Error {
   constructor(
@@ -42,6 +46,45 @@ export function buildOrganicRunPayload(input: {
     mode: "organic" as const,
     requestId: input.requestId,
     target: null,
+  };
+}
+
+export function recentPaidMonitorWindow(
+  days: PaidMonitorWindowDays,
+  now = new Date(),
+): { from: string; to: string } {
+  if (!PAID_MONITOR_WINDOW_DAYS.includes(days)) {
+    throw new TypeError("Paid monitor window is invalid");
+  }
+  const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  to.setUTCDate(to.getUTCDate() - 1);
+  const from = new Date(to);
+  from.setUTCDate(from.getUTCDate() - (days - 1));
+  return {
+    from: from.toISOString().slice(0, 10),
+    to: to.toISOString().slice(0, 10),
+  };
+}
+
+export function buildPaidMonitorRunPayload(input: {
+  brandId: string;
+  connectionId: string;
+  goal: string;
+  requestId: string;
+  window: { from: string; to: string };
+}) {
+  return {
+    brandId: input.brandId,
+    conversationId: null,
+    goal: input.goal.trim(),
+    mode: "paid" as const,
+    requestId: input.requestId,
+    target: {
+      kind: "paid_monitor" as const,
+      connectionId: input.connectionId,
+      from: input.window.from,
+      to: input.window.to,
+    },
   };
 }
 
@@ -76,6 +119,12 @@ function safeApiMessage(status: number, code: string): string {
     return "Your current plan does not include automated agent actions.";
   }
   if (status === 403) return "Only workspace owners and admins can perform this agent action.";
+  if (status === 409 && code === "monitor_connection_unavailable") {
+    return "The selected paid account is no longer connected. Choose another active account.";
+  }
+  if (status === 409 && code === "monitor_window_not_recent") {
+    return "Choose a recent paid monitoring window and try again.";
+  }
   if (status === 404) return "This agent run is no longer available.";
   if (status === 409) return "This run changed before the action completed. The latest version has been loaded.";
   if (status === 422) return "The agent request could not be validated. Review the goal and try again.";
@@ -125,6 +174,18 @@ export async function listAgentRuns(signal?: AbortSignal): Promise<AgentRunDto[]
   return Array.isArray(payload.runs) ? payload.runs : [];
 }
 
+export async function listPaidMonitorConnections(
+  signal?: AbortSignal,
+): Promise<PaidMonitorConnectionDto[]> {
+  const response = await fetch("/api/agent-runs/paid-connections", {
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+    signal,
+  });
+  const payload = await parseResponse<{ connections: PaidMonitorConnectionDto[] }>(response);
+  return Array.isArray(payload.connections) ? payload.connections : [];
+}
+
 export async function getAgentRun(runId: string, signal?: AbortSignal): Promise<AgentRunDto> {
   const response = await fetch(`/api/agent-runs/${encodeURIComponent(runId)}`, {
     cache: "no-store",
@@ -144,6 +205,27 @@ export async function startOrganicAgentRun(input: {
       buildOrganicRunPayload({
         ...input,
         requestId: newAgentRequestId(),
+      }),
+    ),
+  );
+  return (await parseResponse<AgentRunMutationResponse>(response)).run;
+}
+
+export async function startPaidMonitorAgentRun(input: {
+  brandId: string;
+  connectionId: string;
+  goal: string;
+  days: PaidMonitorWindowDays;
+}): Promise<AgentRunDto> {
+  const response = await fetch(
+    "/api/agent-runs",
+    mutationInit(
+      buildPaidMonitorRunPayload({
+        brandId: input.brandId,
+        connectionId: input.connectionId,
+        goal: input.goal,
+        requestId: newAgentRequestId(),
+        window: recentPaidMonitorWindow(input.days),
       }),
     ),
   );

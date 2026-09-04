@@ -89,7 +89,7 @@ export interface OrganicCalendarResponse {
 }
 
 export interface OrganicPlannerProps {
-  /** Durable Brand memory used for every manually created post. */
+  /** Durable audit context used for every manually created post. */
   brandId: string;
   /** IANA timezone used for calendar boundaries and wall-clock editing. */
   timezone?: string;

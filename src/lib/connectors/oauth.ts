@@ -132,6 +132,8 @@ export interface ExchangeCodeInput {
   /** PKCE verifier — pass only when config.usesPkce. */
   codeVerifier?: string;
   signal?: AbortSignal;
+  /** Test seam; production always uses the runtime fetch implementation. */
+  fetchImpl?: typeof fetch;
 }
 
 /**
@@ -144,7 +146,16 @@ export interface ExchangeCodeInput {
 export async function exchangeCodeForTokens(
   input: ExchangeCodeInput,
 ): Promise<OAuthTokens> {
-  const { config, clientId, clientSecret, redirectUri, code, codeVerifier, signal } = input;
+  const {
+    config,
+    clientId,
+    clientSecret,
+    redirectUri,
+    code,
+    codeVerifier,
+    signal,
+    fetchImpl = fetch,
+  } = input;
 
   // TikTok Business: JSON {app_id, secret, auth_code} → {data:{access_token,…}}.
   if (config.oauthStyle === "tiktok") {
@@ -154,6 +165,7 @@ export async function exchangeCodeForTokens(
       secret: clientSecret,
       authCode: code,
       signal,
+      fetchImpl,
     });
   }
 
@@ -176,7 +188,7 @@ export async function exchangeCodeForTokens(
     form.set("client_secret", clientSecret);
   }
 
-  const res = await fetch(config.tokenUrl, {
+  const res = await fetchImpl(config.tokenUrl, {
     method: "POST",
     headers,
     body: form.toString(),
@@ -197,7 +209,7 @@ export async function exchangeCodeForTokens(
     );
   }
 
-  return {
+  const tokens: OAuthTokens = {
     accessToken: body.access_token,
     refreshToken: body.refresh_token,
     expiresAt:
@@ -206,6 +218,66 @@ export async function exchangeCodeForTokens(
         : undefined,
     scope: body.scope,
     tokenType: body.token_type,
+  };
+
+  // Facebook Login returns a short-lived user token. Exchange it before any
+  // account is persisted so a connection does not appear healthy and then die
+  // a couple of hours later. Meta has no refresh token for this flow; users
+  // reconnect after the long-lived token eventually expires.
+  if (config.id === "meta_ads") {
+    return exchangeMetaLongLivedToken({
+      tokenUrl: config.tokenUrl,
+      clientId,
+      clientSecret,
+      shortLivedToken: tokens.accessToken,
+      fallback: tokens,
+      signal,
+      fetchImpl,
+    });
+  }
+
+  return tokens;
+}
+
+async function exchangeMetaLongLivedToken(input: {
+  tokenUrl: string;
+  clientId: string;
+  clientSecret: string;
+  shortLivedToken: string;
+  fallback: OAuthTokens;
+  signal?: AbortSignal;
+  fetchImpl: typeof fetch;
+}): Promise<OAuthTokens> {
+  const url = new URL(input.tokenUrl);
+  url.searchParams.set("grant_type", "fb_exchange_token");
+  url.searchParams.set("client_id", input.clientId);
+  url.searchParams.set("client_secret", input.clientSecret);
+  url.searchParams.set("fb_exchange_token", input.shortLivedToken);
+
+  const res = await input.fetchImpl(url, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    signal: input.signal,
+  });
+  let body: TokenResponseBody;
+  try {
+    body = (await res.json()) as TokenResponseBody;
+  } catch {
+    throw new OAuthError(`Meta long-lived token endpoint returned non-JSON (status ${res.status})`);
+  }
+  if (!res.ok || body.error || !body.access_token) {
+    throw new OAuthError(
+      body.error ? `Meta long-lived token: ${body.error}` : `Meta long-lived token exchange failed (status ${res.status})`,
+    );
+  }
+  return {
+    accessToken: body.access_token,
+    expiresAt:
+      typeof body.expires_in === "number"
+        ? new Date(Date.now() + body.expires_in * 1000)
+        : input.fallback.expiresAt,
+    scope: body.scope ?? input.fallback.scope,
+    tokenType: body.token_type ?? input.fallback.tokenType,
   };
 }
 
@@ -221,8 +293,9 @@ async function exchangeTikTokCode(input: {
   secret: string;
   authCode: string;
   signal?: AbortSignal;
+  fetchImpl: typeof fetch;
 }): Promise<OAuthTokens> {
-  const res = await fetch(input.tokenUrl, {
+  const res = await input.fetchImpl(input.tokenUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ app_id: input.appId, secret: input.secret, auth_code: input.authCode }),
@@ -324,6 +397,7 @@ export interface OAuthTransaction {
   clerkUserId: string;
   /** PKCE verifier; absent for providers without PKCE (Meta). */
   codeVerifier?: string;
+  exp: number;
 }
 
 /** Cookie name carrying the signed OAuth transaction. */
@@ -371,8 +445,11 @@ function readSigningKey(): Buffer | null {
  * Returns null when no signing key (TOKEN_ENC_KEY) is configured — the caller
  * should already have refused via isConnectorConfigured / vault checks.
  */
-export function signTransaction(tx: OAuthTransaction): string | null {
-  return signJson(tx);
+export function signTransaction(tx: Omit<OAuthTransaction, "exp">): string | null {
+  return signJson({
+    ...tx,
+    exp: Math.floor(Date.now() / 1000) + OAUTH_TX_MAX_AGE,
+  });
 }
 
 export function signPendingSelection(
@@ -396,35 +473,55 @@ function signJson(value: unknown): string | null {
  * Verify + parse a signed transaction cookie. Returns null on any tampering,
  * malformed value, or missing key (constant-time signature comparison).
  */
-export function verifyTransaction(cookieValue: string | undefined): OAuthTransaction | null {
+export function verifyTransaction(
+  cookieValue: string | undefined,
+  nowSeconds = Math.floor(Date.now() / 1000),
+): OAuthTransaction | null {
   const parsed = verifyJson(cookieValue) as OAuthTransaction | null;
   if (!parsed) return null;
   if (
     typeof parsed.platform !== "string" ||
+    parsed.platform.length === 0 ||
     typeof parsed.state !== "string" ||
+    parsed.state.length === 0 ||
     typeof parsed.workspaceId !== "string" ||
     parsed.workspaceId.length === 0 ||
     typeof parsed.clerkUserId !== "string" ||
     parsed.clerkUserId.length === 0 ||
-    (parsed.codeVerifier !== undefined && typeof parsed.codeVerifier !== "string")
+    (parsed.codeVerifier !== undefined && typeof parsed.codeVerifier !== "string") ||
+    typeof parsed.exp !== "number" ||
+    !Number.isFinite(parsed.exp) ||
+    parsed.exp <= nowSeconds
   ) {
     return null;
   }
   return parsed;
 }
 
-export function verifyPendingSelection(cookieValue: string | undefined): OAuthPendingSelection | null {
+export function verifyPendingSelection(
+  cookieValue: string | undefined,
+  nowSeconds = Math.floor(Date.now() / 1000),
+): OAuthPendingSelection | null {
   const parsed = verifyJson(cookieValue) as OAuthPendingSelection | null;
   if (!parsed) return null;
   if (
     typeof parsed.platform !== "string" ||
+    parsed.platform.length === 0 ||
     typeof parsed.workspaceId !== "string" ||
     parsed.workspaceId.length === 0 ||
     typeof parsed.clerkUserId !== "string" ||
     parsed.clerkUserId.length === 0 ||
     typeof parsed.encAccessToken !== "string" ||
+    parsed.encAccessToken.length === 0 ||
+    (parsed.encRefreshToken !== undefined && typeof parsed.encRefreshToken !== "string") ||
+    (parsed.expiresAt !== undefined && (
+      typeof parsed.expiresAt !== "string" || Number.isNaN(Date.parse(parsed.expiresAt))
+    )) ||
+    (parsed.scope !== undefined && typeof parsed.scope !== "string") ||
+    (parsed.tokenType !== undefined && typeof parsed.tokenType !== "string") ||
     typeof parsed.exp !== "number" ||
-    parsed.exp < Math.floor(Date.now() / 1000)
+    !Number.isFinite(parsed.exp) ||
+    parsed.exp <= nowSeconds
   ) {
     return null;
   }

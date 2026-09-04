@@ -55,6 +55,50 @@ const KPI_LABEL: Partial<Record<MetricKey, string>> = {
 };
 
 const ADDITIVE: MetricKey[] = ["spend", "revenue", "conversions", "clicks", "impressions"];
+const CACHED_SOURCE_STATES = new Set<PaidSourceState>(["failed", "revoked", "stale"]);
+
+export function isCachedPaidSourceState(state: PaidSourceState): boolean {
+  return CACHED_SOURCE_STATES.has(state);
+}
+
+function withCachedPrefix(value: string): string {
+  return value.startsWith("Cached · ") ? value : `Cached · ${value}`;
+}
+
+/** Keep saved observations visible while making their non-current status impossible to miss. */
+export function campaignWithIntegrityLabel(
+  campaign: PaidCampaign,
+  sources: PaidSource[],
+  dashboardState: PaidSourceState,
+): PaidCampaign {
+  const source = sources.find((candidate) => candidate.key === campaign.accountKey);
+  let effectiveState = campaign.sourceState;
+  if (source && isCachedPaidSourceState(source.state)) effectiveState = source.state;
+  else if (!isCachedPaidSourceState(effectiveState) && !source && sources.length === 0 && isCachedPaidSourceState(dashboardState)) {
+    effectiveState = dashboardState;
+  }
+
+  if (!isCachedPaidSourceState(effectiveState)) return campaign;
+
+  const observedFrom = campaign.observedFrom ?? source?.observedFrom ?? null;
+  const observedTo = campaign.observedTo ?? source?.observedTo ?? null;
+  const timezone = campaign.timezone ?? source?.timezone ?? null;
+  return {
+    ...campaign,
+    campaign: withCachedPrefix(campaign.campaign),
+    sourceState: effectiveState,
+    observedFrom,
+    observedTo,
+    timezone,
+    ads: campaign.ads.map((ad) => ({
+      ...ad,
+      name: withCachedPrefix(ad.name),
+      metricsFrom: ad.metricsFrom ?? observedFrom,
+      metricsTo: ad.metricsTo ?? observedTo,
+      timezone: ad.timezone ?? timezone,
+    })),
+  };
+}
 
 function defaultRange(): { from: string; to: string } {
   const to = new Date();
@@ -292,6 +336,35 @@ function StatusBadge({ mode, state }: { mode: ScreenMode; state: PaidSourceState
   );
 }
 
+export function PaidSyncButton({
+  canManage,
+  syncing,
+  loading = false,
+  onSync,
+  className,
+}: {
+  canManage: boolean;
+  syncing: boolean;
+  loading?: boolean;
+  onSync: () => void;
+  className: string;
+}): React.JSX.Element {
+  const readOnlyExplanation = "Only workspace owners and admins can sync ad accounts. You can still view and filter saved campaign data.";
+  return (
+    <button
+      type="button"
+      onClick={canManage ? onSync : undefined}
+      disabled={!canManage || syncing || loading}
+      aria-label={canManage ? undefined : `Sync unavailable. ${readOnlyExplanation}`}
+      title={canManage ? undefined : readOnlyExplanation}
+      className={className}
+    >
+      <LuRefreshCw aria-hidden className={syncing && canManage ? "animate-spin" : ""} />
+      {canManage ? (syncing ? "Syncing" : "Sync now") : "Sync unavailable"}
+    </button>
+  );
+}
+
 export function CampaignsScreen({
   onOpenConnections,
   canManage,
@@ -396,18 +469,66 @@ export function CampaignsScreen({
 
   const tableCampaigns = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) return sourceScopedCampaigns;
-    return sourceScopedCampaigns.filter((campaign) =>
+    const matching = !query ? sourceScopedCampaigns : sourceScopedCampaigns.filter((campaign) =>
       campaign.campaign.toLowerCase().includes(query)
       || campaign.label.toLowerCase().includes(query)
       || campaign.accountName.toLowerCase().includes(query)
       || (campaign.externalId?.toLowerCase().includes(query) ?? false));
-  }, [sourceScopedCampaigns, search]);
+    return matching.map((campaign) => campaignWithIntegrityLabel(campaign, data.sources, data.state));
+  }, [sourceScopedCampaigns, search, data.sources, data.state]);
+
+  const cachedViewCampaigns = useMemo(
+    () => sourceScopedCampaigns
+      .map((campaign) => campaignWithIntegrityLabel(campaign, data.sources, data.state))
+      .filter((campaign) => isCachedPaidSourceState(campaign.sourceState)),
+    [sourceScopedCampaigns, data.sources, data.state],
+  );
+  const cachedViewSources = useMemo(
+    () => scopedSources.filter((source) => isCachedPaidSourceState(source.state)),
+    [scopedSources],
+  );
+  const hasCachedPerformance = cachedViewCampaigns.length > 0
+    || cachedViewSources.length > 0
+    || (scopedSources.length === 0 && isCachedPaidSourceState(viewData.state));
+  const cachedIntegrityCopy = useMemo(() => {
+    if (!hasCachedPerformance) return null;
+    const names = [...new Set([
+      ...cachedViewSources.map((source) => source.accountName),
+      ...cachedViewCampaigns.map((campaign) => campaign.accountName),
+    ])];
+    const states = [...new Set([
+      ...cachedViewSources.map((source) => source.state),
+      ...cachedViewCampaigns.map((campaign) => campaign.sourceState),
+      ...(cachedViewSources.length === 0 && cachedViewCampaigns.length === 0 ? [viewData.state] : []),
+    ])].map(sourceStateLabel);
+    const observedFrom = minDate([
+      ...cachedViewSources.map((source) => source.observedFrom),
+      ...cachedViewCampaigns.map((campaign) => campaign.observedFrom),
+    ]);
+    const observedTo = maxDate([
+      ...cachedViewSources.map((source) => source.observedTo),
+      ...cachedViewCampaigns.map((campaign) => campaign.observedTo),
+    ]);
+    const timezones = [...new Set([
+      ...cachedViewSources.map((source) => source.timezone),
+      ...cachedViewCampaigns.map((campaign) => campaign.timezone),
+    ].filter((timezone): timezone is string => !!timezone))];
+    const timezone = timezones.length === 1 ? timezones[0] : timezones.length > 1 ? "multiple source timezones" : null;
+    const accountScope = names.length > 0 ? ` for ${names.slice(0, 3).join(", ")}${names.length > 3 ? ` and ${names.length - 3} more` : ""}` : "";
+    const rowScope = cachedViewCampaigns.length > 0
+      ? `${cachedViewCampaigns.length} campaign${cachedViewCampaigns.length === 1 ? "" : "s"}${accountScope}`
+      : `saved account observations${accountScope}`;
+    return `${rowScope} use cached metrics because the source state is ${states.join(" / ").toLowerCase()}. Observation coverage: ${coverageLabel(observedFrom, observedTo, timezone)}. Keep them for context, but do not treat them as current until an owner or admin reconnects and syncs the source.`;
+  }, [cachedViewCampaigns, cachedViewSources, hasCachedPerformance, viewData.state]);
 
   const kpis = useMemo(() => buildKpis(viewData), [viewData]);
   const selected = useMemo(
-    () => selectedKey ? data.campaigns.find((campaign) => campaign.identity === selectedKey) ?? null : null,
-    [selectedKey, data.campaigns],
+    () => {
+      if (!selectedKey) return null;
+      const campaign = data.campaigns.find((candidate) => candidate.identity === selectedKey);
+      return campaign ? campaignWithIntegrityLabel(campaign, data.sources, data.state) : null;
+    },
+    [selectedKey, data.campaigns, data.sources, data.state],
   );
   const closeDrillDown = useCallback(() => setSelectedKey(null), []);
   const usablePlatformSpend = !viewData.mixedCurrency
@@ -454,6 +575,11 @@ export function CampaignsScreen({
           <div>
             <h1 className="font-serif text-[24px] font-medium text-ink-900">Paid command center</h1>
             <p className="mt-[2px] font-sans text-[12.5px] text-ink-400">Google Ads and Meta Ads across every connected account.</p>
+            {!canManage ? (
+              <p className="mt-[4px] font-sans text-[11.5px] text-ink-400">
+                Read-only access: you can view and filter saved data; only workspace owners and admins can sync ad accounts.
+              </p>
+            ) : null}
           </div>
           <div className="flex flex-wrap items-center justify-end gap-[10px]">
             <StatusBadge mode={mode} state={data.state} />
@@ -464,15 +590,13 @@ export function CampaignsScreen({
             >
               <LuFileText aria-hidden /> Campaign drafts
             </button>
-            <button
-              type="button"
-              onClick={sync}
-              disabled={syncing || loading}
+            <PaidSyncButton
+              canManage={canManage}
+              syncing={syncing}
+              loading={loading}
+              onSync={sync}
               className="inline-flex cursor-pointer items-center gap-[6px] rounded-[8px] border border-line-3 bg-transparent px-[12px] py-[7px] font-sans text-[12.5px] font-semibold text-ink-600 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <LuRefreshCw aria-hidden className={syncing ? "animate-spin" : ""} />
-              {syncing ? "Syncing" : "Sync now"}
-            </button>
+            />
           </div>
         </div>
 
@@ -510,6 +634,16 @@ export function CampaignsScreen({
             className="mb-[14px] border-y border-line-3 py-[9px] font-sans text-[12px] text-ink-500"
           >
             {sourceWarning}{data.stateDetail ? ` ${data.stateDetail}` : ""}
+          </div>
+        ) : null}
+        {cachedIntegrityCopy ? (
+          <div
+            id="paid-cached-performance-notice"
+            role="status"
+            className="mb-[14px] border-l-[3px] border-[#B88824] bg-[#FBF6E8] px-[12px] py-[10px] font-sans text-[12px] leading-[1.55] text-[#745616]"
+          >
+            <strong className="mr-[5px] font-semibold">Cached performance snapshot.</strong>
+            {cachedIntegrityCopy}
           </div>
         ) : null}
 
@@ -567,9 +701,12 @@ export function CampaignsScreen({
                 : "Connect Google Ads or Meta Ads, then sync to pull observed campaign performance."}
             </p>
             <div className="mt-[18px] flex flex-wrap justify-center gap-[10px]">
-              <button type="button" onClick={sync} disabled={syncing} className="inline-flex cursor-pointer items-center gap-[6px] rounded-[8px] border border-line-3 bg-white px-[14px] py-[9px] font-sans text-[13px] font-semibold text-ink-600 disabled:opacity-60">
-                <LuRefreshCw aria-hidden /> Sync now
-              </button>
+              <PaidSyncButton
+                canManage={canManage}
+                syncing={syncing}
+                onSync={sync}
+                className="inline-flex cursor-pointer items-center gap-[6px] rounded-[8px] border border-line-3 bg-white px-[14px] py-[9px] font-sans text-[13px] font-semibold text-ink-600 disabled:cursor-not-allowed disabled:opacity-60"
+              />
               <button type="button" onClick={onOpenConnections} className="inline-flex cursor-pointer items-center gap-[6px] rounded-[8px] border-0 bg-plum px-[14px] py-[9px] font-sans text-[13px] font-semibold text-white">
                 <LuPlug aria-hidden /> Manage connections
               </button>
@@ -586,9 +723,21 @@ export function CampaignsScreen({
               </div>
             ) : null}
 
-            <div className="mb-[16px]"><KpiRow kpis={kpis} /></div>
+            <div
+              className="mb-[16px]"
+              role="group"
+              aria-label={hasCachedPerformance ? "Cached paid performance summary" : "Paid performance summary"}
+              aria-describedby={hasCachedPerformance ? "paid-cached-performance-notice" : undefined}
+            >
+              <KpiRow kpis={kpis} />
+            </div>
 
-            <div className="mb-[16px]">
+            <div
+              className="mb-[16px]"
+              role="group"
+              aria-label={hasCachedPerformance ? "Cached paid performance trend" : "Paid performance trend"}
+              aria-describedby={hasCachedPerformance ? "paid-cached-performance-notice" : undefined}
+            >
               <MetricTrendChart
                 series={viewData.series}
                 metric={heroMetric}
@@ -602,7 +751,11 @@ export function CampaignsScreen({
             </div>
 
             {viewData.platforms.length > 0 ? (
-              <section className="mb-[16px] rounded-card border border-line-3 bg-surface-card p-[14px_16px]" aria-labelledby="platform-breakdown-title">
+              <section
+                className="mb-[16px] rounded-card border border-line-3 bg-surface-card p-[14px_16px]"
+                aria-labelledby="platform-breakdown-title"
+                aria-describedby={hasCachedPerformance ? "paid-cached-performance-notice" : undefined}
+              >
                 <div className="mb-[12px] flex flex-wrap items-center justify-between gap-[6px]">
                   <h2 id="platform-breakdown-title" className="font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-300">By platform · spend</h2>
                   {viewData.mixedCurrency ? <span className="font-sans text-[10.5px] text-ink-300">Comparative bars hidden for mixed currencies</span> : null}
@@ -670,7 +823,21 @@ export function CampaignsScreen({
               </div>
             </div>
 
-            <CampaignsTable campaigns={tableCampaigns} columns={columns} onRowClick={(campaign) => setSelectedKey(campaign.identity)} />
+            <div className="mb-[7px] flex flex-wrap items-center justify-between gap-[6px]">
+              <h2 className="font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-300">Campaigns</h2>
+              {cachedViewCampaigns.length > 0 ? (
+                <span className="rounded-pill border border-[#D8BD7A] bg-[#FBF6E8] px-[8px] py-[2px] font-mono text-[9.5px] font-semibold text-[#745616]">
+                  {cachedViewCampaigns.length} cached row{cachedViewCampaigns.length === 1 ? "" : "s"}
+                </span>
+              ) : null}
+            </div>
+            <div
+              role="region"
+              aria-label={cachedViewCampaigns.length > 0 ? "Campaign performance with cached rows" : "Campaign performance"}
+              aria-describedby={hasCachedPerformance ? "paid-cached-performance-notice" : undefined}
+            >
+              <CampaignsTable campaigns={tableCampaigns} columns={columns} onRowClick={(campaign) => setSelectedKey(campaign.identity)} />
+            </div>
           </>
         )}
       </div>

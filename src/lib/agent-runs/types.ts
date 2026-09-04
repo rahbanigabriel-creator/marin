@@ -61,10 +61,20 @@ export interface AgentRunRequest {
   target: AgentRunTargetRequest | null;
 }
 
-export interface AgentRunTargetRequest {
-  kind: "paid_create_paused" | "paid_activate";
-  objectId: string;
-}
+export const PAID_MONITOR_PLATFORMS = ["google_ads", "meta_ads"] as const;
+export type PaidMonitorPlatform = (typeof PAID_MONITOR_PLATFORMS)[number];
+
+export type AgentRunTargetRequest =
+  | {
+      kind: "paid_create_paused" | "paid_activate";
+      objectId: string;
+    }
+  | {
+      kind: "paid_monitor";
+      connectionId: string;
+      from: string;
+      to: string;
+    };
 
 export interface AgentRunListQuery {
   status: AgentRunStatus | null;
@@ -105,6 +115,29 @@ export interface AgentApprovalBinding {
   snapshotHash: string;
   accountId: string | null;
   expiresAt: string;
+}
+
+export interface AgentPaidMonitorBinding {
+  kind: "paid_monitor";
+  connectionId: string;
+  platform: PaidMonitorPlatform;
+  accountId: string;
+  accountName: string;
+  from: string;
+  to: string;
+  boundAt: string;
+}
+
+export type AgentRunTargetBinding = AgentApprovalBinding | AgentPaidMonitorBinding;
+
+export interface PaidMonitorConnectionDto {
+  id: string;
+  platform: PaidMonitorPlatform;
+  accountId: string;
+  accountName: string;
+  currency: string | null;
+  timezone: string | null;
+  lastSuccessfulSyncAt: string | null;
 }
 
 export interface AgentApprovalCheck {

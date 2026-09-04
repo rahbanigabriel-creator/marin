@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import {
+  LuActivity,
   LuBan,
   LuCheck,
   LuClock3,
@@ -124,6 +125,7 @@ export function AgentRunDetail({
     [run],
   );
   const tone = agentRunStatusTone(run);
+  const paidMonitorTarget = run.target?.kind === "paid_monitor" ? run.target : null;
 
   return (
     <article className="min-w-0 flex-1 overflow-y-auto bg-surface-panel" aria-labelledby="agent-run-goal">
@@ -203,6 +205,25 @@ export function AgentRunDetail({
           </div>
         </div>
       </section>
+
+      {paidMonitorTarget && (
+        <section aria-labelledby="paid-monitor-heading" className="border-b border-line-1 bg-[#F4F7F9] px-5 py-4 sm:px-7">
+          <div className="flex items-start gap-3">
+            <LuActivity className="mt-0.5 flex-none text-[#335B72]" aria-hidden />
+            <div className="min-w-0">
+              <h3 id="paid-monitor-heading" className="font-sans text-[12.5px] font-semibold text-ink-800">
+                One-time paid campaign monitor
+              </h3>
+              <p className="mt-1 break-words font-sans text-[12.5px] leading-5 text-ink-500">
+                {formatAgentLabel(paidMonitorTarget.platform)} · {paidMonitorTarget.accountName} · {paidMonitorTarget.from} to {paidMonitorTarget.to}
+              </p>
+              <p className="mt-1 font-sans text-[11.5px] leading-5 text-ink-400">
+                This run reads persisted metrics only. It does not contact providers, change campaigns, or schedule recurring checks.
+              </p>
+            </div>
+          </div>
+        </section>
+      )}
 
       {run.failure && (
         <section aria-labelledby="failure-heading" className="border-b border-line-1 bg-neg-bg px-5 py-4 sm:px-7">

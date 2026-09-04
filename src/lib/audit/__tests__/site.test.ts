@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  appleAppStoreListingId,
   auditSite,
   extractSiteAudit,
   isPublicIpAddress,
+  isAppleAppStoreListingUrl,
   normalizeSiteUrl,
   SiteAuditError,
   validatePublicSiteUrl,
@@ -35,6 +37,16 @@ test("normalizeSiteUrl rejects unsupported schemes and embedded credentials", ()
   assert.throws(() => normalizeSiteUrl("ftp://example.com/archive"), hasAuditCode("INVALID_URL"));
   assert.throws(() => normalizeSiteUrl("https://gabriel:secret@example.com"), hasAuditCode("UNSAFE_URL"));
   assert.throws(() => normalizeSiteUrl("javascript:alert(1)"), hasAuditCode("INVALID_URL"));
+});
+
+test("App Store listing detection requires Apple's exact host and an app id path", () => {
+  const fitura = "https://apps.apple.com/us/app/fitura/id6743079022?platform=watch";
+  assert.equal(appleAppStoreListingId(fitura), "6743079022");
+  assert.equal(isAppleAppStoreListingUrl(fitura), true);
+  assert.equal(isAppleAppStoreListingUrl("https://apps.apple.com/app/id6743079022"), true);
+  assert.equal(isAppleAppStoreListingUrl("https://apps.apple.com/us/developer/example/id123"), false);
+  assert.equal(isAppleAppStoreListingUrl("https://apps.apple.com.attacker.example/us/app/fitura/id6743079022"), false);
+  assert.equal(isAppleAppStoreListingUrl("https://example.com/us/app/fitura/id6743079022"), false);
 });
 
 test("literal local, loopback, link-local, private, and reserved targets are blocked", () => {
@@ -204,6 +216,56 @@ test("a complete representative page can earn a score of 100", () => {
   assert.deepEqual(result.findings, []);
 });
 
+test("App Store audits use bounded app metadata instead of Apple-controlled page SEO", () => {
+  const result = extractSiteAudit(
+    `<html lang="en-US"><head>
+      <title>Fitura App - App Store</title>
+      <meta name="description" content="Apple's generic storefront description.">
+      <link rel="canonical" href="https://apps.apple.com/us/app/fitura/id6743079022">
+      <script type="application/ld+json">${JSON.stringify({
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        name: "\u200eFitura",
+        description: "Fitura turns health goals into a practical weekly plan.\n\nYOUR WEEK, READY TO FOLLOW\n\nBuild a plan around nutrition, movement, sleep, recovery, and daily habits.",
+        applicationCategory: "HealthApplication",
+        genre: ["Health & Fitness", "Productivity"],
+        author: { "@type": "Organization", name: "Gabriel Rahbani Buzed" },
+      })}</script>
+    </head><body>
+      <h1>Fitura</h1><h1>Version History</h1><h1>App Privacy</h1>
+      <h2>Ratings and Reviews</h2><p>Apple-controlled navigation and recommendations.</p>
+      <img src="app.png" alt="Fitura on the App Store">
+    </body></html>`,
+    {
+      sourceUrl: "https://apps.apple.com/us/app/fitura/id6743079022?platform=watch",
+      finalUrl: "https://apps.apple.com/us/app/fitura/id6743079022",
+    },
+  );
+
+  assert.equal(result.documentType, "apple_app_store");
+  assert.deepEqual(result.appStore, {
+    appId: "6743079022",
+    name: "Fitura",
+    description: "Fitura turns health goals into a practical weekly plan. YOUR WEEK, READY TO FOLLOW Build a plan around nutrition, movement, sleep, recovery, and daily habits.",
+    valueProposition: "Fitura turns health goals into a practical weekly plan.",
+    features: ["Your week, ready to follow"],
+    developer: "Gabriel Rahbani Buzed",
+    categories: ["Health & Fitness", "Productivity"],
+  });
+  assert.equal(result.title, "Fitura");
+  assert.equal(result.metaDescription, result.appStore?.valueProposition);
+  assert.deepEqual(result.headings, {
+    h1: ["Fitura"],
+    h2: ["Your week, ready to follow"],
+    h1Count: 1,
+    h2Count: 1,
+  });
+  assert.equal(result.score, 100);
+  assert.deepEqual(result.findings.map((finding) => finding.code), ["app-store-managed-page"]);
+  assert.equal(result.findings.some((finding) => finding.code === "h1-multiple"), false);
+  assert.equal(result.findings.some((finding) => finding.code === "title-length"), false);
+});
+
 test("auditSite follows validated redirects and uses conservative request headers", async () => {
   const requests: Array<{ url: string; addresses: string[]; init: RequestInit }> = [];
   const fetcher: SiteFetch = async (target, init) => {
@@ -332,6 +394,37 @@ test("auditSite requires HTML and enforces declared and streamed size limits", a
       }),
     hasAuditCode("RESPONSE_TOO_LARGE"),
   );
+});
+
+test("auditSite returns actionable App Store failures without weakening URL validation", async () => {
+  const url = "https://apps.apple.com/us/app/fitura/id6743079022";
+  await assert.rejects(
+    () => auditSite(url, {
+      resolver: PUBLIC_DNS,
+      fetcher: async () => htmlResponse("<html><head><title>App Store</title></head></html>"),
+    }),
+    hasAuditCode("APP_STORE_LISTING_UNAVAILABLE"),
+  );
+  await assert.rejects(
+    () => auditSite(url, {
+      resolver: PUBLIC_DNS,
+      fetcher: async () => htmlResponse("Not found", { status: 404 }),
+    }),
+    hasAuditCode("APP_STORE_LISTING_UNAVAILABLE"),
+  );
+
+  let fetchCalls = 0;
+  await assert.rejects(
+    () => auditSite("https://apps.apple.com.attacker.example/us/app/fitura/id6743079022", {
+      resolver: async () => [{ address: "127.0.0.1", family: 4 }],
+      fetcher: async () => {
+        fetchCalls += 1;
+        return htmlResponse("<html></html>");
+      },
+    }),
+    hasAuditCode("UNSAFE_URL"),
+  );
+  assert.equal(fetchCalls, 0);
 });
 
 test("auditSite applies one hard timeout to the full operation", async () => {

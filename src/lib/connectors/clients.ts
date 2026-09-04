@@ -1,4 +1,4 @@
-import { createSign } from "node:crypto";
+import { createHmac, createSign } from "node:crypto";
 
 import type { Connection } from "@prisma/client";
 
@@ -14,9 +14,8 @@ import {
   type ConnectorPlatform,
   type MetricRange,
 } from "./types";
-import { CONNECTORS, META_GRAPH_VERSION } from "./registry";
+import { CONNECTORS, GOOGLE_ADS_API_VERSION, META_GRAPH_VERSION } from "./registry";
 
-const GOOGLE_ADS_API_VERSION = "v24";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GA4_ADMIN_URL = "https://analyticsadmin.googleapis.com/v1beta/accountSummaries";
 const APPLE_TOKEN_URL = "https://appleid.apple.com/auth/oauth2/token";
@@ -53,13 +52,12 @@ function requireAccessToken(connection: Connection, platform: ConnectorPlatform)
 }
 
 async function accessTokenFor(connection: Connection, platform: ConnectorPlatform): Promise<string> {
-  if (
-    connection.encRefreshToken &&
-    connection.expiresAt &&
-    connection.expiresAt.getTime() < Date.now() + 60_000
-  ) {
+  if (connection.expiresAt && connection.expiresAt.getTime() < Date.now() + 60_000) {
     const refreshed = await refreshStoredToken(connection, platform);
     if (refreshed) return refreshed;
+    if (connection.expiresAt.getTime() <= Date.now()) {
+      throw new ConnectorNotReadyError(platform, "access token expired; reconnect the account");
+    }
   }
   return requireAccessToken(connection, platform);
 }
@@ -189,9 +187,6 @@ function googleAdsHeaders(accessToken: string): HeadersInit {
     "developer-token": developerToken,
     "Content-Type": "application/json",
   };
-  if (process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID) {
-    headers["login-customer-id"] = process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID.replace(/-/g, "");
-  }
   return headers;
 }
 
@@ -467,6 +462,54 @@ interface MetaInsights {
   paging?: { next?: string };
 }
 
+const META_MAX_PAGES = 100;
+
+/** Required when the Meta app enables the recommended "Require App Secret" option. */
+export function metaAppSecretProof(accessToken: string): string | null {
+  const appSecret = process.env.META_APP_SECRET;
+  if (!appSecret) return null;
+  return createHmac("sha256", appSecret).update(accessToken).digest("hex");
+}
+
+/** Keep bearer credentials out of URLs and never forward them to a paging host. */
+function trustedMetaGraphUrl(raw: string | URL): URL {
+  let url: URL;
+  try {
+    url = raw instanceof URL ? new URL(raw) : new URL(raw);
+  } catch {
+    throw new ConnectorNotReadyError("meta_ads", "Meta returned an invalid paging URL");
+  }
+  if (
+    url.protocol !== "https:"
+    || url.origin !== "https://graph.facebook.com"
+    || url.username
+    || url.password
+    || url.port
+    || url.hash
+    || !url.pathname.startsWith(`/${META_GRAPH_VERSION}/`)
+  ) {
+    throw new ConnectorNotReadyError("meta_ads", "Meta returned an untrusted paging URL");
+  }
+  url.searchParams.delete("access_token");
+  url.searchParams.delete("appsecret_proof");
+  return url;
+}
+
+async function fetchMetaGraph(
+  accessToken: string,
+  raw: string | URL,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Response> {
+  const url = trustedMetaGraphUrl(raw);
+  const proof = metaAppSecretProof(accessToken);
+  if (proof) url.searchParams.set("appsecret_proof", proof);
+  return fetchImpl(url, {
+    method: "GET",
+    headers: { Accept: "application/json", Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(20_000),
+  });
+}
+
 export class MetaAdsClient implements ConnectorClient {
   readonly platform = "meta_ads" as const;
 
@@ -484,12 +527,15 @@ export class MetaAdsClient implements ConnectorClient {
     );
     url.searchParams.set("time_increment", "1");
     url.searchParams.set("time_range", JSON.stringify({ since: isoDate(range.from), until: isoDate(range.to) }));
-    url.searchParams.set("access_token", accessToken);
 
     const rows: CanonicalMetric[] = [];
     let next: string | undefined = url.toString();
+    let pages = 0;
     while (next) {
-      const res = await fetch(next, { method: "GET", headers: { Accept: "application/json" } });
+      if (++pages > META_MAX_PAGES) {
+        throw new ConnectorNotReadyError(this.platform, "Meta insights pagination exceeded its limit");
+      }
+      const res = await fetchMetaGraph(accessToken, next);
       if (!res.ok) {
         throw new ConnectorNotReadyError(this.platform, `Meta Graph API responded ${res.status}`);
       }
@@ -543,12 +589,15 @@ export class MetaAdsClient implements ConnectorClient {
     const url = new URL(`https://graph.facebook.com/${META_GRAPH_VERSION}/${accountId}/campaigns`);
     url.searchParams.set("fields", "id,name,status,effective_status,objective,daily_budget,lifetime_budget");
     url.searchParams.set("limit", "200");
-    url.searchParams.set("access_token", accessToken);
 
     const out: CampaignConfig[] = [];
     let next: string | undefined = url.toString();
+    let pages = 0;
     while (next) {
-      const res = await fetch(next, { method: "GET", headers: { Accept: "application/json" } });
+      if (++pages > META_MAX_PAGES) {
+        throw new ConnectorNotReadyError(this.platform, "Meta campaigns pagination exceeded its limit");
+      }
+      const res = await fetchMetaGraph(accessToken, next);
       if (!res.ok) {
         throw new ConnectorNotReadyError(this.platform, `Meta campaigns API responded ${res.status}`);
       }
@@ -598,12 +647,15 @@ export class MetaAdsClient implements ConnectorClient {
       ].join(","),
     );
     url.searchParams.set("limit", "100");
-    url.searchParams.set("access_token", accessToken);
 
     const out: AdCreative[] = [];
     let next: string | undefined = url.toString();
+    let pages = 0;
     while (next) {
-      const res = await fetch(next, { method: "GET", headers: { Accept: "application/json" } });
+      if (++pages > META_MAX_PAGES) {
+        throw new ConnectorNotReadyError(this.platform, "Meta ads pagination exceeded its limit");
+      }
+      const res = await fetchMetaGraph(accessToken, next);
       if (!res.ok) {
         throw new ConnectorNotReadyError(this.platform, `Meta ads API responded ${res.status}`);
       }
@@ -651,11 +703,14 @@ export class MetaAdsClient implements ConnectorClient {
     url.searchParams.set("fields", "ad_id,spend,impressions,clicks,actions");
     url.searchParams.set("time_range", JSON.stringify({ since: isoDate(range.from), until: isoDate(range.to) }));
     url.searchParams.set("limit", "300");
-    url.searchParams.set("access_token", accessToken);
 
     let next: string | undefined = url.toString();
+    let pages = 0;
     while (next) {
-      const res = await fetch(next, { method: "GET", headers: { Accept: "application/json" } });
+      if (++pages > META_MAX_PAGES) {
+        throw new ConnectorNotReadyError(this.platform, "Meta ad-insights pagination exceeded its limit");
+      }
+      const res = await fetchMetaGraph(accessToken, next);
       if (!res.ok) {
         // Best-effort: ads still render without perf. Log so a token/permission
         // failure (which would leave every ad at €0) is diagnosable, not silent.
@@ -764,8 +819,7 @@ async function metaAccountCurrency(accountId: string, accessToken: string): Prom
   try {
     const url = new URL(`https://graph.facebook.com/${META_GRAPH_VERSION}/${accountId}`);
     url.searchParams.set("fields", "currency");
-    url.searchParams.set("access_token", accessToken);
-    const res = await fetch(url.toString(), { headers: { Accept: "application/json" } });
+    const res = await fetchMetaGraph(accessToken, url);
     if (!res.ok) return null;
     const j = (await res.json()) as { currency?: string };
     return j.currency ?? null;
@@ -1230,14 +1284,15 @@ export async function resolveOAuthAccount(
 export async function listOAuthAccounts(
   platform: Exclude<ConnectorPlatform, "apple_search_ads">,
   accessToken: string,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<AccountSelection[]> {
   switch (platform) {
     case "google_ads":
-      return listGoogleAdsAccounts(accessToken);
+      return listGoogleAdsAccounts(accessToken, fetchImpl);
     case "ga4":
       return listGa4Properties(accessToken);
     case "meta_ads":
-      return listMetaAdAccounts(accessToken);
+      return listMetaAdAccounts(accessToken, fetchImpl);
     case "linkedin_ads":
       return listLinkedInAdAccounts(accessToken);
     case "tiktok_ads":
@@ -1273,29 +1328,69 @@ export async function resolveAppleSearchAdsAccount(accessToken: string): Promise
   return { externalAccountId: String(org.orgId), displayName: org.orgName ?? `Org ${org.orgId}` };
 }
 
-async function listGoogleAdsAccounts(accessToken: string): Promise<AccountSelection[]> {
-  const res = await fetch(`https://googleads.googleapis.com/${GOOGLE_ADS_API_VERSION}/customers:listAccessibleCustomers`, {
+async function listGoogleAdsAccounts(
+  accessToken: string,
+  fetchImpl: typeof fetch,
+): Promise<AccountSelection[]> {
+  const res = await fetchImpl(`https://googleads.googleapis.com/${GOOGLE_ADS_API_VERSION}/customers:listAccessibleCustomers`, {
+    // Google explicitly ignores login-customer-id for this endpoint. Omitting a
+    // global MCC value also avoids coupling account discovery to Marpin's MCC.
     headers: googleAdsHeaders(accessToken),
+    signal: AbortSignal.timeout(20_000),
   });
   if (!res.ok) throw new ConnectorNotReadyError("google_ads", await googleAdsError(res));
-  const payload = (await res.json()) as { resourceNames?: string[] };
-  const ids = (payload.resourceNames ?? [])
-    .map((resourceName) => resourceName.replace("customers/", ""))
-    .filter(Boolean);
+  let payload: { resourceNames?: unknown };
+  try {
+    payload = (await res.json()) as { resourceNames?: unknown };
+  } catch {
+    throw new ConnectorNotReadyError("google_ads", "Google Ads returned an unreadable account list");
+  }
+  if (!Array.isArray(payload.resourceNames) || !payload.resourceNames.every((name) => typeof name === "string")) {
+    throw new ConnectorNotReadyError("google_ads", "Google Ads returned an invalid account list");
+  }
+  const ids = [...new Set(payload.resourceNames.flatMap((resourceName) => {
+    const match = /^customers\/(\d+)$/.exec(resourceName);
+    return match ? [match[1]] : [];
+  }))];
   if (ids.length === 0) throw new ConnectorNotReadyError("google_ads", "no accessible Google Ads customers");
 
-  return Promise.all(
-    ids.map(async (externalAccountId) => ({
-      externalAccountId,
-      displayName: await googleAdsCustomerName(accessToken, externalAccountId).catch(
-        () => `Customer ${externalAccountId}`,
-      ),
-    })),
+  const inspected = await Promise.all(ids.map(async (externalAccountId) => {
+    try {
+      return await googleAdsCustomerInfo(accessToken, externalAccountId, fetchImpl);
+    } catch {
+      // An unknown account type must never be offered as an advertiser. In
+      // particular, treating a failed lookup as `manager: false` can persist an
+      // MCC that the reporting endpoints cannot query.
+      return null;
+    }
+  }));
+  const resolved = inspected.filter(
+    (account): account is AccountSelection & { isManager: boolean } => account !== null,
   );
+  if (resolved.length === 0) {
+    throw new ConnectorNotReadyError(
+      "google_ads",
+      "Google Ads could not inspect any directly accessible customers",
+    );
+  }
+  const advertisers = resolved.filter((account) => !account.isManager);
+  if (advertisers.length === 0) {
+    throw new ConnectorNotReadyError(
+      "google_ads",
+      inspected.some((account) => account === null)
+        ? "no usable directly accessible advertiser accounts were found"
+        : "only manager accounts are directly accessible; connect an advertiser account",
+    );
+  }
+  return advertisers.map(({ externalAccountId, displayName }) => ({ externalAccountId, displayName }));
 }
 
-async function googleAdsCustomerName(accessToken: string, customerId: string): Promise<string> {
-  const res = await fetch(
+async function googleAdsCustomerInfo(
+  accessToken: string,
+  customerId: string,
+  fetchImpl: typeof fetch,
+): Promise<AccountSelection & { isManager: boolean }> {
+  const res = await fetchImpl(
     `https://googleads.googleapis.com/${GOOGLE_ADS_API_VERSION}/customers/${customerId}/googleAds:searchStream`,
     {
       method: "POST",
@@ -1303,15 +1398,18 @@ async function googleAdsCustomerName(accessToken: string, customerId: string): P
       body: JSON.stringify({
         query: "SELECT customer.id, customer.descriptive_name, customer.manager FROM customer LIMIT 1",
       }),
+      signal: AbortSignal.timeout(20_000),
     },
   );
-  if (!res.ok) return `Customer ${customerId}`;
+  if (!res.ok) throw new ConnectorNotReadyError("google_ads", await googleAdsError(res));
   const payload = parseSearchStream<GoogleAdsBatch>(await res.text());
   const customer = payload[0]?.results?.[0]?.customer;
   const name = customer?.descriptiveName ?? `Customer ${customerId}`;
-  // Flag manager (MCC) accounts so the user doesn't pick one to report on — a
-  // manager has no campaigns and FROM campaign would fail against it.
-  return customer?.manager ? `${name} (manager — no campaigns)` : name;
+  return {
+    externalAccountId: customerId,
+    displayName: name,
+    isManager: customer?.manager === true,
+  };
 }
 
 async function listGa4Properties(accessToken: string): Promise<AccountSelection[]> {
@@ -1340,20 +1438,70 @@ async function listGa4Properties(accessToken: string): Promise<AccountSelection[
   return accounts;
 }
 
-async function listMetaAdAccounts(accessToken: string): Promise<AccountSelection[]> {
-  const url = new URL(`https://graph.facebook.com/${META_GRAPH_VERSION}/me/adaccounts`);
-  url.searchParams.set("fields", "id,account_id,name");
-  url.searchParams.set("access_token", accessToken);
-  const res = await fetch(url, { headers: { Accept: "application/json" } });
-  if (!res.ok) throw new ConnectorNotReadyError("meta_ads", `Meta adaccounts API responded ${res.status}`);
-  const payload = (await res.json()) as {
-    data?: Array<{ id?: string; account_id?: string; name?: string }>;
-  };
-  const accounts = (payload.data ?? []).flatMap((account) => {
-    const id = account.id ?? (account.account_id ? `act_${account.account_id}` : undefined);
-    if (!id) return [];
-    return [{ externalAccountId: id.replace(/^act_/, ""), displayName: account.name ?? id }];
-  });
+async function listMetaAdAccounts(
+  accessToken: string,
+  fetchImpl: typeof fetch,
+): Promise<AccountSelection[]> {
+  const first = new URL(`https://graph.facebook.com/${META_GRAPH_VERSION}/me/adaccounts`);
+  first.searchParams.set("fields", "id,account_id,name");
+  first.searchParams.set("limit", "100");
+
+  const byId = new Map<string, AccountSelection>();
+  const seen = new Set<string>();
+  let next: string | undefined = first.toString();
+  for (let page = 1; next && page <= META_MAX_PAGES; page += 1) {
+    const safeUrl = trustedMetaGraphUrl(next);
+    const pageKey = safeUrl.toString();
+    if (seen.has(pageKey)) {
+      throw new ConnectorNotReadyError("meta_ads", "Meta account pagination repeated a page");
+    }
+    seen.add(pageKey);
+
+    const res = await fetchMetaGraph(accessToken, safeUrl, fetchImpl);
+    if (!res.ok) {
+      throw new ConnectorNotReadyError("meta_ads", `Meta adaccounts API responded ${res.status}`);
+    }
+    let payload: {
+      data?: unknown;
+      paging?: { next?: unknown };
+    };
+    try {
+      payload = (await res.json()) as typeof payload;
+    } catch {
+      throw new ConnectorNotReadyError("meta_ads", "Meta returned an unreadable account list");
+    }
+    if (!Array.isArray(payload.data)) {
+      throw new ConnectorNotReadyError("meta_ads", "Meta returned an invalid account list");
+    }
+    for (const raw of payload.data) {
+      if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+        throw new ConnectorNotReadyError("meta_ads", "Meta returned an invalid ad account");
+      }
+      const account = raw as { id?: unknown; account_id?: unknown; name?: unknown };
+      const rawId = typeof account.id === "string"
+        ? account.id
+        : typeof account.account_id === "string"
+          ? `act_${account.account_id}`
+          : undefined;
+      if (!rawId) continue;
+      const externalAccountId = rawId.replace(/^act_/, "");
+      const displayName = typeof account.name === "string" && account.name.trim()
+        ? account.name
+        : rawId;
+      byId.set(externalAccountId, { externalAccountId, displayName });
+    }
+    if (payload.paging?.next == null) {
+      next = undefined;
+    } else if (typeof payload.paging.next === "string") {
+      next = trustedMetaGraphUrl(payload.paging.next).toString();
+    } else {
+      throw new ConnectorNotReadyError("meta_ads", "Meta returned an invalid account page");
+    }
+    if (next && page === META_MAX_PAGES) {
+      throw new ConnectorNotReadyError("meta_ads", "Meta account pagination exceeded its limit");
+    }
+  }
+  const accounts = [...byId.values()];
   if (accounts.length === 0) throw new ConnectorNotReadyError("meta_ads", "no Meta ad accounts available");
   return accounts;
 }

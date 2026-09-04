@@ -1,8 +1,13 @@
+import {
+  isAppleAppStoreListingUrl,
+  type AuditDocumentType,
+} from "@/lib/audit/document";
 import type { SiteAuditResult } from "@/lib/audit/site";
 
 export const PUBLIC_AUDIT_FINDING_LIMIT = 5;
 
 export interface PublicAuditPreview {
+  documentType: AuditDocumentType;
   sourceUrl: string;
   finalUrl: string;
   title: string | null;
@@ -34,6 +39,9 @@ export function buildAuditSignupHref(website: string): string {
  */
 export function toPublicAuditPreview(audit: SiteAuditResult): PublicAuditPreview {
   return {
+    documentType: audit.documentType ?? (
+      isAppleAppStoreListingUrl(audit.finalUrl) ? "apple_app_store" : "website"
+    ),
     sourceUrl: audit.sourceUrl,
     finalUrl: audit.finalUrl,
     title: audit.title,

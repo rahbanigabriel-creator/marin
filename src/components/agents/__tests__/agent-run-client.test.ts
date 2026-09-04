@@ -7,7 +7,9 @@ import {
   buildAgentCommandPayload,
   buildApprovalDecisionPayload,
   buildOrganicRunPayload,
+  buildPaidMonitorRunPayload,
   newAgentRequestId,
+  recentPaidMonitorWindow,
 } from "../agent-run-client";
 
 const REQUEST_ID = "123e4567-e89b-12d3-a456-426614174000";
@@ -51,6 +53,33 @@ test("organic start payload is bound to one brand and has no hidden target", () 
       mode: "organic",
       requestId: REQUEST_ID,
       target: null,
+    },
+  );
+});
+
+test("paid monitor payload binds one connection and a completed recent window", () => {
+  const window = recentPaidMonitorWindow(14, new Date("2026-09-04T08:00:00.000Z"));
+  assert.deepEqual(window, { from: "2026-08-21", to: "2026-09-03" });
+  assert.deepEqual(
+    buildPaidMonitorRunPayload({
+      brandId: "brand_1",
+      connectionId: "connection_1",
+      goal: "  Find paid campaign risks  ",
+      requestId: REQUEST_ID,
+      window,
+    }),
+    {
+      brandId: "brand_1",
+      conversationId: null,
+      goal: "Find paid campaign risks",
+      mode: "paid",
+      requestId: REQUEST_ID,
+      target: {
+        kind: "paid_monitor",
+        connectionId: "connection_1",
+        from: "2026-08-21",
+        to: "2026-09-03",
+      },
     },
   );
 });

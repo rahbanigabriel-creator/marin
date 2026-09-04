@@ -111,6 +111,31 @@ test("legacy and tampered OAuth cookies fail closed", () => {
   assert.equal(verifyTransaction(tampered), null);
 });
 
+test("OAuth transaction and pending-selection signatures expire server-side", () => {
+  const transaction = signTransaction({
+    platform: "google_ads",
+    state: "expiring-state",
+    workspaceId: "workspace-a",
+    clerkUserId: "user-a",
+    codeVerifier: "verifier-a",
+  });
+  assert.ok(transaction);
+  const parsedTransaction = verifyTransaction(transaction);
+  assert.ok(parsedTransaction);
+  assert.equal(verifyTransaction(transaction, parsedTransaction.exp), null);
+
+  const pending = signPendingSelection({
+    platform: "meta_ads",
+    workspaceId: "workspace-a",
+    clerkUserId: "user-a",
+    encAccessToken: "encrypted-access-token",
+  });
+  assert.ok(pending);
+  const parsedPending = verifyPendingSelection(pending);
+  assert.ok(parsedPending);
+  assert.equal(verifyPendingSelection(pending, parsedPending.exp), null);
+});
+
 test("local development uses the same actor-binding contract", () => {
   const signed = signTransaction({
     platform: "tiktok_ads",

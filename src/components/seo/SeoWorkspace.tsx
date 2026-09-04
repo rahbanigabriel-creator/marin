@@ -24,6 +24,7 @@ import {
   LuPlus,
   LuRefreshCw,
   LuSearch,
+  LuUsers,
   LuX,
 } from "react-icons/lu";
 
@@ -216,12 +217,14 @@ export function SeoWorkspace({
   fetcher = globalThis.fetch,
   onCalendar,
   onStudio,
+  onInfluencers,
   onAskAI,
 }: {
   brandId: string;
   fetcher?: typeof fetch;
   onCalendar: () => void;
   onStudio: () => void;
+  onInfluencers: () => void;
   onAskAI: (prompt: string) => void | Promise<void>;
 }) {
   const [workspace, setWorkspace] = useState<SeoWorkspaceResponse | null>(null);
@@ -413,10 +416,11 @@ export function SeoWorkspace({
             ) : null}
           </div>
         </div>
-        <div className="mt-[12px] inline-grid h-[36px] max-w-full grid-cols-3 rounded-[8px] bg-track-1 p-[3px]" aria-label="Organic workspace view">
-          <button type="button" onClick={onCalendar} className={`flex min-w-0 items-center justify-center gap-[5px] rounded-[6px] px-[9px] text-[12px] font-semibold text-ink-400 sm:min-w-[104px] ${focusRing}`}><LuCalendarDays aria-hidden /> Calendar</button>
-          <button type="button" onClick={onStudio} className={`flex min-w-0 items-center justify-center gap-[5px] rounded-[6px] px-[9px] text-[12px] font-semibold text-ink-400 sm:min-w-[104px] ${focusRing}`}><LuLayoutGrid aria-hidden /> Studio</button>
-          <button type="button" aria-pressed="true" className={`flex min-w-0 items-center justify-center gap-[5px] rounded-[6px] bg-surface-card px-[9px] text-[12px] font-semibold text-ink-900 shadow-sm sm:min-w-[104px] ${focusRing}`}><LuChartNoAxesCombined aria-hidden /> SEO</button>
+        <div className="mt-[12px] grid h-[36px] w-full max-w-[480px] grid-cols-4 rounded-[8px] bg-track-1 p-[3px]" aria-label="Organic workspace view">
+          <button type="button" onClick={onCalendar} className={`flex min-w-0 items-center justify-center gap-[5px] rounded-[6px] px-[6px] text-[11px] font-semibold text-ink-400 sm:text-[12px] ${focusRing}`}><LuCalendarDays aria-hidden /><span className="hidden min-[430px]:inline">Calendar</span></button>
+          <button type="button" onClick={onStudio} className={`flex min-w-0 items-center justify-center gap-[5px] rounded-[6px] px-[6px] text-[11px] font-semibold text-ink-400 sm:text-[12px] ${focusRing}`}><LuLayoutGrid aria-hidden /><span className="hidden min-[430px]:inline">Studio</span></button>
+          <button type="button" aria-pressed="true" className={`flex min-w-0 items-center justify-center gap-[5px] rounded-[6px] bg-surface-card px-[6px] text-[11px] font-semibold text-ink-900 shadow-sm sm:text-[12px] ${focusRing}`}><LuChartNoAxesCombined aria-hidden /><span className="hidden min-[430px]:inline">SEO</span></button>
+          <button type="button" onClick={onInfluencers} className={`flex min-w-0 items-center justify-center gap-[5px] rounded-[6px] px-[6px] text-[11px] font-semibold text-ink-400 sm:text-[12px] ${focusRing}`}><LuUsers aria-hidden /><span className="hidden min-[430px]:inline">Influencers</span></button>
         </div>
       </header>
 

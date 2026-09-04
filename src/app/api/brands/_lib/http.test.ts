@@ -49,7 +49,7 @@ test("brand API returns a stable 403 for role denial", async () => {
     assert.equal(response.status, 403);
     assert.deepEqual(await response.json(), {
       error: "forbidden",
-      message: "Owner or admin access is required to manage brand memory.",
+      message: "Owner or admin access is required to manage audit context.",
     });
   }
 });

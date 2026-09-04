@@ -6,7 +6,6 @@ import {
   LuArrowLeft,
   LuArrowRight,
   LuBadgeCheck,
-  LuBuilding2,
   LuCalendarDays,
   LuCheck,
   LuCircleAlert,
@@ -45,9 +44,9 @@ const planFeatures = {
   ],
   solo: [
     "120 Marpin credits each month",
-    "4 connected platforms",
+    "Google Ads and Meta Ads connections",
     "100 scheduled posts",
-    "Campaign actions and assisted publishing",
+    "Paid monitoring, campaign drafts, and assisted publishing",
   ],
 } as const;
 
@@ -161,11 +160,6 @@ function ResourceUsage({ billing }: { billing: BillingSnapshotDto }) {
       label: "Connections",
       valueText: `${billing.resources.connections} of ${billing.entitlements.maxConnections} used`,
       icon: LuPlug,
-    },
-    {
-      label: "Brands",
-      valueText: `${billing.resources.brands} of ${billing.entitlements.maxBrands} used`,
-      icon: LuBuilding2,
     },
     {
       label: "Seats",
@@ -500,7 +494,7 @@ export function BillingSettings() {
               <div className="flex flex-wrap items-start justify-between gap-[8px]">
                 <div>
                   <h3 className="m-0 font-sans text-[17px] font-semibold text-ink-900">Free</h3>
-                  <p className="mb-0 mt-[4px] font-sans text-[12.5px] text-ink-400">For trying Marpin on one brand</p>
+                  <p className="mb-0 mt-[4px] font-sans text-[12.5px] text-ink-400">For trying Marpin with one business</p>
                 </div>
                 {!isSolo ? (
                   <span className="rounded-[5px] bg-track-1 px-[8px] py-[3px] font-mono text-[10px] font-semibold uppercase tracking-[0.04em] text-ink-600">

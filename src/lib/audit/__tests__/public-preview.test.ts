@@ -40,6 +40,7 @@ function fixture(): SiteAuditResult {
 test("public audit preview is useful and bounded", () => {
   const preview = toPublicAuditPreview(fixture());
 
+  assert.equal(preview.documentType, "website");
   assert.equal(preview.score, 82);
   assert.deepEqual(preview.summary, {
     wordCount: 420,
@@ -52,6 +53,13 @@ test("public audit preview is useful and bounded", () => {
   assert.equal("metaDescription" in preview, false);
   assert.equal("jsonLdTypes" in preview, false);
   assert.equal("scoreImpact" in preview.findings[0], false);
+});
+
+test("public previews identify App Store listings even for legacy snapshots", () => {
+  const audit = fixture();
+  audit.finalUrl = "https://apps.apple.com/es/app/fitura/id6743079022";
+
+  assert.equal(toPublicAuditPreview(audit).documentType, "apple_app_store");
 });
 
 test("the audited website is carried through sign-up in a same-app redirect", () => {
