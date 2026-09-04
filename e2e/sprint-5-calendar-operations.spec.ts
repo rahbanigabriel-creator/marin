@@ -274,6 +274,60 @@ test("plan lifecycle, filters, URL state, and confirmed deletes stay coherent", 
   await expect(page.getByRole("heading", { name: "No posts planned yet" })).toBeVisible();
 });
 
+test("period navigation shows loading until the next calendar range is ready", async ({ page }) => {
+  await mockWorkspace(page);
+  let initialRangeStart = "";
+
+  await page.route(/\/api\/content\/calendar(?:\?.*)?$/, async (route) => {
+    const start = new URL(route.request().url()).searchParams.get("start") ?? "";
+    if (!initialRangeStart) initialRangeStart = start;
+    if (start === initialRangeStart) {
+      await fulfillJson(route, {
+        calendar: { timezone: TIMEZONE, plans: [], contentItems: [], publications: [] },
+      });
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: TIMEZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date(start));
+    const part = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((entry) => entry.type === type)?.value ?? "";
+    const rangeStart = `${part("year")}-${part("month")}-${part("day")}`;
+    const nextPlan = {
+      ...plan("plan_next_range"),
+      startDate: `${rangeStart}T00:00:00+02:00`,
+      endDate: `${addDateKey(rangeStart, 7)}T00:00:00+02:00`,
+    };
+    const nextItem = item("item_next_range", nextPlan.id, 1, "Next week launch lesson");
+    const nextPublication = publication(
+      "pub_next_range",
+      nextItem.id,
+      `${addDateKey(rangeStart, 1)}T10:00:00+02:00`,
+      nextItem.title,
+    );
+    await fulfillJson(route, {
+      calendar: {
+        timezone: TIMEZONE,
+        plans: [nextPlan],
+        contentItems: [nextItem],
+        publications: [nextPublication],
+      },
+    });
+  });
+
+  await page.goto("/app?mode=organic&view=calendar&calendarView=week");
+  await expect(page.getByRole("heading", { name: "No posts planned yet" })).toBeVisible();
+  await page.getByRole("button", { name: "Next week", exact: true }).click();
+  await expect(page.getByText("Loading your organic plan")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "No posts planned yet" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Edit Next week launch lesson on Instagram" })).toBeVisible();
+});
+
 test("desktop drag/drop is optimistic and a stale edit recovers without losing the calendar", async ({ page }) => {
   await mockWorkspace(page);
   let version = 1;

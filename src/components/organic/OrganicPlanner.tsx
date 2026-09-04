@@ -1068,6 +1068,7 @@ export function OrganicPlanner({
   const addButtonRef = useRef<HTMLButtonElement>(null);
   const planButtonRef = useRef<HTMLButtonElement>(null);
   const hasLoadedRef = useRef(false);
+  const rangeTransitionRef = useRef(false);
   const requestedPlanRef = useRef<string | null>(null);
   const generationRequestRef = useRef<{ id: string; period: OrganicPlannerView } | null>(null);
   const [urlReady, setUrlReady] = useState(false);
@@ -1147,12 +1148,17 @@ export function OrganicPlanner({
       });
       setPosts(normalizeCalendarResponse(payload));
       hasLoadedRef.current = true;
+      rangeTransitionRef.current = false;
       setMutationError(null);
       setLoadState("ready");
     } catch (error) {
       if (signal?.aborted) return;
       const message = error instanceof Error ? error.message : "The calendar could not be loaded.";
-      if (hasLoadedRef.current) setMutationError({ message });
+      if (rangeTransitionRef.current) {
+        rangeTransitionRef.current = false;
+        setLoadError(message);
+        setLoadState("error");
+      } else if (hasLoadedRef.current) setMutationError({ message });
       else {
         setLoadError(message);
         setLoadState("error");
@@ -1610,12 +1616,20 @@ export function OrganicPlanner({
     const next = view === "week"
       ? addCalendarDays(cursor, direction * 7)
       : addCalendarMonths(cursor, direction);
+    rangeTransitionRef.current = true;
+    setLoadState("loading");
     setCursor(next);
     setMobileDay(view === "week" ? startOfCalendarWeek(next) : startOfCalendarMonth(next));
   };
 
   const goToday = () => {
     const today = todayKey(timezone);
+    const currentStart = view === "week" ? startOfCalendarWeek(cursor) : monthGridStart(cursor);
+    const todayStart = view === "week" ? startOfCalendarWeek(today) : monthGridStart(today);
+    if (todayStart !== currentStart) {
+      rangeTransitionRef.current = true;
+      setLoadState("loading");
+    }
     setCursor(today);
     setMobileDay(today);
   };
@@ -1854,7 +1868,12 @@ export function OrganicPlanner({
                 key={option}
                 type="button"
                 aria-pressed={view === option}
-                onClick={() => setView(option)}
+                onClick={() => {
+                  if (view === option) return;
+                  rangeTransitionRef.current = true;
+                  setLoadState("loading");
+                  setView(option);
+                }}
                 className={`min-w-[66px] rounded-[6px] px-[10px] text-[12px] font-semibold capitalize ${focusRing} ${view === option ? "bg-surface-card text-ink-900 shadow-sm" : "text-ink-400"}`}
               >
                 {option}
