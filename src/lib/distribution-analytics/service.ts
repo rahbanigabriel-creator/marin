@@ -299,6 +299,7 @@ export function buildDistributionAnalytics(input: {
 async function readOrganic(workspaceId: string, range: AnalyticsRangeInternal): Promise<OrganicAnalyticsInput> {
   const activityWhere = {
     workspaceId,
+    verificationStatus: { not: "superseded" },
     OR: [
       { scheduledAt: { gte: range.from, lt: range.toExclusive } },
       { publishedAt: { gte: range.from, lt: range.toExclusive } },
@@ -386,12 +387,12 @@ async function readSeo(workspaceId: string, range: AnalyticsRangeInternal): Prom
     prisma.seoTask.groupBy({ by: ["status"], where: activityWhere, _count: { _all: true } }),
     prisma.seoTask.groupBy({ by: ["severity"], where: activityWhere, _count: { _all: true } }),
     prisma.seoTask.groupBy({ by: ["priority"], where: activityWhere, _count: { _all: true } }),
-    prisma.seoTask.findFirst({ where: { workspaceId, updatedAt: { gte: range.from, lt: range.toExclusive } }, orderBy: { updatedAt: "asc" }, select: { updatedAt: true } }),
-    prisma.seoTask.findFirst({ where: { workspaceId, updatedAt: { gte: range.from, lt: range.toExclusive } }, orderBy: { updatedAt: "desc" }, select: { updatedAt: true } }),
-    prisma.seoTask.findFirst({ where: { workspaceId, analyzedAt: { gte: range.from, lt: range.toExclusive } }, orderBy: { analyzedAt: "asc" }, select: { analyzedAt: true } }),
-    prisma.seoTask.findFirst({ where: { workspaceId, analyzedAt: { gte: range.from, lt: range.toExclusive } }, orderBy: { analyzedAt: "desc" }, select: { analyzedAt: true } }),
-    prisma.seoTask.findFirst({ where: { workspaceId, analyzedAt: { not: null } }, orderBy: { analyzedAt: "desc" }, select: { analyzedAt: true } }),
-    prisma.seoTask.findFirst({ where: { workspaceId }, orderBy: { updatedAt: "desc" }, select: { updatedAt: true } }),
+    prisma.seoTask.findFirst({ where: { workspaceId, verificationStatus: { not: "superseded" }, updatedAt: { gte: range.from, lt: range.toExclusive } }, orderBy: { updatedAt: "asc" }, select: { updatedAt: true } }),
+    prisma.seoTask.findFirst({ where: { workspaceId, verificationStatus: { not: "superseded" }, updatedAt: { gte: range.from, lt: range.toExclusive } }, orderBy: { updatedAt: "desc" }, select: { updatedAt: true } }),
+    prisma.seoTask.findFirst({ where: { workspaceId, verificationStatus: { not: "superseded" }, analyzedAt: { gte: range.from, lt: range.toExclusive } }, orderBy: { analyzedAt: "asc" }, select: { analyzedAt: true } }),
+    prisma.seoTask.findFirst({ where: { workspaceId, verificationStatus: { not: "superseded" }, analyzedAt: { gte: range.from, lt: range.toExclusive } }, orderBy: { analyzedAt: "desc" }, select: { analyzedAt: true } }),
+    prisma.seoTask.findFirst({ where: { workspaceId, verificationStatus: { not: "superseded" }, analyzedAt: { not: null } }, orderBy: { analyzedAt: "desc" }, select: { analyzedAt: true } }),
+    prisma.seoTask.findFirst({ where: { workspaceId, verificationStatus: { not: "superseded" } }, orderBy: { updatedAt: "desc" }, select: { updatedAt: true } }),
   ]);
   return {
     total,

@@ -171,7 +171,7 @@ export function SplitView({
             </div>
           ) : g.canvasReady && artifacts.length > 0 ? (
             <AnswerCanvas step={step} artifacts={artifacts} channels={channels} onConnect={onConnect} />
-          ) : g.canvasReady && dataMode === "empty" ? (
+          ) : (g.canvasReady && dataMode === "empty") || (done && artifacts.length === 0) ? (
             <div className="flex h-full min-h-[340px] flex-col items-center justify-center gap-[10px] rounded-[8px] border border-dashed border-line-2 bg-surface-card p-[24px] text-center">
               <div className="font-serif text-[19px] font-medium text-ink-700">Your workspace</div>
               <div className="max-w-[360px] font-sans text-[13px] leading-[1.55] text-ink-300">

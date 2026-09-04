@@ -90,3 +90,39 @@ test("activity UI exposes concise status without a reasoning surface", () => {
   assert.match(html, /aria-live="polite"/);
   assert.doesNotMatch(html, /thinking|reasoning|chain.of.thought/i);
 });
+
+test("completed text-only answers do not leave the workspace in a loading state", () => {
+  const html = renderToStaticMarkup(
+    <SplitView
+      step={7}
+      turns={[]}
+      typed="A complete answer"
+      status={null}
+      error={null}
+      isStreaming={false}
+      done
+      onStop={noop}
+      onRetry={noop}
+      question={scenario.question}
+      scenario={scenario}
+      artifacts={[]}
+      chips={[]}
+      closing={null}
+      onSend={noop}
+      onSuggest={noop}
+      suggestions={[]}
+      choices={null}
+      onChoose={noop}
+      dataMode="live"
+      onOpenConnections={noop}
+      connectedCount={0}
+      channels={[]}
+      onConnect={noop}
+      model="auto"
+      onModelChange={noop}
+    />,
+  );
+
+  assert.match(html, /Your workspace/);
+  assert.doesNotMatch(html, /Building your answer/);
+});

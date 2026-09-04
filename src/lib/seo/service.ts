@@ -160,7 +160,11 @@ export async function getSeoWorkspace(input: {
   const [evidence, tasks] = await Promise.all([
     loadSeoEvidence(input.workspaceId, brand.websiteUrl),
     prisma.seoTask.findMany({
-      where: { workspaceId: input.workspaceId, brandId: brand.id },
+      where: {
+        workspaceId: input.workspaceId,
+        brandId: brand.id,
+        verificationStatus: { not: "superseded" },
+      },
       include: { proposals: true },
       orderBy: { updatedAt: "desc" },
     }),
@@ -197,6 +201,25 @@ export async function analyzeSeo(input: {
     if (!locked.length) throw new SeoNotFoundError("brand");
     let created = 0;
     let refreshed = 0;
+    const fingerprints = derived.map((candidate) => candidate.fingerprint);
+    await tx.seoTask.updateMany({
+      where: {
+        workspaceId: input.workspaceId,
+        brandId: brand.id,
+        origin: { in: ["crawl", "search_console", "ga4"] },
+        userEdited: false,
+        status: { in: ["open", "in_progress"] },
+        verificationStatus: { not: "superseded" },
+        ...(fingerprints.length ? { fingerprint: { notIn: fingerprints } } : {}),
+      },
+      data: {
+        status: "dismissed",
+        verificationStatus: "superseded",
+        analyzedAt: now,
+        updatedBy: input.actorId,
+        version: { increment: 1 },
+      },
+    });
     for (const candidate of derived) {
       const existing = await tx.seoTask.findUnique({
         where: {
@@ -206,7 +229,7 @@ export async function analyzeSeo(input: {
             fingerprint: candidate.fingerprint,
           },
         },
-        select: { id: true, userEdited: true },
+        select: { id: true, userEdited: true, status: true, verificationStatus: true },
       });
       if (existing) {
         await tx.seoTask.update({
@@ -217,6 +240,9 @@ export async function analyzeSeo(input: {
             analyzedAt: now,
             updatedBy: input.actorId,
             version: { increment: 1 },
+            ...(existing.status === "dismissed" && existing.verificationStatus === "superseded"
+              ? { status: "open", verificationStatus: "unverified" }
+              : {}),
             ...(existing.userEdited
               ? {}
               : {

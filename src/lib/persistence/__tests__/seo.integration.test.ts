@@ -432,6 +432,111 @@ integrationTest("SEO analysis and task tracking are sourced, tenant-safe, and ve
   }
 });
 
+integrationTest("SEO analysis retires stale generated tasks and reopens them when evidence returns", async () => {
+  const id = suffix();
+  const workspace = await prisma.workspace.create({
+    data: { name: "SEO evidence lifecycle", slug: `seo-lifecycle-${id}` },
+  });
+
+  try {
+    const brand = await prisma.brand.create({
+      data: {
+        workspaceId: workspace.id,
+        name: "Fitura",
+        websiteUrl: "https://fitura.example",
+        isPrimary: true,
+        auditSnapshot: {
+          documentType: "website",
+          finalUrl: "https://fitura.example",
+          ...AUDIT,
+        },
+        auditedAt: new Date("2026-08-29T08:00:00.000Z"),
+      },
+    });
+    const firstAnalysis = await analyzeSeo({
+      workspaceId: workspace.id,
+      brandId: brand.id,
+      actorId: "owner-1",
+      actorRole: "owner",
+      now: new Date("2026-08-29T09:00:00.000Z"),
+    });
+    const generatedTask = firstAnalysis.tasks.find((task) => task.source === "crawl");
+    assert.ok(generatedTask);
+
+    const manualTask = await createSeoTask({
+      workspaceId: workspace.id,
+      brandId: brand.id,
+      actorId: "owner-1",
+      actorRole: "owner",
+      requestId: `seo-lifecycle-manual-${id}`,
+      title: "Review the App Store subtitle",
+    });
+
+    await prisma.brand.update({
+      where: { id: brand.id },
+      data: {
+        websiteUrl: "https://apps.apple.com/es/app/fitura/id6743079022",
+        auditSnapshot: {
+          documentType: "apple_app_store",
+          finalUrl: "https://apps.apple.com/es/app/fitura/id6743079022",
+          findings: [{
+            code: "app-store-managed-page",
+            category: "technical",
+            severity: "info",
+            title: "Apple controls this page's technical markup",
+            evidence: "This is a verified App Store listing.",
+            recommendation: "Use this listing as ASO context and audit a product website separately.",
+            scoreImpact: 0,
+          }],
+        },
+        auditedAt: new Date("2026-08-29T10:00:00.000Z"),
+      },
+    });
+    const appStoreAnalysis = await analyzeSeo({
+      workspaceId: workspace.id,
+      brandId: brand.id,
+      actorId: "owner-1",
+      actorRole: "owner",
+      now: new Date("2026-08-29T10:30:00.000Z"),
+    });
+    assert.equal(appStoreAnalysis.tasks.some((task) => task.id === generatedTask.id), false);
+    assert.equal(appStoreAnalysis.tasks.some((task) => task.id === manualTask.id), true);
+    assert.deepEqual(
+      await prisma.seoTask.findUniqueOrThrow({
+        where: { id: generatedTask.id },
+        select: { status: true, verificationStatus: true },
+      }),
+      { status: "dismissed", verificationStatus: "superseded" },
+    );
+
+    await prisma.brand.update({
+      where: { id: brand.id },
+      data: {
+        websiteUrl: "https://fitura.example",
+        auditSnapshot: {
+          documentType: "website",
+          finalUrl: "https://fitura.example",
+          ...AUDIT,
+        },
+        auditedAt: new Date("2026-08-30T08:00:00.000Z"),
+      },
+    });
+    const restoredAnalysis = await analyzeSeo({
+      workspaceId: workspace.id,
+      brandId: brand.id,
+      actorId: "owner-1",
+      actorRole: "owner",
+      now: new Date("2026-08-30T09:00:00.000Z"),
+    });
+    const restoredTask = restoredAnalysis.tasks.find((task) => task.id === generatedTask.id);
+    assert.ok(restoredTask);
+    assert.equal(restoredTask.status, "open");
+    assert.equal(restoredTask.verificationStatus, "unverified");
+  } finally {
+    await prisma.workspace.delete({ where: { id: workspace.id } });
+  }
+});
+
 integrationTest("SEO AI proposals reserve once, replay safely, and never mutate without acceptance", async () => {
   const id = suffix();
   const workspace = await prisma.workspace.create({

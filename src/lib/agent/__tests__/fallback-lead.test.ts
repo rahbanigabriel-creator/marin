@@ -19,7 +19,7 @@ const brand = {
   contextVersion: 2,
 };
 
-test("offline recovery uses Brand memory instead of requesting known context again", () => {
+test("offline recovery uses saved audit context instead of requesting known context again", () => {
   const lead = buildOfflineBrandLead(
     "Plan next week's organic distribution",
     brand,
@@ -29,6 +29,7 @@ test("offline recovery uses Brand memory instead of requesting known context aga
   assert.match(lead, /Solo software founders/);
   assert.match(lead, /Europe\/Madrid/);
   assert.doesNotMatch(lead, /tell me your website/i);
+  assert.doesNotMatch(lead, /Brand memory/i);
 });
 
 test("monthly paid campaign answers do not fall into the organic calendar fallback", () => {
@@ -39,4 +40,16 @@ test("monthly paid campaign answers do not fall into the organic calendar fallba
 
   assert.match(lead, /anchor the campaign/i);
   assert.doesNotMatch(lead, /build the week/i);
+});
+
+test("multi-area fallback delivers distinct organic, SEO, and paid actions", () => {
+  const lead = buildOfflineBrandLead(
+    "Give me one organic, one SEO, and one paid action for this week",
+    { ...brand, websiteUrl: "https://apps.apple.com/es/app/fitura/id6743079022" },
+  );
+
+  assert.match(lead, /Organic:/);
+  assert.match(lead, /SEO:/);
+  assert.match(lead, /Paid:/);
+  assert.match(lead, /App Store listing as ASO context/);
 });

@@ -52,6 +52,7 @@ import { LAUNCH_FEATURES } from "@/lib/product/features";
  */
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 interface ChatRequest {
   question: string;
@@ -121,8 +122,8 @@ const PHASES: Array<[number, number]> = [
 const LEAD_START_MS = 140;
 const WORD_MS = 26;
 const DEMO_MODE = process.env.NEXT_PUBLIC_MARPIN_DEMO_MODE === "true";
-const CHAT_DEADLINE_MS = 70_000;
-const LIVE_AGENT_DEADLINE_MS = 30_000;
+const CHAT_DEADLINE_MS = 58_000;
+const LIVE_AGENT_DEADLINE_MS = 45_000;
 
 function emptyResolution(workspaceId: string | null): {
   source: MetricsSource;

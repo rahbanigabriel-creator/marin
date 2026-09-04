@@ -7,6 +7,7 @@ export const revalidate = 0;
 
 export async function GET(): Promise<Response> {
   return createReadinessResponse({
+    timeoutMs: 5_000,
     pingDatabase: async () => {
       if (!isDatabaseConfigured()) throw new Error("Database unavailable");
       await prisma.$queryRaw`SELECT 1`;

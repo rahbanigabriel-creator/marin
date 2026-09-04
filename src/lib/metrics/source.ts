@@ -67,9 +67,9 @@ export const defaultMetricFactQuery: MetricFactQuery = (workspaceId, since) =>
     },
   });
 
-/** Default existence probe: any MetricFact row for this workspace at all. */
+/** Default existence probe: at least one recent, non-stale launch metric. */
 const defaultCount = (workspaceId: string): Promise<number> =>
-  prisma.metricFact.count({ where: { workspaceId } });
+  prisma.metricFact.count({ where: liveMetricWhere(workspaceId, windowStart(RECENT_WINDOW_DAYS)) });
 
 /** Human-readable platform labels (canonical id → display name). */
 const PLATFORM_LABEL: Record<string, string> = {

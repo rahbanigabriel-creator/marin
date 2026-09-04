@@ -174,6 +174,7 @@ export async function* runAgentWithTools(opts: {
   // When it has, the canvas carries the detail, so the chat lead is capped to a
   // short headline — the model tends to over-write the chat otherwise.
   let renderedCard = false;
+  let serverToolsEnabled = true;
 
   // LLM cost tracing (Langfuse). Transparent no-op without keys — observe() is an
   // identity function on the stream and flush() does nothing, so the loop's
@@ -207,7 +208,7 @@ export async function* runAgentWithTools(opts: {
           { type: "text" as const, text: opts.system, cache_control: { type: "ephemeral" as const } },
         ],
         messages,
-        tools: AGENT_TOOLS,
+        tools: serverToolsEnabled ? AGENT_TOOLS : TOOLS,
         tool_choice:
           opts.requireActionPlan && i === 0
             ? { type: "tool" as const, name: "add_action_plan" }
@@ -217,28 +218,42 @@ export async function* runAgentWithTools(opts: {
           : {}),
       };
 
-      const stream = trace.observe({
-        name: i === 0 ? "first_turn" : "answer_turn",
-        model: opts.model,
-        tier,
-        stream: client.messages.stream(
-          params as Parameters<typeof client.messages.stream>[0],
-          opts.signal ? ({ signal: opts.signal } as Parameters<typeof client.messages.stream>[1]) : undefined,
-        ),
-      });
-
       let turnText = "";
-      const iterator = stream[Symbol.asyncIterator]();
-      for (;;) {
-        const next = await bounded(iterator.next(), opts.signal);
-        if (next.done) break;
-        const event = next.value;
-        if (event.type === "content_block_delta") {
-          if (event.delta.type === "thinking_delta") yield { kind: "thinking", text: event.delta.thinking };
-          else if (event.delta.type === "text_delta") turnText += event.delta.text;
+      let message: Anthropic.Message;
+      try {
+        const stream = trace.observe({
+          name: i === 0 ? "first_turn" : "answer_turn",
+          model: opts.model,
+          tier,
+          stream: client.messages.stream(
+            params as Parameters<typeof client.messages.stream>[0],
+            opts.signal ? ({ signal: opts.signal } as Parameters<typeof client.messages.stream>[1]) : undefined,
+          ),
+        });
+
+        const iterator = stream[Symbol.asyncIterator]();
+        for (;;) {
+          const next = await bounded(iterator.next(), opts.signal);
+          if (next.done) break;
+          const event = next.value;
+          if (event.type === "content_block_delta") {
+            if (event.delta.type === "thinking_delta") yield { kind: "thinking", text: event.delta.thinking };
+            else if (event.delta.type === "text_delta") turnText += event.delta.text;
+          }
         }
+        message = await bounded(stream.finalMessage(), opts.signal);
+      } catch (error) {
+        // Some Anthropic workspaces do not have server-side web tools enabled.
+        // Retry the untouched first turn once with Marpin's core tools so an
+        // optional research capability cannot take the whole assistant offline.
+        if (serverToolsEnabled && i === 0 && turnText.length === 0 && !opts.signal?.aborted) {
+          serverToolsEnabled = false;
+          console.warn("[agent] server tools unavailable; retrying core tools");
+          i -= 1;
+          continue;
+        }
+        throw error;
       }
-      const message = await bounded(stream.finalMessage(), opts.signal);
 
       // ── Surface live web research the moment it happens. The web_search SERVER
       //    tool can run two ways: (a) it needs more iterations and the model

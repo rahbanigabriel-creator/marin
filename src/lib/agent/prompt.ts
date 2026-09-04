@@ -147,7 +147,7 @@ export function buildAgentPrompt(input: {
   const clock = buildAgentCalendarContext(input.now, input.timeZone);
   const brand = input.brand;
   const brandContext = brand
-    ? `\n\nVERIFIED BRAND MEMORY (context version ${brand.contextVersion}; user edits override earlier audit/model guesses):\n- Name: ${brand.name}\n- Website: ${brand.websiteUrl ?? "Not set"}\n- Summary: ${brand.summary ?? "Not set"}\n- Audience: ${brand.audience.join("; ") || "Not set"}\n- Offers: ${brand.offers.join("; ") || "Not set"}\n- Voice: ${brand.voice.join("; ") || "Not set"}\n- Competitors: ${brand.competitors.join("; ") || "Not set"}\n- Proof: ${brand.proofPoints.join("; ") || "Not set"}\n- Locale/timezone/currency: ${brand.locale} / ${brand.timezone} / ${brand.currency}\nUse this as the current source of truth. Never resurrect a corrected name, audience, offer, or voice from older conversation history.`
+    ? `\n\nVERIFIED AUDIT CONTEXT (context version ${brand.contextVersion}; user edits override earlier audit/model guesses):\n- Name: ${brand.name}\n- Website: ${brand.websiteUrl ?? "Not set"}\n- Summary: ${brand.summary ?? "Not set"}\n- Audience: ${brand.audience.join("; ") || "Not set"}\n- Offers: ${brand.offers.join("; ") || "Not set"}\n- Voice: ${brand.voice.join("; ") || "Not set"}\n- Competitors: ${brand.competitors.join("; ") || "Not set"}\n- Proof: ${brand.proofPoints.join("; ") || "Not set"}\n- Locale/timezone/currency: ${brand.locale} / ${brand.timezone} / ${brand.currency}\nUse this as the current source of truth. Never resurrect a corrected name, audience, offer, or voice from older conversation history.`
     : "";
   const userContent = `You're helping a ${input.persona}.
 
