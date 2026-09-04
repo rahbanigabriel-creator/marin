@@ -78,7 +78,7 @@ test("missing campaign metrics remain null while explicit zero remains zero", ()
   assert.equal(euro.series[0]?.conversions, null);
 });
 
-test("an aggregate stays unavailable when any selected child lacks the additive metric", () => {
+test("an aggregate totals observed facts without treating a missing metric as zero", () => {
   const value = input();
   value.connections[1].currency = "EUR";
   value.attempts[1].currency = "EUR";
@@ -88,9 +88,29 @@ test("an aggregate stays unavailable when any selected child lacks the additive 
     .filter((fact) => !(fact.connectionId === "conn-usd" && fact.metric === "clicks"));
   const data = buildPaidDashboard(value);
   assert.equal(data.mixedCurrency, false);
-  assert.equal(data.totals.spend, 20, "explicit zero participates in a complete sum");
-  assert.equal(data.totals.clicks, null, "one missing child makes the aggregate unavailable");
+  assert.equal(data.totals.spend, 20, "explicit zero participates in the observed sum");
+  assert.equal(data.totals.clicks, 10, "the observed click fact remains usable");
   assert.equal(data.totals.ctr, null);
+});
+
+test("a dormant configured campaign does not erase observed account performance", () => {
+  const value = input();
+  value.connections = [value.connections[0]];
+  value.attempts = [value.attempts[0]];
+  value.facts = value.facts.filter((fact) => fact.connectionId === "conn-eur");
+  value.campaigns = [
+    value.campaigns[0],
+    {
+      connectionId: "conn-eur", platform: "google_ads", providerExternalId: "dormant",
+      name: "Dormant campaign", status: "paused", objective: "Search", budget: 5,
+      budgetType: "daily", currency: "EUR",
+    },
+  ];
+
+  const data = buildPaidDashboard(value);
+  assert.equal(data.campaigns.find((campaign) => campaign.externalId === "dormant")?.spend, null);
+  assert.equal(data.totals.spend, 0);
+  assert.equal(data.totals.clicks, 10);
 });
 
 test("unknown money currency poisons blended money but never a known currency group", () => {

@@ -338,29 +338,32 @@ function StatusBadge({ mode, state }: { mode: ScreenMode; state: PaidSourceState
 
 export function PaidSyncButton({
   canManage,
+  accessLoading = false,
   syncing,
   loading = false,
   onSync,
   className,
 }: {
   canManage: boolean;
+  accessLoading?: boolean;
   syncing: boolean;
   loading?: boolean;
   onSync: () => void;
   className: string;
 }): React.JSX.Element {
   const readOnlyExplanation = "Only workspace owners and admins can sync ad accounts. You can still view and filter saved campaign data.";
+  const unavailableExplanation = accessLoading ? "Checking workspace access." : readOnlyExplanation;
   return (
     <button
       type="button"
       onClick={canManage ? onSync : undefined}
       disabled={!canManage || syncing || loading}
-      aria-label={canManage ? undefined : `Sync unavailable. ${readOnlyExplanation}`}
-      title={canManage ? undefined : readOnlyExplanation}
+      aria-label={canManage ? undefined : accessLoading ? "Checking workspace access" : `Sync unavailable. ${readOnlyExplanation}`}
+      title={canManage ? undefined : unavailableExplanation}
       className={className}
     >
       <LuRefreshCw aria-hidden className={syncing && canManage ? "animate-spin" : ""} />
-      {canManage ? (syncing ? "Syncing" : "Sync now") : "Sync unavailable"}
+      {canManage ? (syncing ? "Syncing" : "Sync now") : accessLoading ? "Checking access" : "Sync unavailable"}
     </button>
   );
 }
@@ -368,9 +371,11 @@ export function PaidSyncButton({
 export function CampaignsScreen({
   onOpenConnections,
   canManage,
+  accessLoading = false,
 }: {
   onOpenConnections: () => void;
   canManage: boolean;
+  accessLoading?: boolean;
 }): React.JSX.Element {
   const [workspaceView, setWorkspaceView] = useState<"performance" | "drafts">("performance");
   const [data, setData] = useState<PaidDashboardData>(() => emptyPaidDashboard());
@@ -575,7 +580,7 @@ export function CampaignsScreen({
           <div>
             <h1 className="font-serif text-[24px] font-medium text-ink-900">Paid command center</h1>
             <p className="mt-[2px] font-sans text-[12.5px] text-ink-400">Google Ads and Meta Ads across every connected account.</p>
-            {!canManage ? (
+            {!canManage && !accessLoading ? (
               <p className="mt-[4px] font-sans text-[11.5px] text-ink-400">
                 Read-only access: you can view and filter saved data; only workspace owners and admins can sync ad accounts.
               </p>
@@ -592,6 +597,7 @@ export function CampaignsScreen({
             </button>
             <PaidSyncButton
               canManage={canManage}
+              accessLoading={accessLoading}
               syncing={syncing}
               loading={loading}
               onSync={sync}

@@ -180,6 +180,7 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
   const [brandError, setBrandError] = useState<string | null>(null);
   const [auditUrl, setAuditUrl] = useState("");
   const [billing, setBilling] = useState<BillingSnapshotDto | null>(null);
+  const [billingResolved, setBillingResolved] = useState(false);
 
   const openConnections = useCallback(() => {
     setConnectionFeedback(null);
@@ -194,7 +195,8 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
   const dataset = PERSONAS[persona];
   const realProductMode = !DEMO_MODE;
   const workspaceCanManage = billing?.canManage === true;
-  const workspaceReadOnly = !workspaceCanManage;
+  const workspaceAccessLoading = realProductMode && !billingResolved;
+  const workspaceReadOnly = billingResolved && !workspaceCanManage;
   const realChannels = channels;
   const connectedCount = realProductMode
     ? new Set(
@@ -361,6 +363,8 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
       if (payload.billing) setBilling(payload.billing);
     } catch {
       // Keep the last confirmed permissions when a background refresh fails.
+    } finally {
+      setBillingResolved(true);
     }
   }, [realProductMode]);
 
@@ -1002,6 +1006,7 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
               <CampaignsScreen
                 onOpenConnections={openConnections}
                 canManage={workspaceCanManage}
+                accessLoading={workspaceAccessLoading}
               />
             ) : (
               <SplitView

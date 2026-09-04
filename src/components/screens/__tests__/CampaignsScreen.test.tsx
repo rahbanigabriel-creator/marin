@@ -118,6 +118,23 @@ test("managers retain the active sync control", () => {
   assert.doesNotMatch(html, /Sync unavailable/);
 });
 
+test("permission loading never mislabels an owner as read-only", () => {
+  const html = renderToStaticMarkup(
+    <PaidSyncButton
+      canManage={false}
+      accessLoading
+      syncing={false}
+      onSync={() => {}}
+      className="sync-control"
+    />,
+  );
+
+  assert.match(html, /disabled=""/);
+  assert.match(html, />Checking access</);
+  assert.doesNotMatch(html, /Only workspace owners and admins/);
+  assert.doesNotMatch(html, /Sync unavailable/);
+});
+
 test("failed account observations stay intact but become explicit cached display data", () => {
   const original = campaign();
   const display = campaignWithIntegrityLabel(original, [source("failed")], "failed");

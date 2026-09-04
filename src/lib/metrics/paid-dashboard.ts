@@ -164,17 +164,6 @@ function metricsFromFacts(facts: PaidFactRow[], mixedCurrency = false): PaidMetr
   return derive(record, mixedCurrency);
 }
 
-function aggregateRecords(records: PaidMetricRecord[], mixedCurrency: boolean): PaidMetricRecord {
-  const result = blankMetrics();
-  for (const key of ADDITIVE) {
-    const values = records.map((record) => record[key]);
-    result[key] = records.length > 0 && values.every((value): value is number => value != null)
-      ? round(values.reduce((sum, value) => sum + value, 0))
-      : null;
-  }
-  return derive(result, mixedCurrency);
-}
-
 function dayKey(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
@@ -369,24 +358,16 @@ export function buildPaidDashboard(input: PaidDashboardInput): PaidDashboardOutp
   const mixedKnownCurrencies = currencies.length > 1;
   const unknownCurrencyContribution = campaignCurrencyUnsafe.size > 0;
   const currencyUnsafe = mixedKnownCurrencies || unknownCurrencyContribution;
-  const totals = aggregateRecords(campaigns, currencyUnsafe);
-  const previousGroups = [...new Set(input.previousFacts.flatMap((fact) => fact.connectionId && fact.campaignExternalId ? [`${fact.connectionId}:${fact.campaignExternalId}`] : []))]
-    .map((identity) => {
-      const split = identity.indexOf(":");
-      const connectionId = identity.slice(0, split);
-      const campaignExternalId = identity.slice(split + 1);
-      const facts = input.previousFacts.filter((fact) => fact.connectionId === connectionId && fact.campaignExternalId === campaignExternalId);
-      const previousCurrencies = currencySet([
-        connectionById.get(connectionId)?.currency,
-        ...facts.map((fact) => fact.currency),
-      ]);
-      const hasMoneyEvidence = facts.some((fact) => ["spend", "revenue"].includes(fact.metric.toLowerCase()));
-      return metricsFromFacts(facts, previousCurrencies.length > 1 || (hasMoneyEvidence && previousCurrencies.length !== 1));
-    });
-  const previous = aggregateRecords(previousGroups, currencyUnsafe);
+  // Provider metric snapshots contain only rows with observations. Campaign
+  // inventory also includes dormant campaigns, so aggregating campaign DTOs
+  // would let an inactive campaign with no rows erase valid account totals.
+  // Sum the canonical facts directly and preserve null for metrics the provider
+  // did not evidence anywhere in the selected range.
+  const totals = metricsFromFacts(currentFacts, currencyUnsafe);
+  const previous = metricsFromFacts(input.previousFacts, currencyUnsafe);
   const series = rangeAxis.map((date) => ({
     date,
-    ...aggregateRecords(campaigns.map((campaign) => campaign.series.find((point) => point.date === date) ?? blankMetrics()), currencyUnsafe),
+    ...metricsFromFacts(currentFacts.filter((fact) => dayKey(fact.date) === date), currencyUnsafe),
   }));
   const platformIds = [...new Set(campaigns.map((campaign) => campaign.platform))];
   const platforms = platformIds.map((platform) => {
@@ -398,12 +379,12 @@ export function buildPaidDashboard(input: PaidDashboardInput): PaidDashboardOutp
       label: PLATFORM_LABEL[platform as PaidSyncPlatform] ?? platform,
       currency: childCurrencies.length === 1 ? childCurrencies[0] : null,
       mixedCurrency: unsafe,
-      ...aggregateRecords(rows, unsafe),
+      ...metricsFromFacts(currentFacts.filter((fact) => fact.platform === platform), unsafe),
     };
   });
   const currencyGroups = currencies.map((currency) => ({
     currency,
-    totals: aggregateRecords(campaigns.filter((campaign) => campaign.currency === currency), false),
+    totals: metricsFromFacts(currentFacts.filter((fact) => fact.currency === currency), false),
   }));
   const observedFrom = minIso(currentFacts.map((fact) => fact.date));
   const observedTo = maxIso(currentFacts.map((fact) => fact.date));
