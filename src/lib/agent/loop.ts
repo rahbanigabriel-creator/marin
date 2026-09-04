@@ -155,6 +155,8 @@ export async function* runAgentWithTools(opts: {
   workspaceId?: string | null;
   /** Force direct creative requests into a visible, reviewable action card. */
   requireActionPlan?: boolean;
+  /** Force own-account performance requests to read verified provider facts. */
+  requireAccountMetrics?: boolean;
   signal?: AbortSignal;
 }): AsyncGenerator<AgentEvent> {
   const client = getClient();
@@ -175,6 +177,7 @@ export async function* runAgentWithTools(opts: {
   // short headline — the model tends to over-write the chat otherwise.
   let renderedCard = false;
   let serverToolsEnabled = true;
+  let forcedActionPlan = false;
 
   // LLM cost tracing (Langfuse). Transparent no-op without keys — observe() is an
   // identity function on the stream and flush() does nothing, so the loop's
@@ -201,6 +204,9 @@ export async function* runAgentWithTools(opts: {
       // iterations re-read it at ~10% input cost instead of full price.
       applyMessageCaching(messages);
 
+      const forceAccountRead = Boolean(opts.requireAccountMetrics && !ctx.internalReadDone);
+      const forceActionPlan = Boolean(opts.requireActionPlan && !forceAccountRead && !forcedActionPlan);
+      if (forceActionPlan) forcedActionPlan = true;
       const params = {
         model: opts.model,
         max_tokens: MAX_TOKENS,
@@ -209,8 +215,9 @@ export async function* runAgentWithTools(opts: {
         ],
         messages,
         tools: serverToolsEnabled ? AGENT_TOOLS : TOOLS,
-        tool_choice:
-          opts.requireActionPlan && i === 0
+        tool_choice: forceAccountRead
+          ? { type: "tool" as const, name: "get_account_metrics" }
+          : forceActionPlan
             ? { type: "tool" as const, name: "add_action_plan" }
             : { type: "auto" as const },
         ...(useThinking

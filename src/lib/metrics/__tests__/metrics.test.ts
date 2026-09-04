@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   createDbMetricsSource,
   hasLiveData,
+  metricsWindowDaysForQuestion,
   serializeMetricFacts,
   type MetricFactQuery,
   type MetricFactRow,
@@ -85,13 +86,41 @@ test("createDbMetricsSource reads via the injected query and serializes", async 
   assert.doesNotMatch(onlySpend, /roas/);
 });
 
+test("account metric windows follow explicit bounded user periods", () => {
+  assert.equal(metricsWindowDaysForQuestion("Monitor the last 90 days"), 90);
+  assert.equal(metricsWindowDaysForQuestion("Review the past 3 months"), 90);
+  assert.equal(metricsWindowDaysForQuestion("Show this quarter"), 90);
+  assert.equal(metricsWindowDaysForQuestion("Check the previous week"), 7);
+  assert.equal(metricsWindowDaysForQuestion("Analyze the last 2 years"), 366);
+  assert.equal(metricsWindowDaysForQuestion("How is performance?"), 30);
+});
+
+test("createDbMetricsSource labels and queries the requested account window", async () => {
+  const requestedSince: Date[] = [];
+  const source = await createDbMetricsSource(
+    "ws_90",
+    async (_workspaceId, since) => {
+      requestedSince.push(since);
+      return SAMPLE_ROWS;
+    },
+    90,
+  );
+  const after = Date.now();
+  assert.match(source.getAccountMetrics(), /last 90 days/);
+  assert.equal(requestedSince.length, 1);
+  const ageDays = (after - requestedSince[0].getTime()) / 86_400_000;
+  assert.ok(ageDays >= 89 && ageDays <= 91, `expected a 90-day query, received ${ageDays}`);
+});
+
 test("hasLiveData is false with no DATABASE_URL (offline path stays sample)", async () => {
   const prev = process.env.DATABASE_URL;
   delete process.env.DATABASE_URL;
   try {
     // count stub would throw if called — proving the env gate short-circuits first.
-    const live = await hasLiveData("ws_123", async () => {
-      throw new Error("count must not run when DB is unconfigured");
+    const live = await hasLiveData("ws_123", {
+      count: async () => {
+        throw new Error("count must not run when DB is unconfigured");
+      },
     });
     assert.equal(live, false);
   } finally {
@@ -107,12 +136,14 @@ test("hasLiveData reflects row count when DB is configured", async () => {
   process.env.DATABASE_URL = "postgresql://stub";
   console.warn = (...values: unknown[]) => warnings.push(values.map(String).join(" "));
   try {
-    assert.equal(await hasLiveData("ws_123", async () => 0), false);
-    assert.equal(await hasLiveData("ws_123", async () => 5), true);
+    assert.equal(await hasLiveData("ws_123", { count: async () => 0 }), false);
+    assert.equal(await hasLiveData("ws_123", { count: async () => 5 }), true);
     // a thrown probe degrades to false (never throws)
     assert.equal(
-      await hasLiveData("ws_123", async () => {
-        throw new Error("postgresql://admin:super-secret@db.internal/private");
+      await hasLiveData("ws_123", {
+        count: async () => {
+          throw new Error("postgresql://admin:super-secret@db.internal/private");
+        },
       }),
       false,
     );

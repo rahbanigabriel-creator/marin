@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isArtifactRelevant, requiresActionPlan } from "@/lib/agent/artifact-relevance";
+import {
+  isArtifactRelevant,
+  requiresAccountMetrics,
+  requiresActionPlan,
+} from "@/lib/agent/artifact-relevance";
 
 test("diagnostic cards require a performance or problem intent", () => {
   assert.equal(isArtifactRelevant("Why did my CPA increase this week?", "rootCause"), true);
@@ -36,4 +40,16 @@ test("direct publishable creative requests require a reviewable action plan", ()
 
 test("a flexible brief remains available for substantive uncategorized work", () => {
   assert.equal(isArtifactRelevant("Explain our positioning in plain English", "brief"), true);
+});
+
+test("only own-account performance requests require a connected metrics read", () => {
+  assert.equal(
+    requiresAccountMetrics("Monitor my connected Fitura Meta Ads account for overspend and anomalies"),
+    true,
+  );
+  assert.equal(requiresAccountMetrics("Why did our CPA rise?"), true);
+  assert.equal(requiresAccountMetrics("Show me my campaigns"), true);
+  assert.equal(requiresAccountMetrics("What is a good CTR?"), false);
+  assert.equal(requiresAccountMetrics("Write ads for my next campaign"), false);
+  assert.equal(requiresAccountMetrics("Plan my paid campaign"), false);
 });

@@ -13,7 +13,11 @@ import { buildOfflineDoctrineLead } from "@/lib/agent/fallback-lead";
 import type { MetricsSource } from "@/lib/agent/tools";
 import { isAuthConfigured, type WorkspaceRef } from "@/lib/auth";
 import { workspaceSeatLimitResponse } from "@/lib/auth-http";
-import { createDbMetricsSource, hasLiveData } from "@/lib/metrics/source";
+import {
+  createDbMetricsSource,
+  hasLiveData,
+  metricsWindowDaysForQuestion,
+} from "@/lib/metrics/source";
 import { capture, flushAnalytics } from "@/lib/analytics";
 import {
   answerRequestFingerprint,
@@ -37,7 +41,11 @@ import {
 } from "@/lib/conversations/service";
 import { isPersistenceModelUnavailable } from "@/lib/persistence/errors";
 import { abortableDelay, raceWithAbort } from "@/lib/streaming/deadline";
-import { isArtifactRelevant, requiresActionPlan } from "@/lib/agent/artifact-relevance";
+import {
+  isArtifactRelevant,
+  requiresAccountMetrics,
+  requiresActionPlan,
+} from "@/lib/agent/artifact-relevance";
 import { getWorkspaceTimeZone } from "@/lib/time/workspace";
 import { resolvePlanningTimeZone } from "@/lib/time/calendar";
 import { LAUNCH_FEATURES } from "@/lib/product/features";
@@ -161,6 +169,7 @@ function emptyResolution(workspaceId: string | null): {
 async function resolveMetricsSource(
   artifacts: ArtifactPayload[],
   workspace: WorkspaceRef | null,
+  windowDays: number,
 ): Promise<{
   source: MetricsSource;
   mode: DataMode;
@@ -177,8 +186,8 @@ async function resolveMetricsSource(
   });
 
   try {
-    if (workspace && (await hasLiveData(workspace.id))) {
-      const source = await createDbMetricsSource(workspace.id);
+    if (workspace && (await hasLiveData(workspace.id, { windowDays }))) {
+      const source = await createDbMetricsSource(workspace.id, undefined, windowDays);
       return { source, mode: "live", workspaceId: workspace.id };
     }
     // No live rows. Sample data ONLY behind the explicit demo flag; otherwise
@@ -417,8 +426,9 @@ export async function POST(req: Request): Promise<Response> {
         // ── Data source: real DB-backed metrics when the workspace has them;
         // otherwise an empty connected-data state for real workspaces, with the
         // old sample path reserved for explicit offline demo mode.
+        const metricsWindowDays = metricsWindowDaysForQuestion(body.question);
         const resolved = await bounded(
-          resolveMetricsSource(body.artifacts, meteringWorkspace),
+          resolveMetricsSource(body.artifacts, meteringWorkspace, metricsWindowDays),
         );
         const { source, mode, workspaceId } = resolved;
         persistenceWorkspaceId = workspaceId;
@@ -496,6 +506,8 @@ export async function POST(req: Request): Promise<Response> {
               persona: body.persona,
               timeZone: planningTimeZone,
               brand,
+              dataMode: mode,
+              metricsWindowDays,
             });
             for await (const ev of runAgentWithTools({
               model: decision.model,
@@ -506,6 +518,7 @@ export async function POST(req: Request): Promise<Response> {
               history: body.history,
               workspaceId,
               requireActionPlan: requiresActionPlan(body.question),
+              requireAccountMetrics: mode === "live" && requiresAccountMetrics(body.question),
               signal: liveController.signal,
             })) {
               if (closed) return;

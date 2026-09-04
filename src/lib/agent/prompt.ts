@@ -2,6 +2,7 @@ import type { Persona } from "@/types/scenario";
 import type { ArtifactPayload } from "@/lib/streaming/events";
 import { buildAgentCalendarContext } from "@/lib/time/calendar";
 import type { BrandPromptContext } from "@/lib/brand/types";
+import type { DataMode } from "@/lib/streaming/events";
 
 /**
  * Context engineering for the "marketing master" (architecture §3). The system
@@ -147,16 +148,25 @@ export function buildAgentPrompt(input: {
   timeZone?: string;
   now?: Date;
   brand?: BrandPromptContext | null;
+  dataMode?: DataMode;
+  metricsWindowDays?: number;
 }): { system: string; userContent: string } {
   const clock = buildAgentCalendarContext(input.now, input.timeZone);
   const brand = input.brand;
   const brandContext = brand
     ? `\n\nVERIFIED AUDIT CONTEXT (context version ${brand.contextVersion}; user edits override earlier audit/model guesses):\n- Name: ${brand.name}\n- Website: ${brand.websiteUrl ?? "Not set"}\n- Summary: ${brand.summary ?? "Not set"}\n- Audience: ${brand.audience.join("; ") || "Not set"}\n- Offers: ${brand.offers.join("; ") || "Not set"}\n- Voice: ${brand.voice.join("; ") || "Not set"}\n- Competitors: ${brand.competitors.join("; ") || "Not set"}\n- Proof: ${brand.proofPoints.join("; ") || "Not set"}\n- Locale/timezone/currency: ${brand.locale} / ${brand.timezone} / ${brand.currency}\nUse this as the current source of truth. Never resurrect a corrected name, audience, offer, or voice from older conversation history.`
     : "";
+  const metricsWindowDays = input.metricsWindowDays ?? 30;
+  const accountContext = input.dataMode === "live"
+    ? `\n\nCONNECTED-ACCOUNT EVIDENCE: Marpin has verified provider observations for this workspace in the requested ${metricsWindowDays}-day window. For any question about the user's own account or campaign performance, call get_account_metrics before answering and ground every number in its result. Never tell this user to connect the account in that answer.`
+    : input.dataMode === "empty"
+      ? `\n\nCONNECTED-ACCOUNT EVIDENCE: Marpin has no measured observations in the requested ${metricsWindowDays}-day window. This does not prove that OAuth is disconnected. If the user says an account is connected, describe the evidence window as empty and suggest a fresh sync; do not falsely tell them to connect it again.`
+      : "";
   const userContent = `You're helping a ${input.persona}.
 
 PLANNING CLOCK: Today is ${clock.today} in ${clock.timeZone}. Weeks begin on Monday. "Next week" means ${clock.nextWeekStart} through ${clock.nextWeekEnd}. Verify every weekday/date pair before rendering a schedule.
 ${brandContext}
+${accountContext}
 
 ${input.question}
 

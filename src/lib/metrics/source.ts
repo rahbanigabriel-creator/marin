@@ -26,6 +26,40 @@ import type { MetricsSource } from "@/lib/agent/tools";
 
 /** Recent window (days) aggregated for an internal read. */
 export const RECENT_WINDOW_DAYS = 30;
+export const MAX_AGENT_METRICS_WINDOW_DAYS = 366;
+
+function normalizeMetricsWindowDays(value: number | undefined): number {
+  if (!Number.isFinite(value)) return RECENT_WINDOW_DAYS;
+  return Math.min(
+    MAX_AGENT_METRICS_WINDOW_DAYS,
+    Math.max(1, Math.trunc(value as number)),
+  );
+}
+
+/**
+ * Match the reporting window the user explicitly asks the assistant to inspect.
+ * The result is deliberately bounded so a chat turn cannot fan out into an
+ * unbounded warehouse read.
+ */
+export function metricsWindowDaysForQuestion(question: string): number {
+  const normalized = question.trim().toLowerCase();
+  const explicit = normalized.match(
+    /\b(\d{1,3})\s*(?:-|–|—)?\s*(day|week|month|year)s?\b/,
+  );
+  if (explicit) {
+    const amount = Number(explicit[1]);
+    const unit = explicit[2];
+    if (amount > 0) {
+      const multiplier = unit === "week" ? 7 : unit === "month" ? 30 : unit === "year" ? 365 : 1;
+      return normalizeMetricsWindowDays(amount * multiplier);
+    }
+  }
+  if (/\b(?:last|past|previous|this)\s+quarter\b/.test(normalized)) return 90;
+  if (/\b(?:last|past|previous|this)\s+year\b|\bytd\b|\byear[- ]to[- ]date\b/.test(normalized)) return 365;
+  if (/\b(?:last|past|previous|this)\s+week\b/.test(normalized)) return 7;
+  if (/\b(?:last|past|previous|this)\s+month\b/.test(normalized)) return 30;
+  return RECENT_WINDOW_DAYS;
+}
 
 /** Minimal row shape the serializer needs — a structural subset of MetricFact. */
 export type MetricFactRow = Pick<
@@ -68,8 +102,10 @@ export const defaultMetricFactQuery: MetricFactQuery = (workspaceId, since) =>
   });
 
 /** Default existence probe: at least one recent, non-stale launch metric. */
-const defaultCount = (workspaceId: string): Promise<number> =>
-  prisma.metricFact.count({ where: liveMetricWhere(workspaceId, windowStart(RECENT_WINDOW_DAYS)) });
+type MetricFactCount = (workspaceId: string, since: Date) => Promise<number>;
+
+const defaultCount: MetricFactCount = (workspaceId, since) =>
+  prisma.metricFact.count({ where: liveMetricWhere(workspaceId, since) });
 
 /** Human-readable platform labels (canonical id → display name). */
 const PLATFORM_LABEL: Record<string, string> = {
@@ -247,7 +283,8 @@ export async function createDbMetricsSource(
   query: MetricFactQuery = defaultMetricFactQuery,
   windowDays = RECENT_WINDOW_DAYS,
 ): Promise<MetricsSource> {
-  const since = windowStart(windowDays);
+  const boundedWindowDays = normalizeMetricsWindowDays(windowDays);
+  const since = windowStart(boundedWindowDays);
   const rows = await query(workspaceId, since);
   // Ads/creatives give the agent access to what's actually RUNNING (copy +
   // performance), not just aggregate numbers. Best-effort: a missing table or a
@@ -260,7 +297,7 @@ export async function createDbMetricsSource(
   }
   return {
     getAccountMetrics(sections?: string[]): string {
-      const metrics = serializeMetricFacts(rows, sections, windowDays);
+      const metrics = serializeMetricFacts(rows, sections, boundedWindowDays);
       const creatives = serializeAds(ads);
       return creatives ? `${metrics}\n\n${creatives}` : metrics;
     },
@@ -432,11 +469,15 @@ export async function readCampaignConfig(workspaceId: string): Promise<CampaignC
  */
 export async function hasLiveData(
   workspaceId: string,
-  count: (workspaceId: string) => Promise<number> = defaultCount,
+  options: {
+    count?: MetricFactCount;
+    windowDays?: number;
+  } = {},
 ): Promise<boolean> {
   if (!isDatabaseConfigured()) return false;
   try {
-    return (await count(workspaceId)) > 0;
+    const windowDays = normalizeMetricsWindowDays(options.windowDays);
+    return (await (options.count ?? defaultCount)(workspaceId, windowStart(windowDays))) > 0;
   } catch {
     console.warn("[metrics] hasLiveData probe failed; treating as no live data");
     return false;
