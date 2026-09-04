@@ -7,6 +7,7 @@ import { dispatchTool, briefFromInput, marketScanFromInput, diagnosisFromInput, 
 import { persistActionPlan } from "@/lib/actions/persist";
 import { startLlmTrace, type LlmTrace } from "@/lib/observability/llm-trace";
 import { abortableDelay, raceWithAbort } from "@/lib/streaming/deadline";
+import { leadHeadline } from "./headline";
 
 /**
  * The agent loop (architecture §1, §4) — now surfacing what it's actually doing.
@@ -497,30 +498,6 @@ function usedWebSearch(content: Anthropic.Message["content"]): boolean {
       t === "web_fetch_tool_result"
     );
   });
-}
-
-/**
- * Trim a chat lead to a short headline — the canvas carries the detail, so the
- * chat is just the takeaway. Keeps whole sentences up to ~maxChars, falling back
- * to a word-boundary cut. Only applied when the agent rendered a card.
- */
-function leadHeadline(text: string, maxChars = 360): string {
-  const t = text.trim();
-  if (t.length <= maxChars) return t;
-  const sentences = t.match(/[^.!?]+[.!?]+(?:\s|$)/g);
-  if (sentences && sentences.length > 0) {
-    let out = "";
-    for (const s of sentences) {
-      const next = out + s;
-      if (out && next.length > maxChars) break;
-      out = next;
-      if (out.length >= maxChars) break;
-    }
-    if (out.trim()) return out.trim();
-  }
-  const cut = t.slice(0, maxChars);
-  const lastSpace = cut.lastIndexOf(" ");
-  return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trim() + "…";
 }
 
 /** Map a concrete model id back to its router tier (for trace/cost labelling). */

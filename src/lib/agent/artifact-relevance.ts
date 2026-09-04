@@ -13,7 +13,7 @@ const ACCOUNT_OBJECT = /\b(account|accounts|campaign|campaigns|ad set|ad sets|ad
 const INTENT: Partial<Record<ArtifactKind, RegExp>> = {
   brief: /\b(brief|strategy|plan|campaign|content|launch|position(?:ing)?|brand|audience|offer|messaging|roadmap|distribution)\b/i,
   marketScan: /\b(market|competitor|competitive|position(?:ing)?|category|share|landscape|alternative|research)\b/i,
-  rootCause: /\b(why|cause|diagnos|drop|declin|increase|rising|worse|underperform|problem|issue|investigate|explain)\b/i,
+  rootCause: /\b(why|cause|diagnos|drop|declin|increase|rising|worse|underperform|problem|issue|investigate|explain|monitor|overspend|pacing|anomal(?:y|ies))\b/i,
   recommendations: /\b(audit|website|site|seo|technical|funnel|landing|page|conversion|fix|improve|speed|content gap)\b/i,
   actionPlan: /\b(plan|strategy|launch|write|create|draft|post|publish|campaign|content|schedule|calendar|grow|seo|fix|roadmap|execute|distribution)\b/i,
   campaign: /\b(ad|ads|campaign|paid|google|meta|tiktok|budget|targeting|creative)\b/i,

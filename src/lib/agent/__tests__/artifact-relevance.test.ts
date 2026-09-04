@@ -9,6 +9,10 @@ import {
 
 test("diagnostic cards require a performance or problem intent", () => {
   assert.equal(isArtifactRelevant("Why did my CPA increase this week?", "rootCause"), true);
+  assert.equal(
+    isArtifactRelevant("Monitor my connected Meta account for overspend and performance anomalies", "rootCause"),
+    true,
+  );
   assert.equal(isArtifactRelevant("Write three launch posts", "rootCause"), false);
 });
 
