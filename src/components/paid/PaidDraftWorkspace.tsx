@@ -359,6 +359,7 @@ export function PaidDraftWorkspace({
   };
 
   const upload = async (file: File) => {
+    if (busy || uploading) return;
     setUploading(true);
     setError(null);
     try {
@@ -392,6 +393,7 @@ export function PaidDraftWorkspace({
     template: PaidLaunchTemplate;
     instruction: string;
   }) => {
+    if (busy || uploading) return;
     const normalizedInstruction = input.instruction.trim();
     const actionKey = `generate:${input.connectionId}:${input.template}:${normalizedInstruction}`;
     const requestId = actionRequestId(actionKey, "draft-generate");
@@ -430,7 +432,7 @@ export function PaidDraftWorkspace({
           <div className="flex flex-wrap items-center gap-[7px]">
             <button type="button" aria-label="Refresh campaign drafts" disabled={loading || busy} onClick={() => void load(selectedId)} className={`grid h-[36px] w-[36px] place-items-center rounded-[7px] border border-line-1 bg-surface-card text-ink-600 disabled:opacity-45 ${focusRing}`}><LuRefreshCw aria-hidden className={loading ? "animate-spin" : ""} /></button>
             <button type="button" onClick={onOpenConnections} className={`inline-flex h-[36px] items-center gap-[6px] rounded-[7px] border border-line-1 bg-surface-card px-[11px] text-[11.5px] font-semibold text-ink-700 ${focusRing}`}><LuPlug aria-hidden /> Accounts</button>
-            <button type="button" disabled={!canManage || !connections.length || busy} onClick={() => { setGenerationError(null); setGenerationOpen(true); }} className={`inline-flex h-[36px] items-center gap-[6px] rounded-[7px] border border-plum-border bg-plum-soft px-[11px] text-[11.5px] font-semibold text-plum-deep disabled:cursor-not-allowed disabled:opacity-45 ${focusRing}`}><LuSparkles aria-hidden /> Generate draft</button>
+            <button type="button" disabled={!canManage || !connections.length || busy || uploading} title={uploading ? "Wait for the creative upload to finish" : undefined} onClick={() => { setGenerationError(null); setGenerationOpen(true); }} className={`inline-flex h-[36px] items-center gap-[6px] rounded-[7px] border border-plum-border bg-plum-soft px-[11px] text-[11.5px] font-semibold text-plum-deep disabled:cursor-not-allowed disabled:opacity-45 ${focusRing}`}><LuSparkles aria-hidden /> Generate draft</button>
             <button type="button" disabled={!canManage || !connections.length || busy} onClick={beginCreate} className={`inline-flex h-[36px] items-center gap-[6px] rounded-[7px] bg-plum px-[12px] text-[12px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45 ${focusRing}`}><LuPlus aria-hidden /> New draft</button>
           </div>
         </div>
