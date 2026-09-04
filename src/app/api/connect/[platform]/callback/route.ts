@@ -31,6 +31,7 @@ import { persistOAuthConnection } from "@/lib/connectors/persist";
 import { emitConnectionBackfill, emitConnectionConnected } from "@/lib/jobs/inngest";
 import { isEntitlementDeniedError } from "@/lib/billing/errors";
 import { isLaunchConnectorPlatform } from "@/lib/product/platforms";
+import { oauthSelectionPageHeaders } from "../../_lib/selection-headers";
 import { connectorCallbackUrl, connectorReturnUrl } from "../../_lib/urls";
 
 /**
@@ -162,13 +163,7 @@ function selectionResponse(input: {
 </html>`;
 
   const res = new NextResponse(body, {
-    headers: {
-      "Cache-Control": "no-store",
-      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
-      "Content-Type": "text/html; charset=utf-8",
-      "Referrer-Policy": "no-referrer",
-      "X-Frame-Options": "DENY",
-    },
+    headers: oauthSelectionPageHeaders(),
   });
   res.cookies.delete(OAUTH_TX_COOKIE);
   res.cookies.set(OAUTH_PENDING_COOKIE, signed, {
