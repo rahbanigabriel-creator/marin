@@ -20,7 +20,7 @@
 
 ## Open Issues And Unverified Gates
 
-- AI scheduling requires correction: the generated start was 22:00 Madrid on September 4, already past at generation, and its seven-day claim did not match the additional 1h59 duration. Keep this draft unapproved; generation success is not semantic correctness.
+- The original AI scheduling defect is resolved in the Astra follow-up below: the old draft was corrected and a fresh live generation persisted the exact seven-day schedule. All QA drafts remain unapproved.
 - Google Ads connection is not yet proven. The current free workspace's single connection slot is consumed by Meta; Google developer-token/access review also remains to verify.
 - Campaign creation/activation is assisted handoff, not proven direct provider writing. Approval UI explicitly reports unreviewed provider writing. No live spend test was performed.
 - Agent health-check execution was denied by the free-plan entitlement. Recurring monitoring is not proven; the current monitor is a one-time read-only run.
@@ -39,3 +39,14 @@ All test campaigns remain Marpin drafts. No provider campaign, budget change, or
 - Full integration testing exposed a real audit-handoff expiry comparison bug in non-UTC database sessions. The comparison now explicitly uses UTC for the timestamp-without-timezone column; boundary tests cover UTC, Europe/Madrid, and America/New_York. No token expiry or single-use rule was relaxed.
 - The agent-run test subscription was stale; its billing period now follows the test's execution time without changing production entitlement policy.
 - Final local verification: 506 unit tests, 54 database integration tests (no skips), and all 69 Playwright browser journeys passed. Typecheck, lint, secret scan, and whitespace checks passed. Browser coverage includes desktop/mobile, calendar and Studio, SEO, audit handoff, paid drafts, agent access, billing screens, and read-only roles. External providers were mocked in these browser tests; this is not a live OAuth, billing, or publishing certification.
+
+## Astra Production Verification
+
+- Commit `88f4177`, pushed to `origin/backend`. Deployment `dpl_vdcuf3YjeNQ2jyDwMQh9s6pS1wyc` is READY and aliased to `https://www.marpin.ai` and `https://marpin.ai`. Production readiness reported the database up.
+- The original backdated AI draft could not be marked ready: the live UI required a future campaign start. It was corrected and saved as `QA - Fitura AI draft - corrected schedule - do not launch`, version 2, Draft.
+- The previously ready manual draft could be explicitly reopened for editing before any handoff attempt. Saving `QA - Fitura Spain manual draft - do not launch` returned it to Draft at version 3 and confirmed that earlier approval could no longer authorize it.
+- Fresh live AI generation created `QA - Fitura seven-day schedule - do not launch`, version 1, Draft, using one credit. It selected Fitura Meta account `1387081932882127`, EUR 5 daily, the uploaded app icon, Spanish copy, and the exact App Store URL. Start: September 5, 2026 at 09:00 Europe/Madrid. End: September 12, 2026 at 09:00 Europe/Madrid. The form and dates persisted after refresh and a full page reload.
+- The production paid health-check dialog checked plan access before accepting input. Free-plan restriction and a Review plan link appeared, and Run health check stayed disabled. It explicitly identified the operation as one-time and read-only, using saved metrics rather than a live provider sync or recurring schedule. No health check was executed.
+- Manage connections still showed Meta connected to Fitura. Google Ads displayed Limit reached because the Free workspace used 1 of 1 connection slots. This is an observed entitlement restriction, not a successful Google OAuth/developer-token test. No connection was removed or plan entitlement bypassed.
+- Inngest remains at owner sign-in; worker execution and recurring monitoring are not verified. Stripe purchase lifecycle and direct provider writes remain open release gates.
+- All three QA campaigns remain unapproved Marpin drafts. No external campaign creation, activation, budget change, or advertising spend was submitted. The browser was left on paid drafts for owner review.
