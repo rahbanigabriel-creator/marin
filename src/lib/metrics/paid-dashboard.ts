@@ -231,6 +231,17 @@ function latestSuccessfulAttempts(attempts: PaidAttemptRow[]): Map<string, PaidA
   return latestAttempts(attempts.filter((attempt) => attempt.status === "succeeded" || attempt.status === "partial"));
 }
 
+function attemptsForRange(
+  attempts: PaidAttemptRow[],
+  range: PaidDashboardInput["range"],
+): PaidAttemptRow[] {
+  const from = range.from.getTime();
+  const to = range.to.getTime();
+  return attempts.filter(
+    (attempt) => attempt.requestedFrom.getTime() === from && attempt.requestedTo.getTime() === to,
+  );
+}
+
 function adMetrics(ad: PaidAdRow): PaidMetricRecord {
   const metrics = blankMetrics();
   metrics.spend = ad.spend;
@@ -247,12 +258,18 @@ function normalizePlatform(value: string): PaidSyncPlatform | null {
 export function buildPaidDashboard(input: PaidDashboardInput): PaidDashboardOutput {
   const latest = latestAttempts(input.attempts);
   const latestSuccessful = latestSuccessfulAttempts(input.attempts);
+  const rangeAttempts = attemptsForRange(input.attempts, input.range);
+  const latestForRange = latestAttempts(rangeAttempts);
+  const latestSuccessfulForRange = latestSuccessfulAttempts(rangeAttempts);
   const connectionById = new Map(input.connections.map((connection) => [connection.id, connection]));
   const sources = input.connections.flatMap((connection) => {
     const platform = normalizePlatform(connection.platform);
     if (!platform) return [];
     const attempt = latest.get(connection.id);
     const successful = latestSuccessful.get(connection.id);
+    const rangeAttempt = latestForRange.get(connection.id);
+    const rangeSuccessful = latestSuccessfulForRange.get(connection.id);
+    const rangeFacts = input.facts.filter((fact) => fact.connectionId === connection.id);
     const state = sourceState(connection, attempt);
     return [{
       key: `${platform}:${connection.externalAccountId}`,
@@ -266,10 +283,10 @@ export function buildPaidDashboard(input: PaidDashboardInput): PaidDashboardOutp
       timezone: connection.timezone ?? successful?.timezone ?? null,
       state,
       detail: attempt?.errorMessage ?? connection.lastErrorMessage ?? null,
-      requestedFrom: attempt?.requestedFrom.toISOString() ?? null,
-      requestedTo: attempt?.requestedTo.toISOString() ?? null,
-      observedFrom: successful?.observedFrom?.toISOString() ?? null,
-      observedTo: successful?.observedTo?.toISOString() ?? null,
+      requestedFrom: rangeAttempt?.requestedFrom.toISOString() ?? null,
+      requestedTo: rangeAttempt?.requestedTo.toISOString() ?? null,
+      observedFrom: rangeSuccessful?.observedFrom?.toISOString() ?? minIso(rangeFacts.map((fact) => fact.date)),
+      observedTo: rangeSuccessful?.observedTo?.toISOString() ?? maxIso(rangeFacts.map((fact) => fact.date)),
       lastSyncedAt: (attempt?.completedAt ?? attempt?.startedAt ?? connection.lastSyncAt)?.toISOString() ?? null,
     }];
   });

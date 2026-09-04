@@ -149,3 +149,25 @@ test("a running attempt is never reported as available", () => {
   const source = buildPaidDashboard(value).sources.find((entry) => entry.connectionId === "conn-eur");
   assert.equal(source?.state, "unavailable");
 });
+
+test("source coverage stays bound to the selected reporting range", () => {
+  const value = input();
+  const widerFrom = new Date("2026-06-01T00:00:00.000Z");
+  const widerTo = new Date("2026-07-01T00:00:00.000Z");
+  value.attempts.push({
+    ...value.attempts[0],
+    id: "attempt-newer-wider-range",
+    requestedFrom: widerFrom,
+    requestedTo: widerTo,
+    observedFrom: widerFrom,
+    observedTo: widerTo,
+    startedAt: new Date(NOW.getTime() + 1_000),
+    completedAt: new Date(NOW.getTime() + 1_000),
+  });
+
+  const source = buildPaidDashboard(value).sources.find((entry) => entry.connectionId === "conn-eur");
+  assert.equal(source?.requestedFrom, DAY.toISOString());
+  assert.equal(source?.requestedTo, DAY.toISOString());
+  assert.equal(source?.observedFrom, DAY.toISOString());
+  assert.equal(source?.observedTo, DAY.toISOString());
+});
