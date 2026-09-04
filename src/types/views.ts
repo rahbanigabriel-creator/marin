@@ -7,7 +7,7 @@ import type { ConnectorPlatform } from "@/lib/connectors/types";
 
 export type Mode = "split" | "thread" | "report";
 
-export type ChannelStatus = "connected" | "disconnected" | "error";
+export type ChannelStatus = "connected" | "disconnected" | "error" | "revoked";
 
 export type ProviderRevocationStatus = "confirmed" | "retained" | "failed" | "unavailable";
 

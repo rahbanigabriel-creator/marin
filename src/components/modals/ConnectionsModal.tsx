@@ -38,6 +38,7 @@ const SECTIONS = [
 function connectionStatus(channel: Channel): string {
   if (channel.status === "connected") return channel.displayName ? `Connected - ${channel.displayName}` : "Connected";
   if (channel.status === "error") return "Connection needs attention";
+  if (channel.status === "revoked") return "Connection needs to be reconnected";
   if (channel.connectionAvailability === "planned") return "Publishing connection planned";
   if (channel.configured) return "Ready to connect";
   return "Developer app setup needed";
@@ -221,9 +222,9 @@ export function ConnectionsModal({
               <div className="grid grid-cols-1 gap-[9px] sm:grid-cols-2">
                 {group.map((channel) => {
                   const on = channel.status === "connected";
-                  const errored = channel.status === "error";
+                  const needsAttention = channel.status === "error" || channel.status === "revoked";
                   const planned = channel.connectionAvailability === "planned";
-                  const existingConnection = on || errored;
+                  const existingConnection = Boolean(channel.connectionId);
                   const availableConnector = Boolean(channel.connectorPlatform && channel.configured);
                   const blockedByLimit = limitReached && !existingConnection && availableConnector;
                   const canConnect = canManage && availableConnector && !blockedByLimit;
@@ -256,7 +257,7 @@ export function ConnectionsModal({
                           <div className="font-sans text-[13.5px] font-semibold text-ink-900">{channel.name}</div>
                           <div
                             className="mt-[2px] overflow-hidden text-ellipsis font-sans text-[11px] font-medium leading-[1.35]"
-                            style={{ color: on ? "#5E7B52" : errored ? "#B23A4B" : "#8C8274" }}
+                            style={{ color: on ? "#5E7B52" : needsAttention ? "#B23A4B" : "#8C8274" }}
                           >
                             {blockedByLimit ? "Upgrade to connect another account" : connectionStatus(channel)}
                           </div>
@@ -285,7 +286,7 @@ export function ConnectionsModal({
                           >
                             {!canManage
                               ? "Read only"
-                              : on || errored
+                              : existingConnection
                               ? "Reconnect"
                               : blockedByLimit
                                 ? "Limit reached"
