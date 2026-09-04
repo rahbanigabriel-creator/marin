@@ -154,7 +154,10 @@ function approvalRun(): AgentRunDto {
   });
 }
 
-async function mockApp(page: Page, canManage: boolean) {
+type BillingAccess = "allowed" | "restricted" | "unavailable";
+
+async function mockApp(page: Page, canManage: boolean, initialBillingAccess: BillingAccess = "allowed") {
+  let billingAccess = initialBillingAccess;
   let runs = [approvalRun(), run()];
   const mutations: Array<{ path: string; body: Record<string, unknown> }> = [];
   const paidConnection = {
@@ -172,15 +175,19 @@ async function mockApp(page: Page, canManage: boolean) {
   );
   await page.route(/\/api\/brands(?:\?.*)?$/, (route) => json(route, { brands: [BRAND] }));
   await page.route(/\/api\/conversations(?:\?.*)?$/, (route) => json(route, { conversations: [] }));
-  await page.route(/\/api\/billing(?:\?.*)?$/, (route) =>
-    json(route, {
+  await page.route(/\/api\/billing(?:\?.*)?$/, (route) => {
+    if (billingAccess === "unavailable") {
+      return json(route, { error: "billing_unavailable" }, 503);
+    }
+    return json(route, {
       billing: {
         canManage,
-        entitlements: { canUseOpus: false },
+        plan: { id: billingAccess === "allowed" ? "solo" : "free", name: billingAccess === "allowed" ? "Solo Founder" : "Free" },
+        entitlements: { canUseOpus: false, canExecuteActions: billingAccess === "allowed" },
         resources: { connections: 0 },
       },
-    }),
-  );
+    });
+  });
 
   await page.route(/\/api\/agent-runs(?:\/.*)?(?:\?.*)?$/, async (route) => {
     const request = route.request();
@@ -277,7 +284,10 @@ async function mockApp(page: Page, canManage: boolean) {
     await json(route, { code: "unexpected_request" }, 500);
   });
 
-  return { mutations };
+  return {
+    mutations,
+    setBillingAccess: (access: BillingAccess) => { billingAccess = access; },
+  };
 }
 
 test("owner can inspect, approve, start, and cancel exact bounded runs", async ({ page }) => {
@@ -345,21 +355,21 @@ test("owner can inspect, approve, start, and cancel exact bounded runs", async (
   expect(overflow).toBeLessThanOrEqual(0);
 });
 
-test("owner can start an account-bound one-time paid monitor", async ({ page }) => {
+test("owner can start an account-bound one-time paid health check", async ({ page }) => {
   const harness = await mockApp(page, true);
   await page.goto("/app?mode=agents");
 
-  await page.getByRole("button", { name: "Monitor paid campaigns" }).click();
-  const dialog = page.getByRole("dialog", { name: "Monitor paid campaigns" });
+  await page.getByRole("button", { name: "Paid campaign health check", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Paid campaign health check", exact: true });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText(/One-time, read-only check/)).toBeVisible();
   await expect(dialog.getByLabel("Connected account")).toHaveValue("connection_google_ads");
   await dialog.getByLabel("Recent window").selectOption("7");
-  await dialog.getByLabel("Monitoring goal").fill("Find paid delivery risks for Fitura");
+  await dialog.getByLabel("Health-check goal").fill("Find paid delivery risks for Fitura");
   await dialog.getByRole("button", { name: "Run health check" }).click();
 
   await expect(page.getByRole("heading", { name: "Find paid delivery risks for Fitura" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "One-time paid campaign monitor" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "One-time paid campaign health check" })).toBeVisible();
   await expect(page.getByText(/does not contact providers/)).toBeVisible();
 
   const mutation = harness.mutations.find(
@@ -383,12 +393,89 @@ test("owner can start an account-bound one-time paid monitor", async ({ page }) 
   expect(Math.round((to.getTime() - from.getTime()) / 86_400_000)).toBe(6);
 });
 
+const START_DIALOGS = [
+  { mode: "organic", action: "New organic plan", title: "Start an organic plan", goal: "Goal", submit: "Start plan" },
+  { mode: "paid", action: "Paid campaign health check", title: "Paid campaign health check", goal: "Health-check goal", submit: "Run health check" },
+] as const;
+
+for (const start of START_DIALOGS) {
+  test(`${start.mode} start shows the Free plan restriction before editing or submitting`, async ({ page }) => {
+    const harness = await mockApp(page, true, "restricted");
+    await page.goto("/app?mode=agents");
+    await page.getByRole("button", { name: start.action, exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: start.title, exact: true });
+
+    await expect(dialog.getByRole("status")).toContainText("Your current plan does not include automated agent actions.");
+    await expect(dialog.getByRole("link", { name: "Review plan" })).toHaveAttribute("href", "/settings/billing");
+    await expect(dialog.getByLabel(start.goal, { exact: true })).toBeDisabled();
+    await expect(dialog.getByRole("button", { name: start.submit, exact: true })).toBeDisabled();
+    if (start.mode === "paid") {
+      await expect(dialog.getByLabel("Connected account")).toHaveValue("connection_google_ads");
+      await expect(dialog.getByLabel("Connected account")).toBeDisabled();
+      await expect(dialog.getByLabel("Recent window")).toBeDisabled();
+      await expect(dialog.getByText(/One-time, read-only check/)).toBeVisible();
+      await expect(dialog.getByText(/does not contact ad platforms, change campaigns, or schedule future checks/)).toBeVisible();
+    }
+
+    // Exercise the submit guard independently of the disabled submit button.
+    await dialog.locator("form").dispatchEvent("submit");
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    expect(harness.mutations).toEqual([]);
+
+    harness.setBillingAccess("allowed");
+    await page.getByRole("button", { name: start.action, exact: true }).click();
+    await expect(dialog.getByLabel(start.goal, { exact: true })).toBeEnabled();
+    await expect(dialog.getByRole("button", { name: start.submit, exact: true })).toBeEnabled();
+    await expect(dialog.getByRole("link", { name: "Review plan" })).toHaveCount(0);
+    expect(harness.mutations).toEqual([]);
+  });
+
+  test(`${start.mode} start fails closed when plan access is unavailable and can retry`, async ({ page }) => {
+    const harness = await mockApp(page, true);
+    await page.goto("/app?mode=agents");
+    const action = page.getByRole("button", { name: start.action, exact: true });
+    // Resolve shell permissions first, then fail the dialog's fresh billing read.
+    await expect(action).toBeVisible();
+    harness.setBillingAccess("unavailable");
+    await action.click();
+    const dialog = page.getByRole("dialog", { name: start.title, exact: true });
+
+    await expect(dialog.getByRole("alert")).toContainText("Plan access could not be checked. No run has been started.");
+    await expect(dialog.getByRole("link", { name: "Review plan" })).toHaveCount(0);
+    await expect(dialog.getByLabel(start.goal, { exact: true })).toBeDisabled();
+    await expect(dialog.getByRole("button", { name: start.submit, exact: true })).toBeDisabled();
+    if (start.mode === "paid") {
+      await expect(dialog.getByLabel("Connected account")).toHaveValue("connection_google_ads");
+    }
+    await dialog.locator("form").dispatchEvent("submit");
+    expect(harness.mutations).toEqual([]);
+
+    const failedRetry = page.waitForResponse((response) =>
+      new URL(response.url()).pathname === "/api/billing" && response.status() === 503,
+    );
+    await dialog.getByRole("button", { name: "Try again", exact: true }).click();
+    await failedRetry;
+    await expect(dialog.getByRole("alert")).toContainText("Plan access could not be checked.");
+    await expect(dialog.getByRole("button", { name: start.submit, exact: true })).toBeDisabled();
+    expect(harness.mutations).toEqual([]);
+
+    harness.setBillingAccess("allowed");
+    await dialog.getByRole("button", { name: "Try again", exact: true }).click();
+    await expect(dialog.getByLabel(start.goal, { exact: true })).toBeEnabled();
+    await expect(dialog.getByRole("button", { name: start.submit, exact: true })).toBeEnabled();
+    await expect(dialog.getByRole("alert")).toHaveCount(0);
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    expect(harness.mutations).toEqual([]);
+  });
+}
+
 test("member view exposes history without mutation controls", async ({ page }) => {
   await mockApp(page, false);
   await page.goto("/app?mode=agents");
 
   await expect(page.getByText("Read-only access.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Monitor paid campaigns" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Paid campaign health check", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "New organic plan" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Review and approve" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Reject", exact: true })).toHaveCount(0);

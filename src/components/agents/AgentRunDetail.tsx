@@ -212,7 +212,7 @@ export function AgentRunDetail({
             <LuActivity className="mt-0.5 flex-none text-[#335B72]" aria-hidden />
             <div className="min-w-0">
               <h3 id="paid-monitor-heading" className="font-sans text-[12.5px] font-semibold text-ink-800">
-                One-time paid campaign monitor
+                One-time paid campaign health check
               </h3>
               <p className="mt-1 break-words font-sans text-[12.5px] leading-5 text-ink-500">
                 {formatAgentLabel(paidMonitorTarget.platform)} · {paidMonitorTarget.accountName} · {paidMonitorTarget.from} to {paidMonitorTarget.to}

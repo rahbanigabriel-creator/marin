@@ -173,6 +173,84 @@ function socialSnapshot(input: {
   };
 }
 
+integrationTest("ready drafts can be corrected before handoff and stale schedules cannot be approved", async () => {
+  const id = suffix();
+  const workspace = await prisma.workspace.create({ data: { name: "Schedule correction", slug: `schedule-${id}` } });
+  try {
+    const connection = await prisma.connection.create({ data: {
+      workspaceId: workspace.id, platform: "google_ads", externalAccountId: `ads-${id}`,
+      status: "connected", encAccessToken: "encrypted-test-token",
+    } });
+    const actor = { workspaceId: workspace.id, actorId: "owner-schedule", actorRole: "owner" as const };
+    const created = await createPaidCampaignDraft({ ...actor, body: parseCreatePaidDraftBody({
+      requestId: `create-${id}`, connectionId: connection.id,
+      snapshot: googleSnapshot({ connectionId: connection.id, accountId: connection.externalAccountId }),
+    }) });
+    const readyBody = { expectedVersion: 1, snapshotHash: created.draft.snapshotHash };
+    await assert.rejects(markPaidCampaignDraftReady({ ...actor, draftId: created.draft.id,
+      now: new Date("2026-09-01T07:00:00Z"), body: { ...readyBody, requestId: `past-ready-${id}` },
+    }), (error: unknown) => error instanceof PaidDraftValidationError && error.code === "schedule_in_past");
+    const ready = await markPaidCampaignDraftReady({ ...actor, draftId: created.draft.id,
+      now: new Date("2026-08-21T10:00:00Z"), body: { ...readyBody, requestId: `ready-${id}` },
+    });
+    assert.equal(ready.draft.capabilities.canEdit, true);
+    const approvalBody = { expectedVersion: 2, snapshotHash: ready.draft.snapshotHash, kind: "create_paused" as const };
+    await assert.rejects(approvePaidCampaignDraftOperation({ ...actor, draftId: created.draft.id,
+      now: new Date("2026-09-02T10:00:00Z"), body: { ...approvalBody, requestId: `past-approve-${id}` },
+    }), (error: unknown) => error instanceof PaidDraftValidationError && error.code === "schedule_in_past");
+    const approved = await approvePaidCampaignDraftOperation({ ...actor, draftId: created.draft.id,
+      now: new Date("2026-08-21T10:00:00Z"), body: { ...approvalBody, requestId: `approve-${id}` },
+    });
+    const execution = { operation: "create_paused" as const, approvalId: approved.approval.id,
+      expectedVersion: 2, snapshotHash: ready.draft.snapshotHash };
+    await assert.rejects(executePaidCampaignDraftOperation({ ...actor, draftId: created.draft.id,
+      now: new Date("2026-09-02T10:00:00Z"), body: { ...execution, requestId: `past-execute-${id}` },
+    }), (error: unknown) => error instanceof PaidDraftValidationError && error.code === "schedule_in_past");
+    assert.equal(await prisma.paidCampaignOperationAttempt.count({ where: { draftId: created.draft.id } }), 0);
+    const corrected = await updatePaidCampaignDraft({ ...actor, draftId: created.draft.id, body: {
+      expectedVersion: 2, requestId: `correct-${id}`,
+      snapshot: { ...ready.draft.snapshot, schedule: {
+        startsAt: "2026-10-01T09:00:00+02:00", endsAt: "2026-10-08T09:00:00+02:00", timezone: "Europe/Madrid",
+      } },
+    } });
+    assert.equal(corrected.draft.state, "draft");
+    assert.equal(corrected.draft.readyAt, null);
+    assert.equal(corrected.draft.version, 3);
+    assert.notEqual(corrected.draft.snapshotHash, ready.draft.snapshotHash);
+    assert.equal(corrected.draft.approvals.length, 1);
+    await assert.rejects(executePaidCampaignDraftOperation({ ...actor, draftId: created.draft.id,
+      now: new Date("2026-09-02T10:00:00Z"), body: { ...execution, requestId: `stale-execute-${id}` },
+    }), (error: unknown) => error instanceof PaidDraftConflictError && error.code === "version_conflict");
+    const readyAgain = await markPaidCampaignDraftReady({ ...actor, draftId: created.draft.id,
+      now: new Date("2026-09-02T10:00:00Z"), body: {
+        expectedVersion: 3, snapshotHash: corrected.draft.snapshotHash, requestId: `ready-again-${id}`,
+      },
+    });
+    const approvedAgain = await approvePaidCampaignDraftOperation({ ...actor, draftId: created.draft.id,
+      now: new Date("2026-09-02T10:00:00Z"), body: {
+        expectedVersion: 4, snapshotHash: corrected.draft.snapshotHash, kind: "create_paused", requestId: `approve-again-${id}`,
+      },
+    });
+    await assert.rejects(executePaidCampaignDraftOperation({ ...actor, draftId: created.draft.id,
+      now: new Date("2026-09-02T10:00:00Z"), body: {
+        ...execution, expectedVersion: 4, snapshotHash: readyAgain.draft.snapshotHash, requestId: `stale-approval-current-version-${id}`,
+      },
+    }), (error: unknown) => error instanceof PaidDraftConflictError && error.code === "stale_approval");
+    const handoff = await executePaidCampaignDraftOperation({ ...actor, draftId: created.draft.id,
+      now: new Date("2026-09-02T10:00:00Z"), body: {
+        expectedVersion: 4, snapshotHash: readyAgain.draft.snapshotHash, operation: "create_paused",
+        approvalId: approvedAgain.approval.id, requestId: `handoff-${id}`,
+      },
+    });
+    assert.equal(handoff.draft.capabilities.canEdit, false);
+    await assert.rejects(updatePaidCampaignDraft({ ...actor, draftId: created.draft.id, body: {
+      expectedVersion: handoff.draft.version, requestId: `unsafe-edit-${id}`, snapshot: handoff.draft.snapshot,
+    } }), (error: unknown) => error instanceof PaidDraftConflictError && error.code === "invalid_state");
+  } finally {
+    await prisma.workspace.delete({ where: { id: workspace.id } });
+  }
+});
+
 integrationTest("paid drafts are tenant-safe, replay-safe, approval-bound, and fail closed", async () => {
   const id = suffix();
   const workspace = await prisma.workspace.create({
@@ -650,6 +728,7 @@ integrationTest("paid drafts are tenant-safe, replay-safe, approval-bound, and f
     const providerPaused = confirmedPaused.draft;
     assert.equal(providerPaused.capabilities.canApproveActivation, true);
     const approvedActivation = await approvePaidCampaignDraftOperation({
+      now: new Date("2026-08-21T10:20:00Z"),
       workspaceId: workspace.id,
       draftId: created.draft.id,
       actorId: "owner-1",
@@ -664,6 +743,7 @@ integrationTest("paid drafts are tenant-safe, replay-safe, approval-bound, and f
     assert.notEqual(approvedActivation.approval.id, approvedCreate.approval.id);
     assert.equal(approvedActivation.approval.kind, "activate");
     const assistedActivation = await executePaidCampaignDraftOperation({
+      now: new Date("2026-08-21T10:21:00Z"),
       workspaceId: workspace.id,
       draftId: created.draft.id,
       actorId: "owner-1",
@@ -702,6 +782,7 @@ integrationTest("paid drafts are tenant-safe, replay-safe, approval-bound, and f
     assert.equal(notActivated.draft.attempts.find((attempt) => attempt.id === assistedActivation.attempt.id)?.providerOutcome?.kind, "external_activation_outcome");
 
     const retriedActivation = await approvePaidCampaignDraftOperation({
+      now: new Date("2026-08-21T10:22:00Z"),
       workspaceId: workspace.id,
       draftId: created.draft.id,
       actorId: "owner-1",
@@ -714,6 +795,7 @@ integrationTest("paid drafts are tenant-safe, replay-safe, approval-bound, and f
       }),
     });
     const retriedHandoff = await executePaidCampaignDraftOperation({
+      now: new Date("2026-08-21T10:23:00Z"),
       workspaceId: workspace.id,
       draftId: created.draft.id,
       actorId: "owner-1",

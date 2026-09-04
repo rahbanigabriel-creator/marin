@@ -10,10 +10,12 @@ import { AgentRunDetail } from "./AgentRunDetail";
 import { StartAgentRunDialog, StartPaidMonitorDialog } from "./AgentRunDialogs";
 import {
   AgentRunClientError,
+  type AgentStartAccess,
   type PaidMonitorWindowDays,
   cancelAgentRun,
   decideAgentRunApproval,
   getAgentRun,
+  getAgentStartAccess,
   listAgentRuns,
   listPaidMonitorConnections,
   retryAgentRun,
@@ -128,10 +130,32 @@ export function AgentRunsWorkspace({
   const [paidStartLoading, setPaidStartLoading] = useState(false);
   const [paidStartError, setPaidStartError] = useState<string | null>(null);
   const [paidConnections, setPaidConnections] = useState<PaidMonitorConnectionDto[]>([]);
+  const [startAccess, setStartAccess] = useState<AgentStartAccess>("loading");
+  const [accessAttempt, setAccessAttempt] = useState(0);
   const [busyAction, setBusyAction] = useState<BusyAction | null>(null);
   const actionInFlight = useRef(false);
   const startInFlight = useRef(false);
   const paidStartInFlight = useRef(false);
+
+  useEffect(() => {
+    if ((!startOpen && !paidStartOpen) || !brandId || !canManage) return;
+    const controller = new AbortController();
+    setStartAccess("loading");
+    void getAgentStartAccess(controller.signal).then(
+      (access) => {
+        if (!controller.signal.aborted) setStartAccess(access);
+      },
+      () => {
+        if (!controller.signal.aborted) setStartAccess("unavailable");
+      },
+    );
+    return () => controller.abort();
+  }, [startOpen, paidStartOpen, brandId, canManage, accessAttempt]);
+
+  const retryStartAccess = useCallback(() => {
+    setStartAccess("loading");
+    setAccessAttempt((attempt) => attempt + 1);
+  }, []);
 
   const load = useCallback(
     async (options: { signal?: AbortSignal; polling?: boolean } = {}): Promise<boolean> => {
@@ -241,7 +265,7 @@ export function AgentRunsWorkspace({
 
   const startRun = useCallback(
     async (goal: string) => {
-      if (!brandId || !canManage || startInFlight.current) return;
+      if (!brandId || !canManage || startAccess !== "allowed" || startInFlight.current) return;
       startInFlight.current = true;
       setStartBusy(true);
       setStartError(null);
@@ -258,17 +282,21 @@ export function AgentRunsWorkspace({
               : "The seven-day organic planning run was started.",
         });
       } catch (error) {
+        if (error instanceof AgentRunClientError && error.code === "agent_runs_upgrade_required") {
+          setStartAccess("restricted");
+        }
         setStartError(clientMessage(error));
       } finally {
         startInFlight.current = false;
         setStartBusy(false);
       }
     },
-    [applyReturnedRun, brandId, canManage],
+    [applyReturnedRun, brandId, canManage, startAccess],
   );
 
   const openPaidMonitor = useCallback(async () => {
     if (!brandId || !canManage) return;
+    setStartAccess("loading");
     setPaidStartOpen(true);
     setPaidStartLoading(true);
     setPaidStartError(null);
@@ -288,7 +316,7 @@ export function AgentRunsWorkspace({
       goal: string;
       days: PaidMonitorWindowDays;
     }) => {
-      if (!brandId || !canManage || paidStartInFlight.current) return;
+      if (!brandId || !canManage || startAccess !== "allowed" || paidStartInFlight.current) return;
       paidStartInFlight.current = true;
       setPaidStartBusy(true);
       setPaidStartError(null);
@@ -301,17 +329,20 @@ export function AgentRunsWorkspace({
           tone: "status",
           message:
             run.dispatchStatus === "unavailable"
-              ? "The monitor was saved, but the worker is unavailable. It did not start."
-              : "The one-time paid campaign monitor was started against saved metrics.",
+              ? "The health check was saved, but the worker is unavailable. It did not start."
+              : "The one-time paid campaign health check was started against saved metrics.",
         });
       } catch (error) {
+        if (error instanceof AgentRunClientError && error.code === "agent_runs_upgrade_required") {
+          setStartAccess("restricted");
+        }
         setPaidStartError(clientMessage(error));
       } finally {
         paidStartInFlight.current = false;
         setPaidStartBusy(false);
       }
     },
-    [applyReturnedRun, brandId, canManage],
+    [applyReturnedRun, brandId, canManage, startAccess],
   );
 
   return (
@@ -341,13 +372,14 @@ export function AgentRunsWorkspace({
               className="flex h-9 items-center gap-2 rounded-[8px] border-none bg-plum px-3 font-sans text-[12.5px] font-semibold text-white hover:bg-plum-deep"
             >
               <LuActivity aria-hidden />
-              Monitor paid campaigns
+              Paid campaign health check
             </button>
           )}
           {canManage && brandId && (
             <button
               type="button"
               onClick={() => {
+                setStartAccess("loading");
                 setStartError(null);
                 setStartOpen(true);
               }}
@@ -518,6 +550,8 @@ export function AgentRunsWorkspace({
       </div>
 
       <StartAgentRunDialog
+        access={startAccess}
+        onRetryAccess={retryStartAccess}
         open={startOpen}
         busy={startBusy}
         error={startError}
@@ -530,6 +564,8 @@ export function AgentRunsWorkspace({
         onStart={startRun}
       />
       <StartPaidMonitorDialog
+        access={startAccess}
+        onRetryAccess={retryStartAccess}
         open={paidStartOpen}
         busy={paidStartBusy}
         loading={paidStartLoading}

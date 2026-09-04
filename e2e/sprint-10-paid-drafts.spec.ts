@@ -48,7 +48,7 @@ function capabilities(
   });
   return {
     canManage: true,
-    canEdit: state === "draft",
+    canEdit: state === "draft" || (state === "ready" && !canConfirmProviderPaused),
     canMarkReady: state === "draft",
     canApproveCreatePaused: state === "ready",
     canConfirmProviderPaused,
@@ -162,19 +162,21 @@ async function mockApp(page: Page) {
       await json(route, { draft, replayed: false }, 201);
       return;
     }
-    if (path === "/api/paid/drafts/paid_draft_1" && method === "GET") {
+    if (draft && path === `/api/paid/drafts/${draft.id}` && method === "GET") {
       await json(route, { draft });
       return;
     }
-    if (path === "/api/paid/drafts/paid_draft_1" && method === "PATCH" && draft) {
+    if (draft && path === `/api/paid/drafts/${draft.id}` && method === "PATCH") {
       draft = {
         ...draft,
         snapshot: body.snapshot as PaidCampaignSnapshotV1,
         connection: (body.snapshot as PaidCampaignSnapshotV1).connection,
-        version: 2,
+        version: draft.version + 1,
+        state: "draft",
+        readyAt: null,
+        capabilities: capabilities("draft"),
         snapshotHash: "b".repeat(64),
         updatedAt: "2026-08-21T12:05:00.000Z",
-        approvals: [],
       };
       await json(route, { draft, replayed: false });
       return;
@@ -183,7 +185,7 @@ async function mockApp(page: Page) {
       draft = {
         ...draft,
         state: "ready",
-        version: 3,
+        version: draft.version + 1,
         snapshotHash: "c".repeat(64),
         readyAt: "2026-08-21T12:10:00.000Z",
         updatedAt: "2026-08-21T12:10:00.000Z",
@@ -348,6 +350,32 @@ test("AI entry uses the reviewed shared generation API and returns an editable s
     instruction: "Focus on technical solo founders launching their first product.",
   });
   expect(mock.getDraft()?.source).toBe("ai");
+});
+
+test("ready drafts reopen for corrections and require fresh approval", async ({ page }) => {
+  const mock = await mockApp(page);
+  await page.goto("/app?mode=paid&view=campaigns&paidView=drafts");
+  await page.getByRole("button", { name: "Generate draft", exact: true }).click();
+  await page.getByRole("button", { name: "Generate saved draft" }).click();
+  await expect(page.getByLabel("Campaign name")).toHaveValue("AI founder search draft");
+  await page.getByRole("button", { name: "Mark ready" }).click();
+  await page.getByRole("button", { name: "Approve create paused" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Approve exact snapshot" }).click();
+  await expect(page.getByRole("button", { name: "Prepare assisted handoff" })).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("Review exact snapshot")).toBeVisible();
+  await page.getByRole("button", { name: "Edit draft" }).click();
+  await page.getByLabel("Start date", { exact: true }).fill("2026-09-02");
+  await page.getByLabel("End date", { exact: true }).fill("2026-09-09");
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByRole("status")).toContainText("Draft v3 saved");
+  expect(mock.getDraft()?.state).toBe("draft");
+  expect(mock.getDraft()?.readyAt).toBeNull();
+  await page.getByRole("button", { name: "Mark ready" }).click();
+  await expect(page.getByRole("button", { name: "Approve create paused" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Prepare assisted handoff" })).toHaveCount(0);
+  expect(mock.getDraft()?.version).toBe(4);
+  expect(mock.mutations.filter((entry) => entry.path.endsWith("/operations"))).toHaveLength(0);
 });
 
 test("paid draft workspace remains usable on a narrow viewport", async ({ page }) => {

@@ -4,6 +4,22 @@ import type {
 } from "@/lib/agent-runs/dto";
 import type { AgentApprovalDecision } from "@/lib/agent-runs/types";
 import type { PaidMonitorConnectionDto } from "@/lib/agent-runs/types";
+import type { BillingSnapshotDto } from "@/lib/billing/types";
+
+export type AgentStartAccess = "loading" | "allowed" | "restricted" | "unavailable";
+
+export async function getAgentStartAccess(signal?: AbortSignal): Promise<"allowed" | "restricted"> {
+  const response = await fetch("/api/billing", {
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+    signal,
+  });
+  if (!response.ok) throw new Error("Billing access could not be checked.");
+  const payload = (await response.json()) as { billing?: BillingSnapshotDto } | null;
+  const allowed = payload?.billing?.entitlements?.canExecuteActions;
+  if (typeof allowed !== "boolean") throw new Error("Billing access is unavailable.");
+  return allowed ? "allowed" : "restricted";
+}
 
 interface ApiFailureBody {
   code?: unknown;

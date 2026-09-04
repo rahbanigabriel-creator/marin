@@ -32,6 +32,7 @@ import {
   hashPaidCampaignSnapshotV1,
   hashPaidDraftRequest,
 } from "./hash";
+import { assertPaidScheduleCurrent } from "./schedule";
 import type {
   ApprovePaidDraftBody,
   ConfirmProviderPausedBody,
@@ -696,10 +697,10 @@ export async function updatePaidCampaignDraft(input: {
       const snapshot = serverSnapshot(clientSnapshot, connection, currentSource);
       await verifySnapshotAssets(tx, input.workspaceId, snapshot);
       const snapshotHash = hashPaidCampaignSnapshotV1(snapshot);
-      if (current.state !== "draft") {
+      if (current.state !== "draft" && !(current.state === "ready" && current.attempts.length === 0)) {
         throw new PaidDraftConflictError(
           "invalid_state",
-          "Only draft campaigns can be edited",
+          "Only drafts and ready campaigns with no handoff or execution attempts can be edited",
           current.version,
         );
       }
@@ -720,6 +721,8 @@ export async function updatePaidCampaignDraft(input: {
           template: snapshot.template,
           snapshot: snapshot as unknown as Prisma.InputJsonValue,
           snapshotHash,
+          state: "draft",
+          readyAt: null,
           version: { increment: 1 },
           updatedBy: input.actorId,
         },
@@ -794,6 +797,7 @@ export async function markPaidCampaignDraftReady(input: {
       assertVersion(current, input.body.expectedVersion, input.body.snapshotHash);
       const snapshot = parsePaidCampaignSnapshotV1(current.snapshot);
       await verifySnapshotAssets(tx, input.workspaceId, snapshot);
+      assertPaidScheduleCurrent(snapshot.schedule, input.now ?? new Date());
       const state = transitionPaidDraftState(current.state as PaidDraftState, "ready");
       const updated = await tx.paidCampaignDraft.update({
         where: { id: current.id },
@@ -1206,6 +1210,11 @@ export async function approvePaidCampaignDraftOperation(input: {
         if (!approval) throw new PaidDraftUnavailableError("approval_missing", "Approval could not be loaded");
         return { draft, approval, replayed: true };
       }
+      assertPaidScheduleCurrent(
+        parsePaidCampaignSnapshotV1(current.snapshot).schedule,
+        input.now ?? new Date(),
+        input.body.kind === "create_paused",
+      );
       const approval = await tx.paidCampaignApproval.create({
         data: {
           workspaceId: input.workspaceId,
@@ -1354,6 +1363,12 @@ export async function executePaidCampaignDraftOperation(input: {
         binding,
       );
       if (!decision.allowed) throw denialConflict(decision.reason, current.version);
+
+      assertPaidScheduleCurrent(
+        parsePaidCampaignSnapshotV1(current.snapshot).schedule,
+        input.now ?? new Date(),
+        input.body.operation === "create_paused",
+      );
 
       const access = serverOwnedPaidConnectionWriteAccess({
         platform: paidPlatform(connection.platform),

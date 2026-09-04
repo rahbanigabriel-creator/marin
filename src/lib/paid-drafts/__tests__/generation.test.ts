@@ -86,9 +86,9 @@ function googleModelOutput(overrides: Record<string, unknown> = {}): string {
     campaign: { name: "Founder search", objective: "traffic" },
     budget: { amountMinor: 2_500, currency: "EUR", cadence: "daily" },
     schedule: {
-      startsAt: "2026-09-01T09:00:00Z",
-      endsAt: "2026-09-30T09:00:00Z",
-      timezone: "UTC",
+      startsDate: "2026-09-01",
+      startsTime: "09:00",
+      durationDays: 29,
     },
     adGroups: [
       {
@@ -135,9 +135,9 @@ function metaModelOutput(assetId = META_IMAGE.id, format: "image" | "video" = "i
     campaign: { name: "Founder traffic", objective: "traffic" },
     budget: { amountMinor: 2_500, currency: "EUR", cadence: "daily" },
     schedule: {
-      startsAt: "2026-09-01T09:00:00Z",
-      endsAt: "2026-09-30T09:00:00Z",
-      timezone: "UTC",
+      startsDate: "2026-09-01",
+      startsTime: "09:00",
+      durationDays: 29,
     },
     adGroups: [
       {
@@ -367,6 +367,40 @@ test("Meta generation accepts one owned asset with a matching type", async () =>
   );
   assert.equal(result.draft.platform, "meta_ads");
   assert.deepEqual(result.draft.snapshot.adGroups[0]?.ads[0]?.assetIds, [META_IMAGE.id]);
+  assert.equal(result.draft.snapshot.schedule.endsAt, "2026-09-30T09:00:00+00:00");
+});
+
+test("past AI starts never persist and release their reservation", async () => {
+  for (const startsTime of ["11:59", "12:00"]) {
+    let released = 0;
+    let persisted = 0;
+    await assert.rejects(
+      generatePaidCampaignDraft(
+        { workspaceId: "workspace_001", actorId: "user_001", actorRole: "owner", body: BODY, now: NOW },
+        baseDependencies({
+          generateModelJson: async () => googleModelOutput({
+            schedule: { startsDate: "2026-08-21", startsTime, durationDays: 7 },
+          }),
+          createDraft: async () => { persisted++; throw new Error("must not persist"); },
+          releaseUsage: async () => { released++; return true; },
+        }),
+      ),
+      (error: unknown) => error instanceof PaidDraftUnavailableError && error.code === "invalid_generated_schedule",
+    );
+    assert.equal(persisted, 0);
+    assert.equal(released, 1);
+  }
+});
+
+test("generation includes a future local schedule and leaves no date arithmetic to the model", () => {
+  const request = buildPaidDraftGenerationModelRequest({
+    brand: BRAND, assets: [], platform: "google_ads", template: "google_search_rsa",
+    instruction: "Run for one week", currency: "EUR", timezone: "Europe/Madrid",
+    now: new Date("2026-09-04T22:30:00Z"),
+  });
+  assert.match(request.user, /"startsDate":"2026-09-06","startsTime":"09:00","durationDays":7/);
+  const schema = (request.inputSchema.properties as Record<string, { properties: Record<string, unknown> }>).schedule;
+  assert.deepEqual(Object.keys(schema.properties), ["startsDate", "startsTime", "durationDays"]);
 });
 
 test("unowned or type-mismatched model asset references fail closed and release usage", async () => {

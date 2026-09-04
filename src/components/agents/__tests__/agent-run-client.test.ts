@@ -8,12 +8,54 @@ import {
   buildApprovalDecisionPayload,
   buildOrganicRunPayload,
   buildPaidMonitorRunPayload,
+  getAgentStartAccess,
   newAgentRequestId,
   recentPaidMonitorWindow,
 } from "../agent-run-client";
 
 const REQUEST_ID = "123e4567-e89b-12d3-a456-426614174000";
 const HASH = "0123456789abcdef".repeat(4);
+
+test("start access uses the server entitlement, not the plan name or remaining credits", async (t) => {
+  const controller = new AbortController();
+  let body: unknown = {
+    billing: { plan: { id: "free" }, usage: { remaining: 0 }, entitlements: { canExecuteActions: true } },
+  };
+  const fetchMock = t.mock.method(globalThis, "fetch", async (url: string, init: RequestInit) => {
+    assert.equal(url, "/api/billing");
+    assert.equal(init.cache, "no-store");
+    assert.equal(init.signal, controller.signal);
+    assert.equal(init.method, undefined);
+    return Response.json(body);
+  });
+  assert.equal(await getAgentStartAccess(controller.signal), "allowed");
+  body = {
+    billing: { plan: { id: "solo" }, usage: { remaining: 120 }, entitlements: { canExecuteActions: false } },
+  };
+  assert.equal(await getAgentStartAccess(controller.signal), "restricted");
+  assert.equal(fetchMock.mock.callCount(), 2);
+});
+
+test("start access fails closed on missing or malformed entitlement responses", async (t) => {
+  let body: unknown;
+  t.mock.method(globalThis, "fetch", async () => Response.json(body));
+  for (const invalid of [null, {}, { billing: {} }, { billing: { entitlements: {} } },
+    { billing: { entitlements: { canExecuteActions: "true" } } }]) {
+    body = invalid;
+    await assert.rejects(getAgentStartAccess(), /Billing access is unavailable/);
+  }
+});
+
+test("start access does not treat HTTP, network, or JSON errors as permission", async (t) => {
+  const fetchMock = t.mock.method(globalThis, "fetch", async (): Promise<Response> =>
+    Response.json({ billing: { entitlements: { canExecuteActions: true } } }, { status: 503 }),
+  );
+  await assert.rejects(getAgentStartAccess(), /could not be checked/);
+  fetchMock.mock.mockImplementation(async () => { throw new TypeError("offline"); });
+  await assert.rejects(getAgentStartAccess(), /offline/);
+  fetchMock.mock.mockImplementation(async () => new Response("not json"));
+  await assert.rejects(getAgentStartAccess(), SyntaxError);
+});
 
 function step(): AgentRunStepDto {
   return {

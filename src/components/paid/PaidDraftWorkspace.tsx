@@ -119,7 +119,7 @@ export function PaidDraftWorkspace({
     const nextForm = formFromPaidDraft(draft.snapshot);
     setSelectedId(draft.id);
     setCreating(false);
-    setEditing(draft.capabilities.canEdit);
+    setEditing(draft.state === "draft" && draft.capabilities.canEdit);
     setForm(nextForm);
     setBaseline(paidDraftFormFingerprint(nextForm));
     setIssues([]);

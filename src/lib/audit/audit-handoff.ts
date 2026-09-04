@@ -382,10 +382,12 @@ async function consumeAuditHandoffIntoWorkspace(input: {
 
   return prisma.$transaction(async (tx) => {
     await tx.auditHandoff.deleteMany({ where: { expiresAt: { lte: input.now } } });
+    // Prisma binds Dates as timestamptz; expires_at stores UTC without a zone.
     const locked = await tx.$queryRaw<Array<{ id: string }>>`
       SELECT "id"
       FROM "audit_handoffs"
-      WHERE "token_hash" = ${tokenHash} AND "expires_at" > ${input.now}
+      WHERE "token_hash" = ${tokenHash}
+        AND "expires_at" > (${input.now}::timestamptz AT TIME ZONE 'UTC')
       FOR UPDATE
     `;
     const id = locked[0]?.id;

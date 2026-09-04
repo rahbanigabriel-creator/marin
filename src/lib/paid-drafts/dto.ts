@@ -245,7 +245,7 @@ export function toPaidCampaignDraftDto(input: {
     updatedAt: input.row.updatedAt.toISOString(),
     capabilities: {
       canManage: manager,
-      canEdit: manager && state === "draft",
+      canEdit: manager && (state === "draft" || (state === "ready" && input.row.attempts.length === 0)),
       canMarkReady: manager && state === "draft",
       canApproveCreatePaused: manager && state === "ready",
       canConfirmProviderPaused:

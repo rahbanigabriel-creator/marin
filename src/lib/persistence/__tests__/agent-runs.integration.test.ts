@@ -41,6 +41,8 @@ function suffix(): string {
 integrationTest("agent runs are tenant-safe, bounded, replay-safe, and approval-bound", async () => {
   const id = suffix();
   const now = new Date("2026-08-21T12:00:00.000Z");
+  // Entitlements use wall-clock time, independently of the injected workflow clock.
+  const billingNow = Date.now();
   const workspace = await prisma.workspace.create({
     data: { name: "Agent runs", slug: `agent-runs-${id}`, timezone: "Europe/Madrid" },
   });
@@ -52,8 +54,8 @@ integrationTest("agent runs are tenant-safe, bounded, replay-safe, and approval-
       workspaceId: workspace.id,
       plan: "solo",
       status: "active",
-      currentPeriodStart: new Date("2026-08-01T00:00:00.000Z"),
-      currentPeriodEnd: new Date("2026-09-01T00:00:00.000Z"),
+      currentPeriodStart: new Date(billingNow - 24 * 60 * 60 * 1_000),
+      currentPeriodEnd: new Date(billingNow + 30 * 24 * 60 * 60 * 1_000),
     },
   });
   const owner = await prisma.membership.create({

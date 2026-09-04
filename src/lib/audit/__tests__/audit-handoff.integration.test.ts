@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 import test from "node:test";
+import type { Prisma } from "@prisma/client";
 
 import {
   AUDIT_HANDOFF_TTL_MS,
@@ -235,3 +236,46 @@ integrationTest("concurrent consumers can reuse one handoff only once", async ()
     await cleanup(prefix);
   }
 });
+
+for (const timezone of ["UTC", "Europe/Madrid", "America/New_York"]) {
+  integrationTest(`handoff expiry is independent of database timezone (${timezone})`, async (t) => {
+    const originalTransaction = prisma.$transaction;
+    const transaction = prisma.$transaction.bind(prisma);
+    // Set the zone on each actual transaction connection, not an arbitrary pool connection.
+    prisma.$transaction = (async <T>(callback: (tx: Prisma.TransactionClient) => Promise<T>) =>
+      transaction(async (tx) => {
+        await tx.$queryRaw`SELECT set_config('TimeZone', ${timezone}, true)`;
+        return callback(tx);
+      })) as typeof prisma.$transaction;
+    t.after(() => { prisma.$transaction = originalTransaction; });
+    const prefix = `audit-zone-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const finalUrl = `https://${prefix}.example.com/`;
+    const now = new Date("2026-08-21T12:00:00.000Z");
+    try {
+      const targetWorkspace = await workspace(`${prefix}-target`);
+      let crawlCalls = 0;
+      for (const elapsed of [AUDIT_HANDOFF_TTL_MS - 1, AUDIT_HANDOFF_TTL_MS, AUDIT_HANDOFF_TTL_MS + 1]) {
+        const rawToken = token();
+        await issueAuditHandoff(audit(finalUrl), {
+          now: () => now,
+          createToken: () => rawToken,
+        });
+        const persisted = await persistWorkspaceAudit(
+          { workspaceId: targetWorkspace.id, requestedUrl: finalUrl, token: rawToken },
+          {
+            now: () => new Date(now.getTime() + elapsed),
+            crawl: async () => {
+              crawlCalls += 1;
+              return audit(finalUrl, "Expired handoff recrawl");
+            },
+          },
+        );
+        assert.equal(persisted.source, elapsed < AUDIT_HANDOFF_TTL_MS ? "handoff" : "crawl");
+        assert.equal(await prisma.auditHandoff.count({ where: { finalUrl } }), 0);
+      }
+      assert.equal(crawlCalls, 2);
+    } finally {
+      await cleanup(prefix);
+    }
+  });
+}

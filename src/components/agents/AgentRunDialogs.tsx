@@ -11,6 +11,7 @@ import type {
 
 import {
   PAID_MONITOR_WINDOW_DAYS,
+  type AgentStartAccess,
   type PaidMonitorWindowDays,
 } from "./agent-run-client";
 import { formatAgentLabel, shortHashSuffix } from "./agent-run-policy";
@@ -18,7 +19,31 @@ import { formatAgentLabel, shortHashSuffix } from "./agent-run-policy";
 const DEFAULT_GOAL =
   "Create a practical seven-day organic content plan for my brand, ready for review and scheduling.";
 
-interface StartAgentRunDialogProps {
+interface StartAccessProps {
+  access: AgentStartAccess;
+  onRetryAccess: () => void;
+}
+
+function StartAccessNotice({ access, onRetryAccess }: StartAccessProps) {
+  if (access === "allowed") return null;
+  return (
+    <div role={access === "unavailable" ? "alert" : "status"} className="mb-4 border-l-2 border-[#C79A20] pl-3 font-sans text-[13px] leading-5 text-ink-700">
+      {access === "loading" ? "Checking plan access..." : access === "restricted" ? (
+        <>
+          Your current plan does not include automated agent actions. Organic planning agents and one-time paid campaign health checks require a plan with agent actions.
+          {" "}<a href="/settings/billing" className="font-semibold underline underline-offset-2">Review plan</a>
+        </>
+      ) : (
+        <>
+          Plan access could not be checked. No run has been started.
+          {" "}<button type="button" onClick={onRetryAccess} className="font-semibold underline underline-offset-2">Try again</button>
+        </>
+      )}
+    </div>
+  );
+}
+
+interface StartAgentRunDialogProps extends StartAccessProps {
   open: boolean;
   busy: boolean;
   error: string | null;
@@ -27,6 +52,8 @@ interface StartAgentRunDialogProps {
 }
 
 export function StartAgentRunDialog({
+  access,
+  onRetryAccess,
   open,
   busy,
   error,
@@ -66,7 +93,7 @@ export function StartAgentRunDialog({
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          if (!busy && goal.trim()) void onStart(goal.trim());
+          if (access === "allowed" && !busy && goal.trim()) void onStart(goal.trim());
         }}
       >
         <div className="flex items-start justify-between border-b border-line-3 px-5 py-4">
@@ -91,6 +118,7 @@ export function StartAgentRunDialog({
         </div>
 
         <div className="px-5 py-5">
+          <StartAccessNotice access={access} onRetryAccess={onRetryAccess} />
           <label htmlFor={`${titleId}-goal`} className="font-sans text-[13px] font-semibold text-ink-800">
             Goal
           </label>
@@ -101,7 +129,7 @@ export function StartAgentRunDialog({
             maxLength={4_000}
             rows={6}
             autoFocus
-            disabled={busy}
+            disabled={busy || access !== "allowed"}
             className="mt-2 w-full resize-y rounded-[8px] border border-line-2 bg-white px-3 py-3 font-sans text-[14px] leading-6 text-ink-900 outline-none focus:border-plum focus:ring-2 focus:ring-plum-soft disabled:opacity-60"
           />
           <div className="mt-1 text-right font-mono text-[10px] text-ink-300">
@@ -125,7 +153,7 @@ export function StartAgentRunDialog({
           </button>
           <button
             type="submit"
-            disabled={busy || goal.trim().length === 0}
+            disabled={busy || access !== "allowed" || goal.trim().length === 0}
             className="h-10 rounded-[8px] border-none bg-plum px-4 font-sans text-[13px] font-semibold text-white hover:bg-plum-deep disabled:cursor-not-allowed disabled:opacity-50"
           >
             {busy ? "Starting..." : "Start plan"}
@@ -139,7 +167,7 @@ export function StartAgentRunDialog({
 const DEFAULT_PAID_MONITOR_GOAL =
   "Review recent paid campaign health, flag material risks, and identify evidence-backed optimization opportunities.";
 
-interface StartPaidMonitorDialogProps {
+interface StartPaidMonitorDialogProps extends StartAccessProps {
   open: boolean;
   busy: boolean;
   loading: boolean;
@@ -172,6 +200,8 @@ function paidSyncLabel(value: string | null): string {
 }
 
 export function StartPaidMonitorDialog({
+  access,
+  onRetryAccess,
   open,
   busy,
   loading,
@@ -225,7 +255,7 @@ export function StartPaidMonitorDialog({
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          if (!busy && connectionId && goal.trim()) {
+          if (access === "allowed" && !busy && !loading && connectionId && goal.trim()) {
             void onStart({ connectionId, goal: goal.trim(), days });
           }
         }}
@@ -237,7 +267,7 @@ export function StartPaidMonitorDialog({
             </span>
             <div>
               <h2 id={titleId} className="font-sans text-[18px] font-semibold tracking-[0]">
-                Monitor paid campaigns
+                Paid campaign health check
               </h2>
               <p id={descriptionId} className="mt-1 font-sans text-[13px] leading-5 text-ink-400">
                 Run one evidence-backed health check against saved Google Ads or Meta Ads data.
@@ -257,6 +287,7 @@ export function StartPaidMonitorDialog({
         </div>
 
         <div className="space-y-5 px-5 py-5">
+          <StartAccessNotice access={access} onRetryAccess={onRetryAccess} />
           <p className="border-l-2 border-[#4A7C96] pl-3 font-sans text-[12.5px] leading-5 text-ink-500">
             One-time, read-only check. Marpin reads persisted metrics only; it does not contact ad platforms, change campaigns, or schedule future checks.
           </p>
@@ -270,7 +301,7 @@ export function StartPaidMonitorDialog({
                 id={`${titleId}-account`}
                 value={connectionId}
                 onChange={(event) => setConnectionId(event.target.value)}
-                disabled={busy || loading || connections.length === 0}
+                disabled={busy || access !== "allowed" || loading || connections.length === 0}
                 className="mt-2 h-11 w-full rounded-[8px] border border-line-2 bg-white px-3 font-sans text-[13px] text-ink-800 outline-none focus:border-plum focus:ring-2 focus:ring-plum-soft disabled:opacity-60"
               >
                 {loading && <option value="">Loading accounts...</option>}
@@ -301,7 +332,7 @@ export function StartPaidMonitorDialog({
                     setDays(next as PaidMonitorWindowDays);
                   }
                 }}
-                disabled={busy}
+                disabled={busy || access !== "allowed"}
                 className="mt-2 h-11 w-full rounded-[8px] border border-line-2 bg-white px-3 font-sans text-[13px] text-ink-800 outline-none focus:border-plum focus:ring-2 focus:ring-plum-soft disabled:opacity-60"
               >
                 {PAID_MONITOR_WINDOW_DAYS.map((option) => (
@@ -313,7 +344,7 @@ export function StartPaidMonitorDialog({
 
           <div>
             <label htmlFor={`${titleId}-goal`} className="font-sans text-[13px] font-semibold text-ink-800">
-              Monitoring goal
+              Health-check goal
             </label>
             <textarea
               id={`${titleId}-goal`}
@@ -321,14 +352,14 @@ export function StartPaidMonitorDialog({
               onChange={(event) => setGoal(event.target.value)}
               maxLength={4_000}
               rows={4}
-              disabled={busy}
+              disabled={busy || access !== "allowed"}
               className="mt-2 w-full resize-y rounded-[8px] border border-line-2 bg-white px-3 py-3 font-sans text-[14px] leading-6 text-ink-900 outline-none focus:border-plum focus:ring-2 focus:ring-plum-soft disabled:opacity-60"
             />
           </div>
 
-          {!loading && connections.length === 0 && !error && (
+          {access === "allowed" && !loading && connections.length === 0 && !error && (
             <p role="status" className="rounded-[8px] bg-[#FFF8E6] px-3 py-2 font-sans text-[12.5px] text-[#725510]">
-              Connect and sync Google Ads or Meta Ads in Paid accounts before starting a monitor.
+              Connect and sync Google Ads or Meta Ads in Paid accounts before running a health check.
             </p>
           )}
           {error && (
@@ -349,7 +380,7 @@ export function StartPaidMonitorDialog({
           </button>
           <button
             type="submit"
-            disabled={busy || loading || !connectionId || goal.trim().length === 0}
+            disabled={busy || access !== "allowed" || loading || !connectionId || goal.trim().length === 0}
             className="h-10 rounded-[8px] border-none bg-plum px-4 font-sans text-[13px] font-semibold text-white hover:bg-plum-deep disabled:cursor-not-allowed disabled:opacity-50"
           >
             {busy ? "Starting..." : "Run health check"}

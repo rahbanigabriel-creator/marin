@@ -60,9 +60,9 @@ export function paidDraftGenerationSchema(template: PaidLaunchTemplate): Tool.In
         cadence: choice("daily", "lifetime"),
       }),
       schedule: object({
-        startsAt: { ...text(40), description: "ISO timestamp with seconds and the UTC offset for the required timezone on this date." },
-        endsAt: { ...text(40), description: "ISO timestamp after startsAt, within 366 days, with the timezone's UTC offset." },
-        timezone: text(100),
+        startsDate: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$", description: "Future local date in requiredTimezone, YYYY-MM-DD. Use suggestedSchedule unless a different future date was requested." },
+        startsTime: { type: "string", pattern: "^([01]\\d|2[0-3]):[0-5]\\d$", description: "Local start time in requiredTimezone, HH:mm." },
+        durationDays: { type: "integer", minimum: 1, maximum: 365, description: "Requested number of calendar days; one week is 7. Default 7. Server calculates the end at the same local time, including DST." },
       }),
       adGroups: list(object({ localId: identifier, name: text(128), targeting, ads: list(ad, 1, 20) }), 1, 20),
       assumptions: list(text(500), 0, 12),
