@@ -82,7 +82,7 @@ requires inspection in Meta and must never trigger a blind retry.
 - [x] Integrated browser tests and desktop/mobile screenshots.
 - [x] Apply additive migration 20260905000000_meta_paused_execution to production.
 - [x] Apply earlier pending check expansion 20260822002000_add_paid_external_activation_outcomes.
-- [ ] Deploy and smoke-test the production editor and read-only access check.
+- [x] Deploy and smoke-test the production editor and read-only access check.
 - [ ] Owner approves additional Meta permissions and selects the correct Page.
 - [ ] Owner approves one exact test snapshot for real paused creation.
 - [ ] Workspace has a valid execution entitlement; no free-plan bypass for testing.
@@ -105,6 +105,27 @@ are separate release gates and are not completed by this sprint.
 - 16 browser journeys passed: new Meta flow, legacy paid drafts, paid reporting,
   read-only members, image rendering and 1280px/390px layouts. External providers
   were mocked; this is not a real-account creation result.
+
+## Production Handoff (2026-09-05)
+
+Implementation commit `9e97e5d` was pushed to `backend`. Vercel deployment
+`dpl_A3f89uBALzHrrzC8VLcEz5cNQ6kv` reached READY and was aliased to
+`https://www.marpin.ai`.
+
+The signed-in Fitura workspace loaded the new editor and its existing private
+512x512 image successfully. The read-only Meta permission check completed with
+EUR / Europe/Madrid, but reported incomplete publishing/account access and an
+incomplete Page list. It did not establish permission to create campaigns.
+
+No production draft was saved or approved, no OAuth scope was granted, and no
+Meta object was created, activated or deleted. The temporary UI opt-in used for
+the permission check was discarded by reloading; the saved QA draft remains
+unchanged and explicitly marked do not launch.
+
+Next: the owner grants the optional publishing scopes, selects a Page, and
+reviews a separate future-dated test draft under a valid execution entitlement.
+The real paused-creation acceptance gate is still open. Google creation remains
+assisted; direct activation and existing campaign budget updates are not shipped.
 
 ## Primary References
 
