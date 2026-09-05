@@ -9,6 +9,7 @@ import { DateRangePicker } from "@/components/dashboard/DateRangePicker";
 import { ColumnChooser } from "@/components/dashboard/ColumnChooser";
 import { CampaignsTable } from "@/components/dashboard/CampaignsTable";
 import { DrillDownPanel } from "@/components/dashboard/DrillDownPanel";
+import { PaidOverview } from "@/components/dashboard/PaidOverview";
 import { PaidDraftWorkspace } from "@/components/paid/PaidDraftWorkspace";
 import {
   COLUMNS,
@@ -482,6 +483,11 @@ export function CampaignsScreen({
     return matching.map((campaign) => campaignWithIntegrityLabel(campaign, data.sources, data.state));
   }, [sourceScopedCampaigns, search, data.sources, data.state]);
 
+  const overviewCampaigns = useMemo(
+    () => sourceScopedCampaigns.map((campaign) => campaignWithIntegrityLabel(campaign, data.sources, data.state)),
+    [sourceScopedCampaigns, data.sources, data.state],
+  );
+
   const cachedViewCampaigns = useMemo(
     () => sourceScopedCampaigns
       .map((campaign) => campaignWithIntegrityLabel(campaign, data.sources, data.state))
@@ -575,11 +581,12 @@ export function CampaignsScreen({
 
   return (
     <section className="min-h-0 min-w-0 w-full max-w-full flex-1 overflow-y-auto overflow-x-hidden bg-surface-page p-[14px] sm:p-[20px] lg:p-[24px]">
-      <div className="mx-auto w-full min-w-0 max-w-[1180px]">
-        <div className="mb-[8px] flex flex-wrap items-start justify-between gap-[10px]">
+      <div className="mx-auto w-full min-w-0 max-w-[1240px]">
+        <div className="mb-[14px] flex flex-wrap items-start justify-between gap-[14px]">
           <div>
-            <h1 className="font-serif text-[24px] font-medium text-ink-900">Paid command center</h1>
-            <p className="mt-[2px] font-sans text-[12.5px] text-ink-400">Google Ads and Meta Ads across every connected account.</p>
+            <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-plum">Paid campaigns</p>
+            <h1 className="mt-[4px] font-serif text-[28px] font-medium leading-none text-ink-900 sm:text-[32px]">Paid command center</h1>
+            <p className="mt-[6px] font-sans text-[12.5px] text-ink-400">A visual view of connected Google Ads and Meta Ads accounts.</p>
             {!canManage && !accessLoading ? (
               <p className="mt-[4px] font-sans text-[11.5px] text-ink-400">
                 Read-only access: you can view and filter saved data; only workspace owners and admins can sync ad accounts.
@@ -591,7 +598,7 @@ export function CampaignsScreen({
             <button
               type="button"
               onClick={() => showWorkspaceView("drafts")}
-              className="inline-flex cursor-pointer items-center gap-[6px] rounded-[8px] border border-line-3 bg-white px-[12px] py-[7px] font-sans text-[12.5px] font-semibold text-ink-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-plum"
+              className="inline-flex cursor-pointer items-center gap-[6px] rounded-[8px] border border-plum-border bg-plum-soft px-[12px] py-[7px] font-sans text-[12.5px] font-semibold text-plum-deep focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-plum"
             >
               <LuFileText aria-hidden /> Campaign drafts
             </button>
@@ -606,11 +613,10 @@ export function CampaignsScreen({
           </div>
         </div>
 
-        <div className="mb-[14px] flex flex-wrap items-center justify-between gap-[10px] border-b border-line-3 pb-[12px]">
-          <div className="font-mono text-[10.5px] text-ink-300">
-            <span>Requested {coverageLabel(data.range.from || range.from, data.range.to || range.to, coverageTimezone(data.sources))}</span>
-            <span className="mx-[6px]" aria-hidden>·</span>
-            <span>Observed {coverageLabel(data.observedFrom, data.observedTo, coverageTimezone(data.sources))}</span>
+        <div className="mb-[16px] flex flex-wrap items-center justify-between gap-[10px] rounded-[8px] border border-line-3 bg-surface-card px-[12px] py-[10px] sm:px-[14px]">
+          <div className="min-w-0 font-mono text-[10.5px] text-ink-300">
+            <span className="block">Requested {coverageLabel(data.range.from || range.from, data.range.to || range.to, coverageTimezone(data.sources))}</span>
+            <span className="mt-[2px] block text-ink-400">Observed {coverageLabel(data.observedFrom, data.observedTo, coverageTimezone(data.sources))}</span>
           </div>
           <DateRangePicker range={data.range.days > 0 ? data.range : { ...range, days: 0 }} disabled={loading} onChange={(from, to) => setRange({ from, to })} />
         </div>
@@ -728,6 +734,20 @@ export function CampaignsScreen({
                 {currencySafetyLabel(viewData)} Money totals, blended ROAS, and cross-currency spend bars are unavailable; row values remain in each known source currency.
               </div>
             ) : null}
+
+            <div
+              className="mb-[18px]"
+              role="group"
+              aria-label={hasCachedPerformance ? "Cached paid campaign overview" : "Paid campaign overview"}
+              aria-describedby={hasCachedPerformance ? "paid-cached-performance-notice" : undefined}
+            >
+              <PaidOverview
+                data={viewData}
+                campaigns={overviewCampaigns}
+                onSelectCampaign={(campaign) => setSelectedKey(campaign.identity)}
+                onOpenDrafts={() => showWorkspaceView("drafts")}
+              />
+            </div>
 
             <div
               className="mb-[16px]"

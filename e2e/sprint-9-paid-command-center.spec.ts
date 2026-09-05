@@ -281,7 +281,13 @@ test("keeps duplicate campaign names distinct and reports paid data truthfully",
   await page.goto("/app?mode=paid&view=campaigns");
 
   await expect(page.getByRole("heading", { name: "Paid command center" })).toBeVisible();
-  await expect(page.getByText("Always On", { exact: true })).toHaveCount(2);
+  await expect(page.getByTestId("paid-overview")).toBeVisible();
+  await expect(page.getByText("Performance snapshot", { exact: true })).toBeVisible();
+  await expect(page.getByText("Campaign posture", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "2 active · 1 paused" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Highest observed spend" })).toBeVisible();
+  await expect(page.getByTestId("paid-campaign-focus-grid").getByRole("button")).toHaveCount(3);
+  await expect(page.getByTestId("campaign-table-scroll").getByText("Always On", { exact: true })).toHaveCount(2);
   await expect(page.getByRole("row", { name: "Open Always On for US Store" })).toHaveCount(1);
   await expect(page.getByRole("row", { name: "Open Always On for EU Store" })).toHaveCount(1);
   await expect(page.getByRole("row", { name: "Open Currency Check for Currency Pending" })).toHaveCount(1);
@@ -291,6 +297,10 @@ test("keeps duplicate campaign names distinct and reports paid data truthfully",
   await expect(page.getByText(/Requested Aug 1 – Aug 20 \(multiple source timezones\)/)).toBeVisible();
   await expect(page.getByText(/Observed Aug 1 – Aug 20 \(multiple source timezones\)/)).toBeVisible();
   await expectContainedLayout(page);
+
+  await page.getByTestId("paid-campaign-focus-grid").getByRole("button", { name: "Open details for Always On" }).first().click();
+  await expect(page.getByRole("dialog", { name: "Always On" })).toBeVisible();
+  await page.keyboard.press("Escape");
 
   const usRow = page.getByRole("row", { name: "Open Always On for US Store" });
   const euRow = page.getByRole("row", { name: "Open Always On for EU Store" });
@@ -347,6 +357,8 @@ test("paid command center stays contained on a mobile viewport", async ({ page }
   await page.goto("/app?mode=paid&view=campaigns");
 
   await expect(page.getByRole("heading", { name: "Paid command center" })).toBeVisible();
+  await expect(page.getByTestId("paid-overview")).toBeVisible();
+  await expect(page.getByTestId("paid-campaign-focus-grid")).toBeVisible();
   await expect(page.getByRole("button", { name: /US Store/ })).toBeVisible();
   const layout = await page.evaluate(() => ({
     viewport: window.innerWidth,
