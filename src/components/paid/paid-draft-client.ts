@@ -18,6 +18,7 @@ interface ApiFailure {
   message?: string;
   path?: string;
   currentVersion?: number;
+  actionUrl?: string;
 }
 
 export class PaidDraftRequestError extends Error {
@@ -27,6 +28,7 @@ export class PaidDraftRequestError extends Error {
     readonly code?: string,
     readonly path?: string,
     readonly currentVersion?: number,
+    readonly actionUrl?: "/settings/billing",
   ) {
     super(message);
     this.name = "PaidDraftRequestError";
@@ -42,6 +44,7 @@ async function responseJson<T>(response: Response): Promise<T> {
       payload.code ?? payload.error,
       payload.path,
       payload.currentVersion,
+      payload.actionUrl === "/settings/billing" ? "/settings/billing" : undefined,
     );
   }
   return payload;
@@ -81,6 +84,25 @@ export async function loadPaidDraft(id: string): Promise<PaidCampaignDraftDto> {
   const payload = await fetch(`/api/paid/drafts/${encodeURIComponent(id)}`, { cache: "no-store" })
     .then((response) => responseJson<{ draft: PaidCampaignDraftDto }>(response));
   return payload.draft;
+}
+
+export interface MetaDraftReadiness {
+  ready: true;
+  version: number;
+  snapshotHash: string;
+  checkedAt: string;
+}
+
+export async function checkMetaDraftReadiness(id: string): Promise<MetaDraftReadiness> {
+  return fetch(`/api/paid/drafts/${encodeURIComponent(id)}/meta-check`, {
+    method: "POST", credentials: "same-origin", cache: "no-store",
+  }).then((response) => responseJson<MetaDraftReadiness>(response));
+}
+
+export async function reconcileMetaDraft(id: string): Promise<{ draft: PaidCampaignDraftDto; attempt: PaidCampaignOperationAttemptDto; replayed: boolean }> {
+  return fetch(`/api/paid/drafts/${encodeURIComponent(id)}/meta-reconcile`, {
+    method: "POST", credentials: "same-origin", cache: "no-store",
+  }).then((response) => responseJson<{ draft: PaidCampaignDraftDto; attempt: PaidCampaignOperationAttemptDto; replayed: boolean }>(response));
 }
 
 export async function loadPaidConnections(): Promise<PaidConnectionOption[]> {

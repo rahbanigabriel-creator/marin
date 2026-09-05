@@ -667,6 +667,7 @@ export function parsePaidCampaignSnapshotV1(
       "schedule",
       "adGroups",
       "assumptions",
+      "metaDelivery",
     ],
     "snapshot",
   );
@@ -675,6 +676,9 @@ export function parsePaidCampaignSnapshotV1(
   }
   const source = enumValue(body.source, SOURCE_VALUES, "source");
   const platform = enumValue(body.platform, PLATFORM_VALUES, "platform");
+  if (body.metaDelivery !== undefined && platform !== "meta_ads") {
+    fail("unsupported_delivery", "metaDelivery", "Meta delivery is only available for Meta drafts");
+  }
   const template = enumValue(body.template, TEMPLATE_VALUES, "template");
   const campaign = parseCampaign(body.campaign);
   assertTemplatePairing(platform, template, campaign.objective);
@@ -694,7 +698,24 @@ export function parsePaidCampaignSnapshotV1(
     return deepFreeze({ ...common, platform, template: "google_search_rsa", adGroups: parseGoogleAdGroups(body.adGroups) }) as PaidCampaignSnapshotV1;
   }
   if (platform === "meta_ads") {
-    return deepFreeze({ ...common, platform, template, adGroups: parseMetaAdGroups(body.adGroups) }) as PaidCampaignSnapshotV1;
+    let metaDelivery;
+    if (body.metaDelivery !== undefined) {
+      const delivery = object(body.metaDelivery, "metaDelivery");
+      onlyKeys(delivery, ["version", "pageId", "pageName", "placement", "specialAdCategory", "beneficiary", "payer"], "metaDelivery");
+      if (delivery.version !== 1 || delivery.placement !== "facebook_feed" || delivery.specialAdCategory !== "none") {
+        fail("unsupported_delivery", "metaDelivery", "This delivery version supports Facebook Feed and no special ad category only");
+      }
+      const pageId = requiredText(delivery.pageId, "metaDelivery.pageId", 32);
+      if (!/^\d{1,32}$/.test(pageId)) fail("invalid_page", "metaDelivery.pageId", "Select a valid Facebook Page");
+      metaDelivery = {
+        version: 1 as const, pageId,
+        pageName: requiredText(delivery.pageName, "metaDelivery.pageName", 200),
+        placement: "facebook_feed" as const, specialAdCategory: "none" as const,
+        beneficiary: requiredText(delivery.beneficiary, "metaDelivery.beneficiary", 200),
+        payer: requiredText(delivery.payer, "metaDelivery.payer", 200),
+      };
+    }
+    return deepFreeze({ ...common, platform, template, adGroups: parseMetaAdGroups(body.adGroups), ...(metaDelivery ? { metaDelivery } : {}) }) as PaidCampaignSnapshotV1;
   }
   return deepFreeze({ ...common, platform, template, adGroups: parseTikTokAdGroups(body.adGroups) }) as PaidCampaignSnapshotV1;
 }

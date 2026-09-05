@@ -14,6 +14,7 @@ export type RateLimitEndpoint =
   | "influencer_mutation"
   | "plan_generation"
   | "paid_draft_generation"
+  | "paid_provider_operation"
   | "sync"
   | "tracking_redirect";
 
@@ -51,6 +52,7 @@ export const RATE_LIMIT_POLICIES: Readonly<
   influencer_mutation: boundedPolicy(30, 60),
   plan_generation: boundedPolicy(6, 3_600),
   paid_draft_generation: boundedPolicy(6, 3_600),
+  paid_provider_operation: boundedPolicy(12, 60),
   sync: boundedPolicy(12, 300),
   tracking_redirect: boundedPolicy(60, 60),
 });

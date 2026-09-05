@@ -5,6 +5,8 @@ import {
   buildAuthorizeUrl,
   exchangeCodeForTokens,
   OAuthError,
+  parseConnectorOAuthIntent,
+  type ConnectorOAuthIntent,
 } from "../oauth";
 import { CONNECTORS } from "../registry";
 
@@ -14,6 +16,66 @@ function json(value: unknown, status = 200): Response {
     headers: { "Content-Type": "application/json" },
   });
 }
+
+function metaAuthorize(intent?: ConnectorOAuthIntent): URL {
+  return new URL(buildAuthorizeUrl({
+    config: CONNECTORS.meta_ads,
+    clientId: "meta-client-id",
+    redirectUri: "https://www.marpin.ai/api/connect/meta_ads/callback",
+    state: "csrf-state",
+    intent,
+  }));
+}
+
+test("default Meta OAuth stays read-only and the registry is never mutated by a step-up", () => {
+  const before = [...CONNECTORS.meta_ads.scopes];
+  const url = metaAuthorize();
+  assert.deepEqual(before, ["ads_read", "business_management"]);
+  assert.equal(url.searchParams.get("scope"), "ads_read business_management");
+  assert.equal(url.searchParams.has("auth_type"), false);
+  metaAuthorize("paid_write");
+  assert.deepEqual(CONNECTORS.meta_ads.scopes, before);
+  assert.equal(metaAuthorize().searchParams.get("scope"), "ads_read business_management");
+});
+
+test("explicit Meta paid_write intent requests only the fixed additional publishing scopes", () => {
+  const intent = parseConnectorOAuthIntent("meta_ads", new URLSearchParams("intent=paid_write"));
+  const url = metaAuthorize(intent);
+  assert.equal(intent, "paid_write");
+  assert.equal(url.searchParams.get("scope"), "ads_read business_management ads_management pages_show_list pages_read_engagement");
+  assert.equal(url.searchParams.get("auth_type"), "rerequest");
+  assert.equal(url.searchParams.get("client_id"), "meta-client-id");
+  assert.equal(url.searchParams.get("redirect_uri"), "https://www.marpin.ai/api/connect/meta_ads/callback");
+  assert.equal(url.searchParams.get("state"), "csrf-state");
+  assert.equal(url.searchParams.get("response_type"), "code");
+  assert.equal(url.searchParams.has("intent"), false);
+  assert.equal(url.searchParams.has("code_challenge"), false);
+});
+
+test("OAuth intent rejects unknown values, duplicate values, non-Meta step-up and caller-supplied scopes", () => {
+  for (const platform of ["meta_ads", "google_ads", "ga4"]) {
+    assert.equal(parseConnectorOAuthIntent(platform, new URLSearchParams()), undefined);
+  }
+  for (const [platform, query] of [
+    ["meta_ads", "intent="], ["meta_ads", "intent=read"], ["meta_ads", "intent=paid_write%20"],
+    ["meta_ads", "intent=paid_write&intent=paid_write"], ["meta_ads", "intent=paid_write&intent=anything"],
+    ["google_ads", "intent=paid_write"], ["ga4", "intent=paid_write"],
+    ["meta_ads", "scope=ads_management"], ["meta_ads", "scopes=pages_manage_posts"],
+    ["meta_ads", "intent=paid_write&scope=pages_manage_posts"],
+  ]) {
+    assert.throws(() => parseConnectorOAuthIntent(platform, new URLSearchParams(query)),
+      (error: unknown) => error instanceof OAuthError && error.message === "OAuth exchange error: invalid_oauth_intent");
+  }
+});
+
+test("authorize URL construction revalidates step-up even when a caller skips request parsing", () => {
+  assert.throws(() => metaAuthorize("pages_manage_posts" as ConnectorOAuthIntent), OAuthError);
+  assert.throws(() => buildAuthorizeUrl({
+    config: CONNECTORS.google_ads,
+    clientId: "google-client", redirectUri: "https://www.marpin.ai/api/connect/google_ads/callback",
+    state: "csrf-state", intent: "paid_write",
+  }), OAuthError);
+});
 
 test("Google authorization carries exact redirect, state, offline access, and PKCE", () => {
   const url = new URL(buildAuthorizeUrl({

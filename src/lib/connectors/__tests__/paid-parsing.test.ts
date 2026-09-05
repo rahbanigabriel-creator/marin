@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { coalesceConnectionToken } from "../clients";
+import { coalesceConnectionToken, getConnectionAccessToken } from "../clients";
+import { encryptToken, tokenAad } from "@/lib/security/vault";
+import type { Connection } from "@prisma/client";
 import { addMetricRows } from "../paid-clients";
 import { WorkspaceAuthorizationError } from "../../auth";
 import { paidSyncAuthFailure } from "../paid-http";
@@ -98,4 +100,17 @@ test("concurrent paid phases share one token acquisition", async () => {
     return "next-token";
   }), "next-token");
   assert.equal(calls, 2, "a later sync may acquire a fresh token");
+});
+
+test("concurrent Meta reads use their exact credential generation after a reconnect", async () => {
+  const previous = process.env.TOKEN_ENC_KEY;
+  process.env.TOKEN_ENC_KEY = Buffer.alloc(32, 7).toString("base64");
+  try {
+    const identity = { id: "meta-fixture", workspaceId: "workspace-fixture", platform: "meta_ads", externalAccountId: "123456789", expiresAt: null, encRefreshToken: null };
+    const aad = tokenAad({ ...identity, tokenKind: "access" });
+    const connections = ["fixture-old-token", "fixture-new-token"].map((value) => ({ ...identity, encAccessToken: encryptToken(value, aad) }) as Connection);
+    assert.deepEqual(await Promise.all(connections.map((connection) => getConnectionAccessToken(connection, "meta_ads"))), ["fixture-old-token", "fixture-new-token"]);
+  } finally {
+    if (previous === undefined) delete process.env.TOKEN_ENC_KEY; else process.env.TOKEN_ENC_KEY = previous;
+  }
 });

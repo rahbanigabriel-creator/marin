@@ -10,6 +10,7 @@ import type {
   PaidPlatform,
 } from "./types";
 import { parsePaidCampaignSnapshotV1 } from "./validation";
+import type { MetaCreationOutcome } from "./meta-paused-execution";
 
 export interface PaidAssistedHandoffDto {
   kind: "assisted_handoff";
@@ -27,6 +28,7 @@ export interface PaidExternalActivationOutcomeDto {
 
 export type PaidProviderOutcomeDto =
   | PaidAssistedHandoffDto
+  | MetaCreationOutcome
   | PaidExternalActivationOutcomeDto;
 
 export interface PaidCampaignOperationAttemptDto {
@@ -35,7 +37,7 @@ export interface PaidCampaignOperationAttemptDto {
   operation: "create_paused" | "activate";
   snapshotVersion: number;
   snapshotHash: string;
-  status: "assisted_handoff" | "succeeded" | "failed" | "needs_reconciliation";
+  status: "assisted_handoff" | "running" | "succeeded" | "failed" | "needs_reconciliation";
   capabilityReason: string;
   providerOutcome: PaidProviderOutcomeDto | null;
   attemptedAt: string;
@@ -53,7 +55,7 @@ export interface PaidCampaignApprovalDto {
 
 export interface PaidProviderPausedConfirmationDto {
   providerCampaignId: string;
-  verificationStatus: "user_asserted_unverified";
+  verificationStatus: "user_asserted_unverified" | "provider_verified";
   snapshotVersion: number;
   snapshotHash: string;
   confirmedAt: string;
@@ -147,15 +149,46 @@ function operation(value: string): "create_paused" | "activate" {
 function attemptStatus(
   value: string,
 ): PaidCampaignOperationAttemptDto["status"] {
-  if (value === "succeeded" || value === "failed" || value === "needs_reconciliation") {
+  if (value === "running" || value === "succeeded" || value === "failed" || value === "needs_reconciliation") {
     return value;
   }
   return "assisted_handoff";
 }
 
-function providerOutcome(value: unknown): PaidProviderOutcomeDto | null {
+function metaStepKey(key: string, kind: MetaCreationOutcome["steps"][number]["kind"]): boolean {
+  if (kind === "campaign" || kind === "adset") return key === kind;
+  const prefix = `${kind}:`;
+  const identifier = key.slice(prefix.length);
+  // Match snapshot identifiers (191 characters) plus the engine's step prefix (up to 9).
+  return key.startsWith(prefix) && identifier.length <= 191
+    && /^[A-Za-z0-9]/.test(identifier) && !/[^A-Za-z0-9._:-]/.test(identifier);
+}
+
+export function paidProviderOutcome(value: unknown): PaidProviderOutcomeDto | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
+  if (row.kind === "meta_paused_creation"
+    && (row.providerSideEffect === "paused_objects" || row.providerSideEffect === "possible" || row.providerSideEffect === "none")
+    && Array.isArray(row.steps) && row.steps.length <= 20 && typeof row.message === "string") {
+    const steps: MetaCreationOutcome["steps"] = [];
+    for (const raw of row.steps) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+      const step = raw as Record<string, unknown>;
+      if (typeof step.key !== "string"
+        || (step.kind !== "campaign" && step.kind !== "image" && step.kind !== "adset" && step.kind !== "creative" && step.kind !== "ad")
+        || (step.status !== "submitting" && step.status !== "created")
+        || !metaStepKey(step.key, step.kind)) return null;
+      if (step.id !== undefined && (typeof step.id !== "string" || !(step.kind === "image" ? /^[a-fA-F0-9]{32}$/ : /^\d{1,32}$/).test(step.id))) return null;
+      steps.push({ key: step.key, kind: step.kind as MetaCreationOutcome["steps"][number]["kind"], status: step.status as "submitting" | "created", ...(step.id ? { id: step.id as string } : {}) });
+    }
+    return {
+      kind: "meta_paused_creation", providerSideEffect: row.providerSideEffect, steps,
+      message: row.message.slice(0, 500),
+      ...(typeof row.campaignId === "string" && /^\d{1,32}$/.test(row.campaignId) ? { campaignId: row.campaignId } : {}),
+      ...(typeof row.code === "string" && /^[a-z_]{1,100}$/.test(row.code) ? { code: row.code } : {}),
+      ...(typeof row.verifiedAt === "string" && Number.isFinite(Date.parse(row.verifiedAt)) ? { verifiedAt: row.verifiedAt } : {}),
+    };
+  }
   if (row.kind === "assisted_handoff") {
     if (
       row.providerSideEffect !== "none" ||
@@ -192,7 +225,7 @@ function providerOutcome(value: unknown): PaidProviderOutcomeDto | null {
 
 function canConfirmProviderPaused(input: PaidDraftRecord): boolean {
   return input.attempts.some((attempt) => {
-    const outcome = providerOutcome(attempt.providerOutcome);
+    const outcome = paidProviderOutcome(attempt.providerOutcome);
     return (
       attempt.operation === "create_paused" &&
       attempt.status === "assisted_handoff" &&
@@ -205,7 +238,7 @@ function canConfirmProviderPaused(input: PaidDraftRecord): boolean {
 
 function canRecordExternalActivationOutcome(input: PaidDraftRecord): boolean {
   return input.state === "provider_paused" && input.attempts.some((attempt) => {
-    const outcome = providerOutcome(attempt.providerOutcome);
+    const outcome = paidProviderOutcome(attempt.providerOutcome);
     return (
       attempt.operation === "activate" &&
       attempt.status === "assisted_handoff" &&
@@ -230,6 +263,10 @@ export function toPaidCampaignDraftDto(input: {
   const state = input.row.state as PaidDraftState;
   const manager = canManage(input.actorRole);
   const pendingExternalActivationOutcome = canRecordExternalActivationOutcome(input.row);
+  let execution = paidDraftCapabilities(input.writeAccess);
+  if (snapshot.platform === "meta_ads" && snapshot.metaDelivery && input.writeAccess.oauthConnected) {
+    execution = { ...execution, mode: "provider_checked", createPaused: { operation: "create_paused", path: "provider_checked", canExecuteProvider: true, assistedHandoffAvailable: true, reason: "provider_preflight_required" } };
+  }
   return {
     id: input.row.id,
     platform: snapshot.platform,
@@ -257,13 +294,13 @@ export function toPaidCampaignDraftDto(input: {
         manager && state === "provider_paused" && !pendingExternalActivationOutcome,
       canRecordExternalActivationOutcome:
         manager && pendingExternalActivationOutcome,
-      execution: paidDraftCapabilities(input.writeAccess),
+      execution,
     },
     providerPausedConfirmation: input.row.providerPausedConfirmation
       ? {
           providerCampaignId:
             input.row.providerPausedConfirmation.providerCampaignId,
-          verificationStatus: "user_asserted_unverified",
+          verificationStatus: input.row.providerPausedConfirmation.verificationStatus === "provider_verified" ? "provider_verified" : "user_asserted_unverified",
           snapshotVersion:
             input.row.providerPausedConfirmation.snapshotVersion,
           snapshotHash: input.row.providerPausedConfirmation.snapshotHash,
@@ -288,7 +325,7 @@ export function toPaidCampaignDraftDto(input: {
       snapshotHash: attempt.snapshotHash,
       status: attemptStatus(attempt.status),
       capabilityReason: attempt.capabilityReason.slice(0, 100),
-      providerOutcome: providerOutcome(attempt.providerOutcome),
+      providerOutcome: paidProviderOutcome(attempt.providerOutcome),
       attemptedAt: attempt.attemptedAt.toISOString(),
     })),
   };

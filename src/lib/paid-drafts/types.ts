@@ -141,6 +141,17 @@ export interface GoogleSearchCampaignSnapshotV1 extends PaidCampaignSnapshotBase
   readonly adGroups: readonly GoogleSearchAdGroupSnapshot[];
 }
 
+/** Explicit delivery choices are part of the exact campaign approval. */
+export interface MetaPausedDeliveryV1 {
+  readonly version: 1;
+  readonly pageId: string;
+  readonly pageName: string;
+  readonly placement: "facebook_feed";
+  readonly specialAdCategory: "none";
+  readonly beneficiary: string;
+  readonly payer: string;
+}
+
 export interface MetaCampaignSnapshotV1 extends PaidCampaignSnapshotBase {
   readonly platform: "meta_ads";
   readonly template: "meta_traffic" | "meta_lead";
@@ -149,6 +160,7 @@ export interface MetaCampaignSnapshotV1 extends PaidCampaignSnapshotBase {
     readonly objective: "traffic" | "leads";
   };
   readonly adGroups: readonly MetaAdGroupSnapshot[];
+  readonly metaDelivery?: MetaPausedDeliveryV1;
 }
 
 export interface TikTokCampaignSnapshotV1 extends PaidCampaignSnapshotBase {

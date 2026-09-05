@@ -15,6 +15,8 @@ import {
   PaidDraftUnavailableError,
 } from "@/lib/paid-drafts/errors";
 import { PaidDraftValidationError } from "@/lib/paid-drafts/validation";
+import { PaidProviderError } from "@/lib/connectors/paid-errors";
+import { MetaPausedProviderError } from "@/lib/paid-drafts/meta-paused-provider";
 import { isPersistenceModelUnavailable } from "@/lib/persistence/errors";
 import {
   readBoundedJson,
@@ -117,6 +119,11 @@ export function paidDraftApiFailure(error: unknown, operation: string): NextResp
       { error: error.code, code: error.code, message: error.message },
       { status: 400, headers: NO_STORE },
     );
+  }
+  if (error instanceof PaidProviderError || error instanceof MetaPausedProviderError) {
+    return NextResponse.json({ error: "meta_check_failed", code: "meta_check_failed", message: error instanceof PaidProviderError
+      ? "Meta could not verify publishing access. Check the connection, Page permissions and ad account status, then retry the check. No new campaign was created by this check."
+      : "The Meta objects could not be verified as a complete paused campaign. Review the recorded IDs in Meta before attempting a new campaign." }, { status: 502, headers: NO_STORE });
   }
   if (error instanceof PaidDraftNotFoundError) {
     return NextResponse.json(

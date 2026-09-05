@@ -5,6 +5,8 @@ import {
   LuChartNoAxesCombined,
   LuFileText,
   LuPlug,
+  LuPanelLeftClose,
+  LuPanelLeftOpen,
   LuPlus,
   LuRefreshCw,
   LuSparkles,
@@ -21,6 +23,7 @@ import type { PaidLaunchTemplate } from "@/lib/paid-drafts/types";
 import { PaidDraftEditor } from "./PaidDraftEditor";
 import { PaidDraftGenerationDialog } from "./PaidDraftGenerationDialog";
 import { PaidDraftReview } from "./PaidDraftReview";
+import { MetaDeliverySettings } from "./MetaDeliverySettings";
 import {
   PaidDraftRequestError,
   PaidDraftRequestLedger,
@@ -35,6 +38,7 @@ import {
   loadPaidDrafts,
   markPaidDraftReady,
   recordPaidDraftExternalActivationOutcome,
+  reconcileMetaDraft,
   updatePaidDraft,
   uploadPaidAsset,
 } from "./paid-draft-client";
@@ -91,12 +95,15 @@ export function PaidDraftWorkspace({
   const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [uncertainDraftId, setUncertainDraftId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [issues, setIssues] = useState<PaidDraftFormIssue[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [billingErrorMessage, setBillingErrorMessage] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [stateFilter, setStateFilter] = useState<"all" | PaidCampaignDraftDto["state"]>("all");
   const [search, setSearch] = useState("");
+  const [draftsExpanded, setDraftsExpanded] = useState(false);
   const [generationOpen, setGenerationOpen] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const requestIds = useRef(new PaidDraftRequestLedger());
@@ -118,6 +125,7 @@ export function PaidDraftWorkspace({
   const selectDraft = useCallback((draft: PaidCampaignDraftDto) => {
     const nextForm = formFromPaidDraft(draft.snapshot);
     setSelectedId(draft.id);
+    setDraftsExpanded(false);
     setCreating(false);
     setEditing(draft.state === "draft" && draft.capabilities.canEdit);
     setForm(nextForm);
@@ -125,6 +133,7 @@ export function PaidDraftWorkspace({
     setIssues([]);
     setError(null);
     setNotice(null);
+    setUncertainDraftId(null);
   }, []);
 
   const load = useCallback(async (preferredId?: string | null) => {
@@ -166,6 +175,7 @@ export function PaidDraftWorkspace({
     }
     const next = createPaidDraftForm(connection);
     setCreating(true);
+    setDraftsExpanded(false);
     setEditing(true);
     setSelectedId(null);
     setForm(next);
@@ -266,6 +276,7 @@ export function PaidDraftWorkspace({
       updateSelected(result.draft, true);
       setNotice(`${kind === "activate" ? "Activation" : "Create-paused"} approval bound to v${result.approval.snapshotVersion} and its exact snapshot hash.`);
     } catch (approvalError) {
+      setBillingErrorMessage(approvalError instanceof PaidDraftRequestError && approvalError.status === 402 ? approvalError.message : null);
       if (approvalError instanceof PaidDraftRequestError && await recoverConflict(approvalError)) return;
       setError(approvalError instanceof Error ? approvalError.message : "Approval could not be recorded.");
     } finally {
@@ -280,21 +291,53 @@ export function PaidDraftWorkspace({
     setBusy(true);
     setError(null);
     setNotice(null);
+    const metaCreation = selected.snapshot.platform === "meta_ads" && Boolean(selected.snapshot.metaDelivery) && approval.kind === "create_paused";
+    if (metaCreation) setUncertainDraftId(selected.id);
     try {
       const result = await executePaidDraft(selected, approval, requestId);
       completeAction(actionKey);
       updateSelected(result.draft, true);
-      setNotice(result.attempt.providerOutcome?.providerSideEffect === "none"
+      setUncertainDraftId(null);
+      setNotice(result.attempt.providerOutcome?.kind === "assisted_handoff" && result.attempt.providerOutcome.providerSideEffect === "none"
         ? "Assisted handoff prepared. Marpin made no provider change and spent no budget."
-        : result.attempt.status === "succeeded"
-          ? "The reviewed provider operation completed."
-          : "The operation attempt was recorded. Review its outcome below.");
+        : result.attempt.status === "failed" && result.attempt.providerOutcome?.providerSideEffect === "none"
+          ? "Meta made no provider changes. The approval was consumed; edit and mark ready before a fresh approval."
+        : result.draft.state === "provider_paused" && result.draft.providerPausedConfirmation?.verificationStatus === "provider_verified"
+          ? "Meta objects were verified paused. No activation was requested."
+          : "The creation attempt was recorded but is not verified complete. Check the recorded objects below; do not create another campaign.");
     } catch (operationError) {
+      setBillingErrorMessage(operationError instanceof PaidDraftRequestError && operationError.status === 402 ? operationError.message : null);
+      if (metaCreation) {
+        try {
+          const latest = await loadPaidDraft(selected.id);
+          updateSelected(latest, true);
+          if (latest.attempts.some((attempt) => attempt.operation === "create_paused" && attempt.snapshotHash === selected.snapshotHash)) setUncertainDraftId(null);
+        } catch { /* Keep execution blocked until the saved status is available. */ }
+        setError(operationError instanceof Error ? operationError.message : "The Meta response was interrupted. Check saved status before continuing.");
+        return;
+      }
       if (operationError instanceof PaidDraftRequestError && await recoverConflict(operationError)) return;
       setError(operationError instanceof Error ? operationError.message : "The operation could not be prepared.");
     } finally {
       setBusy(false);
     }
+  };
+
+  const reconcileMeta = async () => {
+    if (!selected || busy) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await reconcileMetaDraft(selected.id);
+      updateSelected(result.draft, true);
+      setUncertainDraftId(null);
+      setNotice(result.draft.state === "provider_paused" && result.draft.providerPausedConfirmation?.verificationStatus === "provider_verified"
+        ? "Existing Meta objects verified paused. No new objects were created."
+        : "Existing objects checked. Creation is still unresolved; no new objects were created.");
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : "Existing Meta objects could not be verified.");
+    } finally { setBusy(false); }
   };
 
   const confirmProviderPaused = async (providerCampaignId: string) => {
@@ -430,6 +473,7 @@ export function PaidDraftWorkspace({
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-[12px]">
           <div><p className="m-0 font-mono text-[9.5px] font-semibold uppercase tracking-[0.08em] text-ink-300">Paid campaigns</p><h1 id="paid-drafts-title" className="mb-0 mt-[2px] text-[20px] font-semibold text-ink-900">Campaign drafts</h1></div>
           <div className="flex flex-wrap items-center gap-[7px]">
+            <button type="button" aria-label={draftsExpanded ? "Hide saved campaign drafts" : "Show saved campaign drafts"} title={draftsExpanded ? "Hide saved campaign drafts" : "Show saved campaign drafts"} aria-expanded={draftsExpanded} aria-controls="saved-paid-drafts" onClick={() => setDraftsExpanded(!draftsExpanded)} className={`grid h-[36px] w-[36px] place-items-center rounded-[7px] border border-line-1 bg-surface-card text-ink-600 ${focusRing}`}>{draftsExpanded ? <LuPanelLeftClose aria-hidden /> : <LuPanelLeftOpen aria-hidden />}</button>
             <button type="button" aria-label="Refresh campaign drafts" disabled={loading || busy} onClick={() => void load(selectedId)} className={`grid h-[36px] w-[36px] place-items-center rounded-[7px] border border-line-1 bg-surface-card text-ink-600 disabled:opacity-45 ${focusRing}`}><LuRefreshCw aria-hidden className={loading ? "animate-spin" : ""} /></button>
             <button type="button" onClick={onOpenConnections} className={`inline-flex h-[36px] items-center gap-[6px] rounded-[7px] border border-line-1 bg-surface-card px-[11px] text-[11.5px] font-semibold text-ink-700 ${focusRing}`}><LuPlug aria-hidden /> Accounts</button>
             <button type="button" disabled={!canManage || !connections.length || busy || uploading} title={uploading ? "Wait for the creative upload to finish" : undefined} onClick={() => { setGenerationError(null); setGenerationOpen(true); }} className={`inline-flex h-[36px] items-center gap-[6px] rounded-[7px] border border-plum-border bg-plum-soft px-[11px] text-[11.5px] font-semibold text-plum-deep disabled:cursor-not-allowed disabled:opacity-45 ${focusRing}`}><LuSparkles aria-hidden /> Generate draft</button>
@@ -442,11 +486,12 @@ export function PaidDraftWorkspace({
         </div>
       </header>
 
-      {error ? <div role="alert" className="mx-[14px] mt-[10px] border-l-[3px] border-neg-700 bg-neg-bg px-[12px] py-[9px] text-[12px] text-neg-700 sm:mx-[20px]">{error}</div> : null}
+      {error ? <div role="alert" className="mx-[14px] mt-[10px] border-l-[3px] border-neg-700 bg-neg-bg px-[12px] py-[9px] text-[12px] text-neg-700 sm:mx-[20px]">{error}{billingErrorMessage === error ? <> <a href="/settings/billing" className={`font-semibold underline underline-offset-2 ${focusRing}`}>Review plan</a></> : null}</div> : null}
       {notice ? <div role="status" aria-live="polite" className="mx-[14px] mt-[10px] border-l-[3px] border-pos-500 bg-pos-bg px-[12px] py-[9px] text-[12px] text-pos-700 sm:mx-[20px]">{notice}</div> : null}
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[300px_minmax(0,1fr)]">
-        <aside className="min-h-0 border-b border-line-2 bg-surface-card lg:border-b-0 lg:border-r" aria-label="Saved campaign drafts">
+      <div className={`grid min-h-0 flex-1 grid-cols-1 overflow-hidden ${draftsExpanded ? "lg:grid-cols-[300px_minmax(0,1fr)]" : "lg:grid-cols-[44px_minmax(0,1fr)]"}`}>
+        {!draftsExpanded ? <div className="hidden border-r border-line-2 bg-surface-card px-1 pt-3 lg:block"><button type="button" aria-label="Open saved drafts" title="Open saved drafts" onClick={() => setDraftsExpanded(true)} className={`grid h-9 w-9 place-items-center rounded-[6px] text-ink-500 hover:bg-track-1 ${focusRing}`}><LuPanelLeftOpen aria-hidden /></button></div> : null}
+        <aside id="saved-paid-drafts" className={`${draftsExpanded ? "" : "hidden"} min-h-0 border-b border-line-2 bg-surface-card lg:border-b-0 lg:border-r`} aria-label="Saved campaign drafts">
           <div className="grid grid-cols-[minmax(0,1fr)_112px] gap-[7px] border-b border-line-2 p-[11px]">
             <label className="min-w-0"><span className="sr-only">Search campaign drafts</span><input type="search" aria-label="Search campaign drafts" placeholder="Search drafts" value={search} onChange={(event) => setSearch(event.target.value)} className={`w-full min-w-0 rounded-[7px] border border-line-1 bg-surface-card px-[9px] py-[7px] text-[12px] outline-none focus:border-plum-border ${focusRing}`} /></label>
             <label><span className="sr-only">Filter campaign draft state</span><select aria-label="Filter campaign draft state" value={stateFilter} onChange={(event) => setStateFilter(event.target.value as typeof stateFilter)} className={`w-full rounded-[7px] border border-line-1 bg-surface-card px-[8px] py-[7px] text-[11px] text-ink-600 outline-none ${focusRing}`}><option value="all">All states</option><option value="draft">Draft</option><option value="ready">Ready</option><option value="provider_paused">Paused</option><option value="active">Active</option><option value="needs_reconciliation">Reconcile</option></select></label>
@@ -466,8 +511,8 @@ export function PaidDraftWorkspace({
         <div role="region" aria-label="Paid campaign draft editor" className="min-h-0 overflow-y-auto px-[14px] py-[16px] sm:px-[20px] lg:px-[26px] lg:py-[22px]">
           {!connections.length && !loading ? <div className="grid min-h-[360px] place-items-center text-center"><div><LuPlug aria-hidden className="mx-auto h-[25px] w-[25px] text-ink-300" /><h2 className="mb-0 mt-[9px] text-[17px] font-semibold text-ink-900">Connect a paid account first</h2><p className="mx-auto mb-0 mt-[6px] max-w-[420px] text-[12px] leading-[1.55] text-ink-400">Drafts are bound to one exact Google Ads or Meta Ads account.</p><button type="button" onClick={onOpenConnections} className={`mt-[13px] h-[36px] rounded-[7px] bg-plum px-[13px] text-[12px] font-semibold text-white ${focusRing}`}>Manage connections</button></div></div> : null}
           {connections.length && !form && !loading ? <div className="grid min-h-[360px] place-items-center text-center"><div><LuFileText aria-hidden className="mx-auto h-[25px] w-[25px] text-ink-300" /><h2 className="mb-0 mt-[9px] text-[17px] font-semibold text-ink-900">{canManage ? "Create a manual campaign draft" : "No campaign drafts yet"}</h2><p className="mx-auto mb-0 mt-[6px] max-w-[420px] text-[12px] leading-[1.55] text-ink-400">{canManage ? "Prepare a versioned campaign without changing any provider account." : "This workspace is read-only for your role. An owner or admin can prepare the first paid draft."}</p>{canManage ? <button type="button" onClick={beginCreate} className={`mt-[13px] inline-flex h-[36px] items-center gap-[6px] rounded-[7px] bg-plum px-[13px] text-[12px] font-semibold text-white ${focusRing}`}><LuPlus aria-hidden /> Create first draft</button> : null}</div></div> : null}
-          {form && (creating || editing) ? <PaidDraftEditor value={form} connections={connections} assets={assets} issues={issues} isNew={creating} disabled={busy || !canManage || (!creating && !selected?.capabilities.canEdit)} saving={busy} uploading={uploading} dirty={dirty} onChange={(next) => { setForm(next); setIssues([]); }} onConnectionChange={(connectionId) => { const connection = connections.find((item) => item.id === connectionId); if (connection) setForm(createPaidDraftForm(connection)); }} onTemplateChange={(template: PaidLaunchTemplate) => { if (form) setForm({ ...form, template }); }} onSave={() => void save()} onReady={() => void markReady()} canMarkReady={canManage && Boolean(selected?.capabilities.canMarkReady)} onUpload={(file) => void upload(file)} /> : null}
-          {selected && !creating && !editing ? <PaidDraftReview draft={selected} busy={busy} onEdit={() => setEditing(true)} onApprove={(kind) => void approve(kind)} onExecute={(approval) => void execute(approval)} onConfirmProviderPaused={(providerCampaignId) => void confirmProviderPaused(providerCampaignId)} onRecordActivationOutcome={(attempt, outcome) => void recordActivationOutcome(attempt, outcome)} /> : null}
+          {form && (creating || editing) ? <PaidDraftEditor value={form} connections={connections} assets={assets} issues={issues} isNew={creating} disabled={busy || !canManage || (!creating && !selected?.capabilities.canEdit)} saving={busy} uploading={uploading} dirty={dirty} onChange={(next) => { setForm(next); setIssues([]); }} onConnectionChange={(connectionId) => { const connection = connections.find((item) => item.id === connectionId); if (connection) setForm(createPaidDraftForm(connection)); }} onTemplateChange={(template: PaidLaunchTemplate) => { if (form) setForm({ ...form, template }); }} onSave={() => void save()} onReady={() => void markReady()} canMarkReady={canManage && Boolean(selected?.capabilities.canMarkReady)} onUpload={(file) => void upload(file)} deliverySettings={form.connection.platform === "meta_ads" ? <MetaDeliverySettings key={`${selectedId ?? "new"}:${form.connection.id}`} value={form} disabled={busy || !canManage || (!creating && !selected?.capabilities.canEdit)} onChange={(next) => { setForm(next); setIssues([]); }} onConnect={() => !dirty || window.confirm("This draft has unsaved changes. Continue to Meta permissions in a new tab? Nothing will be saved automatically. Cancel to save a regular draft first.")} /> : undefined} /> : null}
+          {selected && !creating && !editing ? <PaidDraftReview key={selected.id} draft={selected} busy={busy} executionUncertain={uncertainDraftId === selected.id} onReconcileMeta={() => void reconcileMeta()} onEdit={() => { setDraftsExpanded(false); setEditing(true); }} onApprove={(kind) => void approve(kind)} onExecute={(approval) => void execute(approval)} onConfirmProviderPaused={(providerCampaignId) => void confirmProviderPaused(providerCampaignId)} onRecordActivationOutcome={(attempt, outcome) => void recordActivationOutcome(attempt, outcome)} /> : null}
         </div>
       </div>
       {generationOpen ? <PaidDraftGenerationDialog connections={connections} busy={busy} error={generationError} onClose={() => { setGenerationOpen(false); setGenerationError(null); }} onGenerate={(input) => void generate(input)} /> : null}

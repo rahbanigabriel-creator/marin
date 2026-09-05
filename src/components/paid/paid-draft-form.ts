@@ -6,6 +6,7 @@ import type {
   PaidPlatform,
   SocialCallToAction,
   SocialGender,
+  MetaPausedDeliveryV1,
 } from "@/lib/paid-drafts/types";
 import {
   PaidDraftValidationError,
@@ -53,6 +54,8 @@ export interface PaidDraftAdGroupForm {
 }
 
 export interface PaidDraftFormValue {
+  metaDelivery?: MetaPausedDeliveryV1;
+  metaCategoryConfirmed?: boolean;
   source: PaidDraftSource;
   connection: PaidConnectionOption;
   template: PaidLaunchTemplate;
@@ -329,11 +332,12 @@ export function buildPaidCampaignSnapshot(form: PaidDraftFormValue): PaidCampaig
       destinationUrl: ad.destinationUrl,
     })),
   }));
-  return parsePaidCampaignSnapshotV1({ ...base, adGroups: socialGroups });
+  return parsePaidCampaignSnapshotV1({ ...base, adGroups: socialGroups, ...(form.connection.platform === "meta_ads" && form.metaDelivery ? { metaDelivery: form.metaDelivery } : {}) });
 }
 
 function requiredIssues(form: PaidDraftFormValue): PaidDraftFormIssue[] {
   const issues: PaidDraftFormIssue[] = [];
+  if (form.metaDelivery && !form.metaCategoryConfirmed) issues.push({ path: "metaDelivery.specialAdCategory", message: "Confirm that no special ad category applies before preparing direct creation." });
   const required = (path: string, value: string, label: string) => {
     if (!value.trim()) issues.push({ path, message: `${label} is required.` });
   };
@@ -397,6 +401,7 @@ export function formFromPaidDraft(snapshot: PaidCampaignSnapshotV1): PaidDraftFo
   const start = wallClockFromIso(snapshot.schedule.startsAt, snapshot.schedule.timezone);
   const end = wallClockFromIso(snapshot.schedule.endsAt, snapshot.schedule.timezone);
   return {
+    ...(snapshot.platform === "meta_ads" && snapshot.metaDelivery ? { metaDelivery: snapshot.metaDelivery, metaCategoryConfirmed: true } : {}),
     source: snapshot.source,
     connection: {
       id: snapshot.connection.connectionId,

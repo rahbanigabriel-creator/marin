@@ -188,6 +188,7 @@ test("defines every endpoint policy within immutable global ceilings", () => {
     "image_generation",
     "influencer_mutation",
     "paid_draft_generation",
+    "paid_provider_operation",
     "plan_generation",
     "sync",
     "tracking_redirect",

@@ -12,9 +12,11 @@ import {
   parsePaidDraftId,
 } from "@/lib/paid-drafts/parsers";
 import { executePaidCampaignDraftOperation } from "@/lib/paid-drafts/service";
+import { enforcePaidProviderRateLimit } from "@/lib/security/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 interface RouteContext {
   params: Promise<{ draftId: string }>;
@@ -30,6 +32,8 @@ export async function POST(
   if (unavailable) return unavailable;
   try {
     const access = await requirePaidDraftManageAccess();
+    const limited = await enforcePaidProviderRateLimit({ userId: access.clerkUserId, workspaceId: access.workspace.id });
+    if (limited) return limited;
     const { draftId } = await context.params;
     const result = await executePaidCampaignDraftOperation({
       workspaceId: access.workspace.id,

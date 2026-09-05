@@ -2,7 +2,7 @@ import type { PaidDraftState, PaidPlatform } from "./types";
 
 export type PaidWriteOperation = "create_paused" | "activate" | "change_budget";
 export type PaidProviderReviewStatus = "not_requested" | "pending" | "approved" | "rejected";
-export type PaidExecutionPath = "assisted" | "provider_reviewed";
+export type PaidExecutionPath = "assisted" | "provider_reviewed" | "provider_checked";
 export type PaidApprovalStatus = "approved" | "consumed" | "rejected" | "expired";
 
 const WRITE_OPERATIONS = new Set<PaidWriteOperation>([
@@ -34,6 +34,7 @@ export interface PaidOperationCapability {
   readonly assistedHandoffAvailable: true;
   readonly reason:
     | "provider_write_ready"
+    | "provider_preflight_required"
     | "oauth_disconnected"
     | "provider_review_required"
     | "provider_review_pending"
@@ -292,6 +293,8 @@ const RECONCILIATION_TARGETS = new Set<PaidDraftState>([
 ]);
 
 export interface PaidStateTransitionOptions {
+  /** The provider adapter proves that no write request was sent. Consumes the old approval. */
+  readonly confirmedNoExternalEffect?: boolean;
   readonly uncertainExternalEffect?: boolean;
   readonly reconciled?: boolean;
   readonly assistedConfirmation?: boolean;
@@ -304,6 +307,7 @@ export function canTransitionPaidDraftState(
   to: PaidDraftState,
   options: PaidStateTransitionOptions = {},
 ): boolean {
+  if (from === "creating_paused" && to === "draft") return options.confirmedNoExternalEffect === true;
   if (from === "ready" && to === "provider_paused") {
     return options.assistedConfirmation === true;
   }

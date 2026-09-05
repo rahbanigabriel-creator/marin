@@ -99,6 +99,22 @@ export async function enforceInfluencerMutationRateLimit(
   input: { userId: string; workspaceId: string },
   dependencies: InfluencerMutationRateLimitDependencies = {},
 ): Promise<NextResponse | null> {
+  return enforceWorkspaceMutationRateLimit("influencer_mutation", input, dependencies);
+}
+
+/** Shared across paid preflight, approval and execution, before provider reads. */
+export async function enforcePaidProviderRateLimit(
+  input: { userId: string; workspaceId: string },
+  dependencies: InfluencerMutationRateLimitDependencies = {},
+): Promise<NextResponse | null> {
+  return enforceWorkspaceMutationRateLimit("paid_provider_operation", input, dependencies);
+}
+
+async function enforceWorkspaceMutationRateLimit(
+  endpoint: "influencer_mutation" | "paid_provider_operation",
+  input: { userId: string; workspaceId: string },
+  dependencies: InfluencerMutationRateLimitDependencies,
+): Promise<NextResponse | null> {
   if (
     dependencies.isDeployment === undefined &&
     dependencies.redisConfigured === undefined &&
@@ -126,7 +142,6 @@ export async function enforceInfluencerMutationRateLimit(
     (isDeployment ? "" : "marpin-local-rate-limit-pepper");
   if (pepper.length < 16) return unavailable();
 
-  const endpoint = "influencer_mutation" as const;
   const policy = getRateLimitPolicy(endpoint);
   const limiter = dependencies.limit
     ? { limit: dependencies.limit }

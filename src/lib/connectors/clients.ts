@@ -83,6 +83,9 @@ export async function getConnectionAccessToken(
   connection: Connection,
   platform: ConnectorPlatform,
 ): Promise<string> {
+  // Meta has no refresh exchange here. Read this exact credential generation;
+  // a reconnect must never reuse a concurrent read of the old token.
+  if (platform === "meta_ads") return accessTokenFor(connection, platform);
   return coalesceConnectionToken(`${platform}:${connection.id}`, () => accessTokenFor(connection, platform));
 }
 

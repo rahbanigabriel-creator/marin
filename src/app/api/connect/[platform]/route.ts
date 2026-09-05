@@ -21,6 +21,7 @@ import {
   OAUTH_PENDING_COOKIE,
   OAUTH_TX_COOKIE,
   OAUTH_TX_MAX_AGE,
+  parseConnectorOAuthIntent,
   randomToken,
   signTransaction,
 } from "@/lib/connectors/oauth";
@@ -60,6 +61,16 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Re
   const config = getConnectorConfig(platform);
   if (!config) {
     return NextResponse.json({ error: "unknown_platform", platform }, { status: 404 });
+  }
+
+  let intent;
+  try {
+    intent = parseConnectorOAuthIntent(config.id, req.nextUrl.searchParams);
+  } catch {
+    return NextResponse.json(
+      { error: "invalid_oauth_intent" },
+      { status: 400, headers: { "Cache-Control": "no-store" } },
+    );
   }
 
   let workspace: WorkspaceRef;
@@ -114,6 +125,7 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Re
 
   const authorizeUrl = buildAuthorizeUrl({
     config,
+    intent,
     clientId,
     redirectUri,
     state,

@@ -49,6 +49,28 @@ export function deriveCodeChallenge(verifier: string): string {
 
 // ── Authorize URL construction ────────────────────────────────────────────────
 
+export type ConnectorOAuthIntent = "paid_write";
+
+const META_PAID_WRITE_SCOPES = [
+  "ads_management",
+  "pages_show_list",
+  "pages_read_engagement",
+] as const;
+
+/** Only this explicit Meta step-up can extend the registry's read scopes. */
+export function parseConnectorOAuthIntent(
+  platform: string,
+  params: URLSearchParams,
+): ConnectorOAuthIntent | undefined {
+  const intents = params.getAll("intent");
+  if (params.has("scope") || params.has("scopes")
+    || intents.length > 1
+    || (intents.length === 1 && (platform !== "meta_ads" || intents[0] !== "paid_write"))) {
+    throw new OAuthError("invalid_oauth_intent");
+  }
+  return intents.length === 1 ? "paid_write" : undefined;
+}
+
 export interface AuthorizeUrlInput {
   config: ConnectorConfig;
   clientId: string;
@@ -56,6 +78,7 @@ export interface AuthorizeUrlInput {
   state: string;
   /** S256 challenge — pass only when config.usesPkce. */
   codeChallenge?: string;
+  intent?: ConnectorOAuthIntent;
 }
 
 /**
@@ -63,7 +86,10 @@ export interface AuthorizeUrlInput {
  * PKCE params only when a challenge is supplied (provider supports it).
  */
 export function buildAuthorizeUrl(input: AuthorizeUrlInput): string {
-  const { config, clientId, redirectUri, state, codeChallenge } = input;
+  const { config, clientId, redirectUri, state, codeChallenge, intent } = input;
+  if (intent !== undefined && (intent !== "paid_write" || config.id !== "meta_ads")) {
+    throw new OAuthError("invalid_oauth_intent");
+  }
 
   // TikTok Business uses a non-standard portal: app_id (not client_id), no
   // response_type/scope params; the granted scopes live on the app itself.
@@ -84,6 +110,10 @@ export function buildAuthorizeUrl(input: AuthorizeUrlInput): string {
   params.set("state", state);
   for (const [k, v] of Object.entries(config.extraAuthorizeParams ?? {})) {
     params.set(k, v);
+  }
+  if (intent === "paid_write") {
+    params.set("scope", [...new Set([...config.scopes, ...META_PAID_WRITE_SCOPES])].join(" "));
+    params.set("auth_type", "rerequest");
   }
   if (codeChallenge) {
     params.set("code_challenge", codeChallenge);

@@ -18,6 +18,7 @@ import {
 } from "./capabilities";
 import {
   toPaidCampaignDraftDto,
+  paidProviderOutcome,
   type PaidCampaignApprovalDto,
   type PaidCampaignDraftDto,
   type PaidCampaignOperationAttemptDto,
@@ -33,6 +34,19 @@ import {
   hashPaidDraftRequest,
 } from "./hash";
 import { assertPaidScheduleCurrent } from "./schedule";
+import { assertMetaPausedSnapshot } from "./meta-paused-contract";
+import { requireMetaCreationEntitlement } from "./meta-entitlements";
+import {
+  assertMetaCompletedAssets,
+  assertMetaConnectionGeneration,
+  metaConnectionGeneration,
+  checkMetaPausedAccess,
+  prepareMetaPausedCreation,
+  reconcileMetaPausedCreation,
+  type MetaCreationOutcome,
+  type PreparedMetaCreation,
+} from "./meta-paused-execution";
+import { MetaPausedProviderError } from "./meta-paused-provider";
 import type {
   ApprovePaidDraftBody,
   ConfirmProviderPausedBody,
@@ -270,7 +284,7 @@ function requestSnapshot(snapshot: PaidCampaignSnapshotV1): unknown {
   };
 }
 
-async function verifySnapshotAssets(
+export async function verifySnapshotAssets(
   db: Pick<Prisma.TransactionClient, "asset">,
   workspaceId: string,
   snapshot: PaidCampaignSnapshotV1,
@@ -279,9 +293,10 @@ async function verifySnapshotAssets(
   if (!assetIds.length) return;
   const assets = await db.asset.findMany({
     where: { workspaceId, id: { in: assetIds } },
-    select: { id: true, kind: true, mimeType: true },
+    select: { id: true, kind: true, mimeType: true, bytes: true, storageKey: true },
   });
   assertPaidDraftAssetSuitability(snapshot, assets);
+  if (snapshot.platform === "meta_ads" && snapshot.metaDelivery) assertMetaCompletedAssets(workspaceId, snapshot, assets);
 }
 
 function writeAccess(row: PaidDraftRow) {
@@ -797,6 +812,7 @@ export async function markPaidCampaignDraftReady(input: {
       assertVersion(current, input.body.expectedVersion, input.body.snapshotHash);
       const snapshot = parsePaidCampaignSnapshotV1(current.snapshot);
       await verifySnapshotAssets(tx, input.workspaceId, snapshot);
+      if (snapshot.platform === "meta_ads" && snapshot.metaDelivery) assertMetaPausedSnapshot(snapshot);
       assertPaidScheduleCurrent(snapshot.schedule, input.now ?? new Date());
       const state = transitionPaidDraftState(current.state as PaidDraftState, "ready");
       const updated = await tx.paidCampaignDraft.update({
@@ -1174,6 +1190,16 @@ export async function approvePaidCampaignDraftOperation(input: {
   });
   if (prior) return prior;
 
+  const approving = await findDraft(prisma, input.workspaceId, input.draftId);
+  assertVersion(approving, input.body.expectedVersion, input.body.snapshotHash);
+  const approvingSnapshot = parsePaidCampaignSnapshotV1(approving.snapshot);
+  if (input.body.kind === "create_paused" && approvingSnapshot.platform === "meta_ads" && approvingSnapshot.metaDelivery) {
+    await requireMetaCreationEntitlement(input.workspaceId);
+    await verifySnapshotAssets(prisma, input.workspaceId, approvingSnapshot);
+    const connection = await metaDraftConnection(input.workspaceId, approving);
+    await checkMetaPausedAccess(connection, approvingSnapshot, input.now ?? new Date());
+  }
+
   try {
     return await prisma.$transaction(async (tx) => {
       await lockDraft(tx, input.workspaceId, input.draftId);
@@ -1215,6 +1241,10 @@ export async function approvePaidCampaignDraftOperation(input: {
         input.now ?? new Date(),
         input.body.kind === "create_paused",
       );
+      if (input.body.kind === "create_paused" && approvingSnapshot.platform === "meta_ads" && approvingSnapshot.metaDelivery) {
+        await requireMetaCreationEntitlement(input.workspaceId, tx);
+        await verifySnapshotAssets(tx, input.workspaceId, parsePaidCampaignSnapshotV1(current.snapshot));
+      }
       const approval = await tx.paidCampaignApproval.create({
         data: {
           workspaceId: input.workspaceId,
@@ -1274,7 +1304,7 @@ export async function executePaidCampaignDraftOperation(input: {
   actorRole: WorkspaceRole;
   body: ExecutePaidDraftBody;
   now?: Date;
-}): Promise<PaidDraftOperationResult> {
+}, dependencies: { prepareMeta?: typeof prepareMetaPausedCreation } = {}): Promise<PaidDraftOperationResult> {
   requireManager(input.actorRole);
   const requestHash = hashPaidDraftRequest({
     operation: input.body.operation,
@@ -1293,8 +1323,35 @@ export async function executePaidCampaignDraftOperation(input: {
   });
   if (prior) return prior;
 
+  // Provider reads and media downloads happen before the short DB claim transaction.
+  // Only the request that durably consumes the approval may subsequently write.
+  let prepared: PreparedMetaCreation | undefined;
+  let connectionGeneration: string | undefined;
+  const executing = await findDraft(prisma, input.workspaceId, input.draftId);
+  if (executing.attempts.some((attempt) => attempt.requestId === input.body.requestId)) {
+    const replay = await replayOperation({ workspaceId: input.workspaceId, draftId: input.draftId, requestId: input.body.requestId, requestHash, operation: input.body.operation, actorRole: input.actorRole });
+    if (replay) return replay;
+  }
+  assertVersion(executing, input.body.expectedVersion, input.body.snapshotHash);
+  const executingSnapshot = parsePaidCampaignSnapshotV1(executing.snapshot);
+  if (input.body.operation === "create_paused" && executingSnapshot.platform === "meta_ads" && executingSnapshot.metaDelivery) {
+    if (executing.state !== "ready") throw denialConflict("invalid_state", executing.version);
+    const approval = executing.approvals.find((item) => item.id === input.body.approvalId);
+    if (!approval) throw new PaidDraftNotFoundError();
+    const decision = evaluatePaidApprovalBinding({ operation: "create_paused", state: "ready", platform: "meta_ads", connectionId: executingSnapshot.connection.connectionId, accountId: executing.accountId, snapshotVersion: executing.version, snapshotHash: executing.snapshotHash }, {
+      approvalId: approval.id, status: approval.attempt ? "consumed" : "approved", kind: approval.kind as PaidOperationApproval["kind"], platform: paidPlatform(approval.platform), connectionId: approval.connectionId, accountId: approval.accountId, snapshotVersion: approval.snapshotVersion, snapshotHash: approval.snapshotHash,
+    });
+    if (!decision.allowed) throw denialConflict(decision.reason, executing.version);
+    assertMetaPausedSnapshot(executingSnapshot);
+    await requireMetaCreationEntitlement(input.workspaceId);
+    await verifySnapshotAssets(prisma, input.workspaceId, executingSnapshot);
+    const connection = await metaDraftConnection(input.workspaceId, executing);
+    connectionGeneration = metaConnectionGeneration(connection);
+    prepared = await (dependencies.prepareMeta ?? prepareMetaPausedCreation)({ workspaceId: input.workspaceId, connection, snapshot: executingSnapshot, now: input.now ?? new Date(), preparationKey: input.body.approvalId });
+  }
+
   try {
-    return await prisma.$transaction(async (tx) => {
+    const claimed = await prisma.$transaction(async (tx) => {
       await lockDraft(tx, input.workspaceId, input.draftId);
       const current = await findDraft(tx, input.workspaceId, input.draftId);
       const replay = await tx.paidCampaignOperationAttempt.findUnique({
@@ -1370,6 +1427,27 @@ export async function executePaidCampaignDraftOperation(input: {
         input.body.operation === "create_paused",
       );
 
+      if (prepared) {
+        if (connection.status !== "connected") throw denialConflict("provider_write_unavailable", current.version);
+        await requireMetaCreationEntitlement(input.workspaceId, tx);
+        await assertMetaConnectionGeneration(tx, connection.id, input.workspaceId, connectionGeneration!);
+        await verifySnapshotAssets(tx, input.workspaceId, parsePaidCampaignSnapshotV1(current.snapshot));
+        const outcome: MetaCreationOutcome = { kind: "meta_paused_creation", providerSideEffect: "possible", steps: [], message: "Creating the approved campaign in pause. Activation is not part of this operation." };
+        const attempt = await tx.paidCampaignOperationAttempt.create({ data: {
+          workspaceId: input.workspaceId, draftId: current.id, approvalId: approval.id,
+          requestId: input.body.requestId, requestHash, operation: "create_paused",
+          snapshotVersion: current.version, snapshotHash: current.snapshotHash,
+          status: "running", capabilityReason: "provider_preflight_passed",
+          providerOutcome: outcome as unknown as Prisma.InputJsonValue,
+          actorId: input.actorId, attemptedAt: input.now ?? new Date(),
+        } });
+        const updated = await tx.paidCampaignDraft.update({ where: { id: current.id }, data: {
+          state: transitionPaidDraftState(current.state as PaidDraftState, "creating_paused"), version: { increment: 1 }, updatedBy: input.actorId,
+        }, include: draftInclude });
+        const draft = dto(updated, input.actorRole);
+        return { draft, attempt: draft.attempts.find((item) => item.id === attempt.id)!, replayed: false };
+      }
+
       const access = serverOwnedPaidConnectionWriteAccess({
         platform: paidPlatform(connection.platform),
         connectionId: connection.id,
@@ -1427,6 +1505,47 @@ export async function executePaidCampaignDraftOperation(input: {
       if (!result) throw new PaidDraftUnavailableError("attempt_missing", "Operation attempt could not be loaded");
       return { draft, attempt: result, replayed: false };
     });
+    if (!prepared || claimed.replayed || claimed.attempt.status !== "running") return claimed;
+    try {
+      const result = await prepared.run(async (steps) => {
+        // A submitted ID must be recorded even when access has since changed.
+        // Only a new POST is stopped by rechecking the prepared account credentials.
+        if (steps.at(-1)?.status === "submitting") {
+          await assertMetaConnectionGeneration(prisma, executingSnapshot.connection.connectionId, input.workspaceId, connectionGeneration!);
+          await requireMetaCreationEntitlement(input.workspaceId);
+          await verifySnapshotAssets(prisma, input.workspaceId, executingSnapshot);
+        }
+        const outcome: MetaCreationOutcome = { kind: "meta_paused_creation", providerSideEffect: "possible", steps, message: "Creating paused objects in Meta. No activation has been requested." };
+        const saved = await prisma.paidCampaignOperationAttempt.updateMany({ where: { id: claimed.attempt.id, workspaceId: input.workspaceId, status: "running" }, data: { providerOutcome: outcome as unknown as Prisma.InputJsonValue } });
+        if (saved.count !== 1) throw new PaidDraftConflictError("operation_claim_lost", "The operation requires reconciliation before it can continue.");
+      });
+      return await completeMetaPausedOperation({ ...input, attemptId: claimed.attempt.id, result });
+    } catch (error) {
+      const currentAttempt = await prisma.paidCampaignOperationAttempt.findFirstOrThrow({ where: { id: claimed.attempt.id, workspaceId: input.workspaceId } });
+      const priorOutcome = paidProviderOutcome(currentAttempt.providerOutcome);
+      const noExternalEffect = error instanceof MetaPausedProviderError && !error.externalEffectPossible;
+      const outcome: MetaCreationOutcome = {
+        kind: "meta_paused_creation", providerSideEffect: noExternalEffect ? "none" : "possible",
+        steps: error instanceof MetaPausedProviderError && error.acknowledgedSteps
+          ? error.acknowledgedSteps
+          : priorOutcome?.kind === "meta_paused_creation" ? priorOutcome.steps : [],
+        code: error instanceof MetaPausedProviderError && /^[a-z_]{1,100}$/.test(error.code) ? error.code : "execution_interrupted",
+        message: noExternalEffect
+          ? "No campaign objects were submitted to Meta. The approval was consumed; review the draft and approve a new attempt."
+          : "Meta creation could not be fully verified. Some paused objects may exist. Do not create another copy; check the recorded objects first.",
+      };
+      await prisma.$transaction(async (tx) => {
+        await lockDraft(tx, input.workspaceId, input.draftId);
+        const latest = await findDraft(tx, input.workspaceId, input.draftId);
+        if (latest.state !== "creating_paused") return;
+        await tx.paidCampaignOperationAttempt.update({ where: { id: claimed.attempt.id }, data: { status: noExternalEffect ? "failed" : "needs_reconciliation", providerOutcome: outcome as unknown as Prisma.InputJsonValue } });
+        await tx.paidCampaignDraft.update({ where: { id: input.draftId }, data: {
+          state: transitionPaidDraftState("creating_paused", noExternalEffect ? "draft" : "needs_reconciliation", { confirmedNoExternalEffect: noExternalEffect, uncertainExternalEffect: !noExternalEffect }),
+          ...(noExternalEffect ? { version: { increment: 1 } } : {}), updatedBy: input.actorId,
+        } });
+      });
+      return metaOperationResult(input, claimed.attempt.id);
+    }
   } catch (error) {
     if (!isUniqueConflict(error)) throw error;
     const replay = await replayOperation({
@@ -1450,4 +1569,64 @@ export async function executePaidCampaignDraftOperation(input: {
     }
     throw requestConflict();
   }
+}
+
+async function metaDraftConnection(workspaceId: string, row: PaidDraftRow) {
+  const connection = await prisma.connection.findFirst({ where: { id: row.connectionId ?? "", workspaceId, platform: "meta_ads", status: "connected", externalAccountId: row.accountId } });
+  if (!connection) throw new PaidDraftConflictError("meta_connection_unavailable", "Reconnect the Meta account before creating a campaign.");
+  return connection;
+}
+
+async function metaOperationResult(input: { workspaceId: string; draftId: string; actorRole: WorkspaceRole }, attemptId: string): Promise<PaidDraftOperationResult> {
+  const draft = dto(await findDraft(prisma, input.workspaceId, input.draftId), input.actorRole);
+  const attempt = draft.attempts.find((item) => item.id === attemptId);
+  if (!attempt) throw new PaidDraftNotFoundError();
+  return { draft, attempt, replayed: false };
+}
+
+async function completeMetaPausedOperation(input: {
+  workspaceId: string; draftId: string; actorId: string; actorRole: WorkspaceRole;
+  attemptId: string;
+  result: Awaited<ReturnType<PreparedMetaCreation["run"]>>;
+}): Promise<PaidDraftOperationResult> {
+  await prisma.$transaction(async (tx) => {
+    await lockDraft(tx, input.workspaceId, input.draftId);
+    const current = await findDraft(tx, input.workspaceId, input.draftId);
+    const attempt = current.attempts.find((item) => item.id === input.attemptId && item.operation === "create_paused");
+    if (!attempt || attempt.snapshotHash !== current.snapshotHash) throw new PaidDraftConflictError("operation_binding_mismatch", "The recorded provider operation no longer matches the draft.");
+    if (attempt.status === "succeeded" && current.state === "provider_paused") return;
+    if (!["creating_paused", "needs_reconciliation"].includes(current.state)) throw denialConflict("invalid_state", current.version);
+    const now = new Date();
+    const outcome: MetaCreationOutcome = { kind: "meta_paused_creation", providerSideEffect: "paused_objects", steps: input.result.steps, campaignId: input.result.campaignId, verifiedAt: now.toISOString(), message: "Meta confirmed the campaign, audience and all ads are paused. No activation was requested." };
+    await tx.paidCampaignProviderPausedConfirmation.create({ data: {
+      workspaceId: input.workspaceId, draftId: current.id, requestId: `meta-verified-${attempt.id}`,
+      requestHash: hashPaidDraftRequest({ attemptId: attempt.id, campaignId: input.result.campaignId }),
+      platform: "meta_ads", connectionId: current.connectionId!, accountId: current.accountId,
+      providerCampaignId: input.result.campaignId, verificationStatus: "provider_verified",
+      snapshotVersion: attempt.snapshotVersion, snapshotHash: attempt.snapshotHash,
+      confirmedBy: input.actorId, confirmedAt: now,
+    } });
+    await tx.paidCampaignOperationAttempt.update({ where: { id: attempt.id }, data: { status: "succeeded", providerOutcome: outcome as unknown as Prisma.InputJsonValue } });
+    await tx.paidCampaignDraft.update({ where: { id: current.id }, data: {
+      state: transitionPaidDraftState(current.state as PaidDraftState, "provider_paused", { reconciled: current.state === "needs_reconciliation" }),
+      version: { increment: 1 }, updatedBy: input.actorId,
+    } });
+  });
+  return metaOperationResult(input, input.attemptId);
+}
+
+export async function reconcilePaidMetaCreation(input: {
+  workspaceId: string; draftId: string; actorId: string; actorRole: WorkspaceRole;
+}): Promise<PaidDraftOperationResult> {
+  requireManager(input.actorRole);
+  const current = await findDraft(prisma, input.workspaceId, input.draftId);
+  const attempt = current.attempts.find((item) => item.operation === "create_paused" && paidProviderOutcome(item.providerOutcome)?.kind === "meta_paused_creation");
+  if (!attempt) throw new PaidDraftNotFoundError();
+  if (attempt.status === "succeeded") return metaOperationResult(input, attempt.id);
+  if (attempt.status === "running" && Date.now() - attempt.attemptedAt.getTime() < 5 * 60_000) throw new PaidDraftConflictError("operation_running", "Creation is still in progress. Refresh before checking recovery.");
+  const outcome = paidProviderOutcome(attempt.providerOutcome);
+  if (outcome?.kind !== "meta_paused_creation") throw new PaidDraftNotFoundError();
+  const connection = await metaDraftConnection(input.workspaceId, current);
+  const result = await reconcileMetaPausedCreation({ connection, snapshot: parsePaidCampaignSnapshotV1(current.snapshot), steps: outcome.steps });
+  return completeMetaPausedOperation({ ...input, attemptId: attempt.id, result });
 }

@@ -1,16 +1,25 @@
 "use client";
 
-import type { ChangeEvent } from "react";
+import { useEffect, useState, type ChangeEvent, type ReactNode } from "react";
 import {
+  LuCalendarDays,
   LuCheck,
+  LuEye,
+  LuEyeOff,
+  LuFileText,
+  LuLayers,
+  LuMegaphone,
   LuPlus,
   LuSave,
+  LuSlidersHorizontal,
   LuTrash2,
   LuUpload,
 } from "react-icons/lu";
 
 import type { ContentAssetDto } from "@/lib/content/types";
 import type { PaidLaunchTemplate, SocialGender } from "@/lib/paid-drafts/types";
+import { PaidDraftAdPreview } from "./PaidDraftAdPreview";
+import { selectedPaidPreview, type PaidPreviewSelection } from "./paid-draft-preview";
 
 import {
   CALL_TO_ACTION_LABEL,
@@ -29,7 +38,7 @@ import {
 } from "./paid-draft-form";
 
 const focusRing = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-plum";
-const field = `w-full min-w-0 rounded-[7px] border border-line-1 bg-surface-card px-[10px] py-[8px] text-[13px] text-ink-900 outline-none focus:border-plum-border disabled:cursor-not-allowed disabled:bg-track-1 disabled:text-ink-400 ${focusRing}`;
+const field = `w-full min-h-[36px] min-w-0 rounded-[7px] border border-line-1 bg-surface-card px-[10px] py-[8px] text-[13px] text-ink-900 outline-none focus:border-plum-border disabled:cursor-not-allowed disabled:bg-track-1 disabled:text-ink-400 ${focusRing}`;
 const label = "text-[11px] font-semibold text-ink-500";
 
 interface PaidDraftEditorProps {
@@ -49,11 +58,16 @@ interface PaidDraftEditorProps {
   onReady: () => void;
   canMarkReady: boolean;
   onUpload: (file: File) => void;
+  deliverySettings?: ReactNode;
 }
 
 function ErrorText({ issues, path }: { issues: PaidDraftFormIssue[]; path: string }) {
   const issue = issues.find((item) => item.path === path || item.path.startsWith(`${path}.`));
   return issue ? <span className="text-[11px] text-neg-700">{issue.message}</span> : null;
+}
+
+function SectionHeading({ id, icon, children }: { id: string; icon: ReactNode; children: ReactNode }) {
+  return <h3 id={id} className="m-0 flex items-center gap-2.5 text-[14px] font-semibold text-ink-900"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-[6px] bg-plum-soft text-plum" aria-hidden>{icon}</span>{children}</h3>;
 }
 
 function updateAt<T>(items: readonly T[], index: number, value: T): T[] {
@@ -81,7 +95,14 @@ export function PaidDraftEditor({
   onReady,
   canMarkReady,
   onUpload,
+  deliverySettings,
 }: PaidDraftEditorProps): React.JSX.Element {
+  const [selection, setSelection] = useState<PaidPreviewSelection | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(true);
+  useEffect(() => {
+    if (window.matchMedia("(max-width: 767px)").matches) setPreviewOpen(false);
+  }, []);
+  const selected = selectedPaidPreview(value, selection);
   const social = value.connection.platform !== "google_ads";
   const assetOptions = assetOptionsForPlatform(assets, value.connection.platform);
   const set = <K extends keyof PaidDraftFormValue>(key: K, next: PaidDraftFormValue[K]) => {
@@ -94,17 +115,27 @@ export function PaidDraftEditor({
     const group = value.adGroups[groupIndex];
     setGroup(groupIndex, { ...group, ads: updateAt(group.ads, adIndex, ad) });
   };
+  const showAdPreview = (next: PaidPreviewSelection) => {
+    setSelection(next);
+    setPreviewOpen(true);
+    requestAnimationFrame(() => {
+      const preview = document.getElementById("paid-draft-preview");
+      if (preview && (preview.closest("form")?.clientWidth ?? 0) < 850) {
+        preview.scrollIntoView({ block: "start", behavior: "smooth" });
+      }
+    });
+  };
 
   return (
     <form
       aria-label={isNew ? "New paid campaign draft" : `Edit ${value.campaignName || "paid campaign draft"}`}
       onSubmit={(event) => { event.preventDefault(); onSave(); }}
-      className="mx-auto w-full max-w-[980px]"
+      className="mx-auto w-full min-w-0 max-w-[1240px] [container-type:inline-size] [overflow-wrap:anywhere] [&_label]:content-start"
     >
       <div className="flex flex-wrap items-start justify-between gap-[12px] border-b border-line-2 pb-[16px]">
-        <div>
-          <p className="m-0 font-mono text-[9.5px] font-semibold uppercase tracking-[0.08em] text-ink-300">Manual campaign builder</p>
-          <h2 className="mb-0 mt-[3px] text-[20px] font-semibold text-ink-900">
+        <div className="min-w-0 flex-1 basis-[260px]">
+          <p className="m-0 flex items-center gap-2 text-[10px] font-semibold text-plum"><LuMegaphone aria-hidden />{PLATFORM_LABEL[value.connection.platform]}<span className="text-ink-300">/</span>{value.source === "ai" ? "AI-assisted draft" : "Manual campaign builder"}</p>
+          <h2 className="mb-0 mt-[5px] font-serif text-[25px] font-medium leading-tight text-ink-900">
             {isNew ? "New paid campaign" : value.campaignName || "Untitled campaign"}
           </h2>
           <p className="mb-0 mt-[4px] text-[11.5px] text-ink-400">Saved drafts create no ads and spend no budget.</p>
@@ -113,7 +144,7 @@ export function PaidDraftEditor({
           <button
             type="submit"
             disabled={disabled || saving || (!isNew && !dirty)}
-            className={`inline-flex h-[36px] items-center gap-[6px] rounded-[7px] bg-ink-900 px-[12px] text-[12px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45 ${focusRing}`}
+            className={`inline-flex h-[36px] items-center gap-[6px] rounded-[7px] bg-plum px-[12px] text-[12px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45 ${focusRing}`}
           >
             <LuSave aria-hidden /> {saving ? "Saving…" : isNew ? "Create draft" : "Save changes"}
           </button>
@@ -131,6 +162,16 @@ export function PaidDraftEditor({
         </div>
       </div>
 
+      <nav aria-label="Campaign editor sections" className="flex flex-wrap items-center gap-x-1 gap-y-2 border-b border-line-2 py-2.5">
+        {[
+          { id: "paid-draft-setup-title", title: "Campaign", icon: LuSlidersHorizontal },
+          { id: "paid-draft-budget-title", title: "Budget & dates", icon: LuCalendarDays },
+          { id: "paid-draft-groups-title", title: "Audience & ads", icon: LuLayers },
+          { id: "paid-draft-assumptions-title", title: "Assumptions", icon: LuFileText },
+        ].map(({ id, title, icon: Icon }) => <button key={id} type="button" onClick={() => document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "smooth" })} className={`inline-flex min-h-8 items-center gap-1.5 rounded-[5px] border-0 bg-transparent px-2 text-[11px] font-medium text-ink-500 hover:bg-track-1 hover:text-plum ${focusRing}`}><Icon aria-hidden />{title}</button>)}
+        <button type="button" aria-label={previewOpen ? "Hide ad preview" : "Show ad preview"} aria-expanded={previewOpen} aria-controls="paid-draft-preview" onClick={() => setPreviewOpen(!previewOpen)} className={`ml-auto grid h-8 w-8 shrink-0 place-items-center rounded-[5px] border ${previewOpen ? "border-plum-border bg-plum-soft text-plum" : "border-line-2 text-ink-400"} ${focusRing}`} title={previewOpen ? "Hide ad preview" : "Show ad preview"}>{previewOpen ? <LuEye aria-hidden /> : <LuEyeOff aria-hidden />}</button>
+      </nav>
+
       {issues.length ? (
         <div role="alert" className="mt-[12px] border-l-[3px] border-neg-700 bg-neg-bg px-[12px] py-[10px] text-[12px] text-neg-700">
           <p className="m-0 font-semibold">Resolve {issues.length} validation {issues.length === 1 ? "issue" : "issues"} before saving.</p>
@@ -140,8 +181,10 @@ export function PaidDraftEditor({
         </div>
       ) : null}
 
+      <div className={`grid min-w-0 grid-cols-1 gap-x-6 ${previewOpen ? "[@container(min-width:850px)]:grid-cols-[minmax(0,1fr)_330px]" : ""}`}>
+      <div className="min-w-0 [container-type:inline-size]">
       <section className="border-b border-line-2 py-[18px]" aria-labelledby="paid-draft-setup-title">
-        <h3 id="paid-draft-setup-title" className="m-0 text-[14px] font-semibold text-ink-900">Campaign setup</h3>
+        <SectionHeading id="paid-draft-setup-title" icon={<LuSlidersHorizontal />}>Campaign setup</SectionHeading>
         <div className="mt-[12px] grid gap-[12px] md:grid-cols-2">
           <label className="grid gap-[5px]">
             <span className={label}>Connected paid account</span>
@@ -187,11 +230,12 @@ export function PaidDraftEditor({
             <ErrorText issues={issues} path="campaign.name" />
           </label>
         </div>
+        {deliverySettings}
       </section>
 
       <section className="border-b border-line-2 py-[18px]" aria-labelledby="paid-draft-budget-title">
-        <h3 id="paid-draft-budget-title" className="m-0 text-[14px] font-semibold text-ink-900">Budget and schedule</h3>
-        <div className="mt-[12px] grid gap-[12px] sm:grid-cols-2 lg:grid-cols-4">
+        <SectionHeading id="paid-draft-budget-title" icon={<LuCalendarDays />}>Budget and schedule</SectionHeading>
+        <div className="mt-[12px] grid gap-[12px] sm:grid-cols-2 [@container(min-width:680px)]:grid-cols-4">
           <label className="grid gap-[5px]"><span className={label}>Budget</span><input aria-label="Budget" inputMode="decimal" placeholder="50.00" disabled={disabled} value={value.budgetMajor} onChange={(event) => set("budgetMajor", event.target.value)} className={field} /><ErrorText issues={issues} path="budget.amountMinor" /></label>
           <label className="grid gap-[5px]"><span className={label}>Currency</span><input aria-label="Currency" maxLength={3} placeholder="EUR" disabled={disabled} value={value.currency} onChange={(event) => set("currency", event.target.value.toUpperCase())} className={field} /><ErrorText issues={issues} path="budget.currency" /></label>
           <label className="grid gap-[5px]"><span className={label}>Budget cadence</span><select aria-label="Budget cadence" disabled={disabled} value={value.cadence} onChange={(event) => set("cadence", event.target.value as "daily" | "lifetime")} className={field}><option value="daily">Daily</option><option value="lifetime">Lifetime</option></select></label>
@@ -204,13 +248,13 @@ export function PaidDraftEditor({
       </section>
 
       <section className="border-b border-line-2 py-[18px]" aria-labelledby="paid-draft-assumptions-title">
-        <h3 id="paid-draft-assumptions-title" className="m-0 text-[14px] font-semibold text-ink-900">Assumptions</h3>
+        <SectionHeading id="paid-draft-assumptions-title" icon={<LuFileText />}>Assumptions</SectionHeading>
         <label className="mt-[10px] grid gap-[5px]"><span className={label}>One assumption per line</span><textarea aria-label="Assumptions" rows={3} maxLength={6000} disabled={disabled} value={value.assumptions} onChange={(event) => set("assumptions", event.target.value)} className={`${field} resize-y leading-[1.5]`} /></label>
       </section>
 
       <section className="py-[18px]" aria-labelledby="paid-draft-groups-title">
         <div className="flex flex-wrap items-center justify-between gap-[8px]">
-          <div><h3 id="paid-draft-groups-title" className="m-0 text-[14px] font-semibold text-ink-900">Ad groups and ads</h3><p className="mb-0 mt-[2px] text-[11px] text-ink-400">Every group and ad is included in the versioned approval snapshot.</p></div>
+          <div><SectionHeading id="paid-draft-groups-title" icon={<LuLayers />}>Ad groups and ads</SectionHeading></div>
           <button type="button" disabled={disabled || value.adGroups.length >= 20} onClick={() => set("adGroups", [...value.adGroups, createPaidDraftAdGroup()])} className={`inline-flex h-[34px] items-center gap-[6px] rounded-[7px] border border-line-1 bg-surface-card px-[10px] text-[11.5px] font-semibold text-ink-700 disabled:opacity-45 ${focusRing}`}><LuPlus aria-hidden /> Add ad group</button>
         </div>
 
@@ -248,8 +292,8 @@ export function PaidDraftEditor({
                     const adPrefix = `${groupPrefix}.ads[${adIndex}]`;
                     return (
                       <div key={ad.localId} className="border-b border-line-3 py-[14px] last:border-b-0">
-                        <div className="flex items-center justify-between gap-[8px]"><span className="font-mono text-[9.5px] font-semibold uppercase tracking-[0.08em] text-ink-300">Ad {adIndex + 1}</span><button type="button" aria-label={`Remove ad ${adIndex + 1} from ad group ${groupIndex + 1}`} disabled={disabled || group.ads.length === 1} onClick={() => setGroup(groupIndex, { ...group, ads: removeAt(group.ads, adIndex) })} className={`grid h-[30px] w-[30px] place-items-center rounded-[6px] border-0 bg-transparent text-ink-400 disabled:opacity-35 ${focusRing}`}><LuTrash2 aria-hidden /></button></div>
-                        <div className="mt-[8px] grid gap-[11px] md:grid-cols-2">
+                        <div className="flex items-center justify-between gap-[8px]"><button type="button" aria-label={`Preview ad ${adIndex + 1} from ad group ${groupIndex + 1}`} aria-pressed={selected?.groupId === group.localId && selected.adId === ad.localId} onClick={() => showAdPreview({ groupId: group.localId, adId: ad.localId })} className={`inline-flex min-h-8 items-center gap-1.5 rounded-[5px] border-0 px-2 text-[11px] font-semibold ${selected?.groupId === group.localId && selected.adId === ad.localId ? "bg-plum-soft text-plum" : "bg-transparent text-ink-500"} ${focusRing}`} title="Preview this ad"><LuEye aria-hidden />Ad {adIndex + 1}</button><button type="button" aria-label={`Remove ad ${adIndex + 1} from ad group ${groupIndex + 1}`} disabled={disabled || group.ads.length === 1} onClick={() => setGroup(groupIndex, { ...group, ads: removeAt(group.ads, adIndex) })} className={`grid h-[30px] w-[30px] place-items-center rounded-[6px] border-0 bg-transparent text-ink-400 disabled:opacity-35 ${focusRing}`}><LuTrash2 aria-hidden /></button></div>
+                        <div onFocusCapture={() => setSelection({ groupId: group.localId, adId: ad.localId })} className="mt-[8px] grid gap-[11px] md:grid-cols-2">
                           <label className="grid gap-[5px] md:col-span-2"><span className={label}>Ad name</span><input aria-label={`Ad group ${groupIndex + 1} ad ${adIndex + 1} name`} maxLength={128} disabled={disabled} value={ad.name} onChange={(event) => setAd(groupIndex, adIndex, { ...ad, name: event.target.value })} className={field} /><ErrorText issues={issues} path={`${adPrefix}.name`} /></label>
                           {!social ? (
                             <>
@@ -278,6 +322,9 @@ export function PaidDraftEditor({
           })}
         </div>
       </section>
+      </div>
+      {previewOpen ? <div id="paid-draft-preview" className="order-first min-w-0 border-b border-line-2 py-[18px] [@container(min-width:850px)]:order-last [@container(min-width:850px)]:border-b-0 [@container(min-width:850px)]:border-l [@container(min-width:850px)]:pl-5"><div className="[@container(min-width:850px)]:sticky [@container(min-width:850px)]:top-0"><PaidDraftAdPreview value={value} assets={assets} selection={selection} onSelect={setSelection} unsaved={isNew || dirty} /></div></div> : null}
+      </div>
     </form>
   );
 }
