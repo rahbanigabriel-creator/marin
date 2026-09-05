@@ -92,7 +92,6 @@ function CampaignVisual({ campaign }: { campaign: PaidCampaign }): React.JSX.Ele
 function CampaignFocusCard({ campaign, maxSpend, onSelect }: { campaign: PaidCampaign; maxSpend: number; onSelect: (campaign: PaidCampaign) => void }): React.JSX.Element {
   const spendUnavailable = metricIsUnavailable("spend", campaign.spend, campaign.currency);
   const barWidth = spendUnavailable || campaign.spend == null ? 0 : Math.max(8, Math.round((campaign.spend / maxSpend) * 100));
-  const status = campaignStatus(campaign.status);
 
   return (
     <button
