@@ -224,13 +224,13 @@ function dashboardPayload() {
   };
 }
 
-async function mockApp(page: Page): Promise<{ syncRequests: Array<{ body: unknown; contentType: string | undefined }> }> {
+async function mockApp(page: Page, dashboard: unknown = dashboardPayload()): Promise<{ syncRequests: Array<{ body: unknown; contentType: string | undefined }> }> {
   const syncRequests: Array<{ body: unknown; contentType: string | undefined }> = [];
   await page.route(/\/api\/connections(?:\?.*)?$/, (route) => json(route, { workspace: { name: "Solo Founder" }, connections: [] }));
   await page.route(/\/api\/brands(?:\?.*)?$/, (route) => json(route, { brands: [BRAND] }));
   await page.route(/\/api\/conversations(?:\?.*)?$/, (route) => json(route, { conversations: [] }));
   await page.route(/\/api\/billing(?:\?.*)?$/, (route) => json(route, { billing: { canManage: true, entitlements: { canUseOpus: false }, resources: { connections: 2 } } }));
-  await page.route(/\/api\/dashboard(?:\?.*)?$/, (route) => json(route, dashboardPayload()));
+  await page.route(/\/api\/dashboard(?:\?.*)?$/, (route) => json(route, dashboard));
   await page.route(/\/api\/sync(?:\?.*)?$/, async (route) => {
     const request = route.request();
     syncRequests.push({ body: request.postDataJSON(), contentType: request.headers()["content-type"] });
@@ -282,11 +282,23 @@ test("keeps duplicate campaign names distinct and reports paid data truthfully",
 
   await expect(page.getByRole("heading", { name: "Paid command center" })).toBeVisible();
   await expect(page.getByTestId("paid-overview")).toBeVisible();
-  await expect(page.getByText("Performance snapshot", { exact: true })).toBeVisible();
-  await expect(page.getByText("Campaign posture", { exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "2 active · 1 paused" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Highest observed spend" })).toBeVisible();
-  await expect(page.getByTestId("paid-campaign-focus-grid").getByRole("button")).toHaveCount(3);
+  await expect(page.getByRole("group", { name: "Paid performance trend", exact: true })).toBeVisible();
+  const mixedTrend = page.getByRole("group", { name: "Paid performance trend", exact: true });
+  await mixedTrend.getByText("View chart data", { exact: true }).click();
+  const displayedValues = await mixedTrend.getByRole("table").locator("tbody tr td:last-child").allTextContents();
+  expect(displayedValues.length).toBeGreaterThan(0);
+  expect(displayedValues.every((value) => value.trim() === "Unavailable")).toBe(true);
+  await mixedTrend.getByText("View chart data", { exact: true }).click();
+  await expect(page.getByRole("img", { name: "2 active, 1 paused, 0 other campaigns" })).toBeVisible();
+  await expect(page.getByTestId("paid-creative-gallery").getByRole("article")).toHaveCount(3);
+  await page.getByRole("button", { name: "Show paused campaigns" }).click();
+  await expect(page.getByTestId("paid-creative-gallery").getByRole("article")).toHaveCount(1);
+  await expect(page.getByTestId("paid-creative-gallery")).toContainText("EU Store");
+  await page.getByRole("button", { name: "Clear campaign status filter" }).click();
+  await page.getByRole("button", { name: "Open creative details for Always On in US Store" }).click();
+  await expect(page.getByRole("dialog", { name: "Always On" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Table", exact: true }).click();
   await expect(page.getByTestId("campaign-table-scroll").getByText("Always On", { exact: true })).toHaveCount(2);
   await expect(page.getByRole("row", { name: "Open Always On for US Store" })).toHaveCount(1);
   await expect(page.getByRole("row", { name: "Open Always On for EU Store" })).toHaveCount(1);
@@ -294,13 +306,11 @@ test("keeps duplicate campaign names distinct and reports paid data truthfully",
   await expect(page.getByRole("button", { name: /US Store/ })).toHaveAttribute("aria-pressed", "false");
   await expect(page.getByRole("button", { name: /EU Store/ })).toHaveAttribute("aria-pressed", "false");
   await expect(page.getByText(/Currency-safe totals unavailable \(EUR, USD \+ unknown currency\)/)).toBeVisible();
+  await page.getByText("Data coverage", { exact: false }).first().click();
   await expect(page.getByText(/Requested Aug 1 – Aug 20 \(multiple source timezones\)/)).toBeVisible();
   await expect(page.getByText(/Observed Aug 1 – Aug 20 \(multiple source timezones\)/)).toBeVisible();
   await expectContainedLayout(page);
 
-  await page.getByTestId("paid-campaign-focus-grid").getByRole("button", { name: "Open details for Always On" }).first().click();
-  await expect(page.getByRole("dialog", { name: "Always On" })).toBeVisible();
-  await page.keyboard.press("Escape");
 
   const usRow = page.getByRole("row", { name: "Open Always On for US Store" });
   const euRow = page.getByRole("row", { name: "Open Always On for EU Store" });
@@ -358,8 +368,8 @@ test("paid command center stays contained on a mobile viewport", async ({ page }
 
   await expect(page.getByRole("heading", { name: "Paid command center" })).toBeVisible();
   await expect(page.getByTestId("paid-overview")).toBeVisible();
-  await expect(page.getByTestId("paid-campaign-focus-grid")).toBeVisible();
-  await expect(page.getByRole("button", { name: /US Store/ })).toBeVisible();
+  await expect(page.getByTestId("paid-creative-gallery")).toBeVisible();
+  await expect(page.getByRole("group", { name: "Filter by ad account" }).getByRole("button", { name: /US Store/ })).toBeVisible();
   const layout = await page.evaluate(() => ({
     viewport: window.innerWidth,
     scrollWidth: document.documentElement.scrollWidth,
@@ -370,6 +380,7 @@ test("paid command center stays contained on a mobile viewport", async ({ page }
   }));
   expect(layout.scrollWidth, JSON.stringify(layout)).toBeLessThanOrEqual(layout.viewport);
   await expectContainedLayout(page);
+  await page.getByRole("button", { name: "Table", exact: true }).click();
   const tableScroll = await page.getByTestId("campaign-table-scroll").evaluate((element) => {
     const node = element as HTMLElement;
     const box = node.getBoundingClientRect();
@@ -414,4 +425,73 @@ test("sync route enforces the exact bounded JSON date-range contract", async ({ 
     data: "{\"from\":\"2026-08-10\",\"to\":\"2026-08-12\"}",
   });
   expect(missingContentType.status()).toBe(400);
+});
+
+test("visual workspace preserves sparse data, exact small spend, and source creative failures", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const payload = dashboardPayload();
+  const campaign = payload.data.campaigns[0];
+  const nullableMetrics = { spend: null, revenue: null, conversions: null, clicks: null, impressions: null, roas: null, cpa: null, ctr: null, cpc: null, cpm: null, cvr: null, aov: null };
+  const series = Array.from({ length: 20 }, (_, index) => ({
+    date: `2026-08-${String(index + 1).padStart(2, "0")}`,
+    metrics: index === 8 || index === 10
+      ? { ...nullableMetrics, spend: index === 8 ? 7.25 : 2.99, clicks: 168, impressions: 750, ctr: 22.4 }
+      : nullableMetrics,
+  }));
+  const metrics = { ...nullableMetrics, spend: 10.24, clicks: 336, impressions: 1500, ctr: 22.4 };
+  const fixture = {
+    mode: "live",
+    data: {
+      ...payload.data,
+      accounts: [{ ...payload.data.accounts[0], currency: "EUR", platform: "meta_ads", platformLabel: "Meta Ads", accountName: "Fixture account", timezone: "Europe/Madrid", state: "partial", observedFrom: "2026-08-09", observedTo: "2026-08-11" }],
+      currencies: ["EUR"], mixedCurrency: false,
+      totals: { metrics }, series,
+      platforms: [{ platform: "meta_ads", label: "Meta Ads", currency: "EUR", metrics }],
+      campaigns: Array.from({ length: 3 }, (_, index) => ({
+        ...campaign, externalId: `fixture_${index}`, currency: "EUR", platform: "meta_ads", label: "Meta Ads", accountName: "Fixture account",
+        campaign: ["Founder story", "Product walkthrough", "Customer perspective"][index],
+        status: "paused", metrics: { ...metrics, spend: index === 0 ? 10.24 : 0 }, series,
+        ads: [{ ...campaign.ads[0], thumbnailUrl: index === 1 ? "/missing-fixture-preview.png" : "/marpin-logo.png", title: "Fixture creative", body: "Source-supplied creative preview", metricsFrom: "2026-08-09", metricsTo: "2026-08-11" }],
+      })),
+    },
+  };
+  fixture.data.campaigns[0].ads.push({ ...fixture.data.campaigns[0].ads[0], externalId: "fixture-second", title: "Second creative" });
+  await mockApp(page, fixture);
+  await page.goto("/app?mode=paid&view=campaigns");
+  await expect(page.getByRole("button", { name: "Chart Ad spend" })).toContainText("€10.24");
+  await page.getByRole("group", { name: "Filter by ad account" }).getByRole("button", { name: /Fixture account/ }).click();
+  await expect(page.getByRole("button", { name: "Chart Ad spend" })).toContainText("€10.24");
+  const selector = page.getByRole("combobox", { name: "Preview creative for Founder story in Fixture account" });
+  await selector.selectOption("fixture-second");
+  fixture.data.campaigns[0].ads.reverse();
+  await page.getByRole("button", { name: "Sync now", exact: true }).click();
+  await expect(selector).toHaveValue("fixture-second");
+  fixture.data.campaigns[0].ads.shift();
+  await page.getByRole("button", { name: "Sync now", exact: true }).click();
+  await expect(selector).toHaveCount(0);
+  await expect(page.getByTestId("paid-creative-gallery").getByRole("article").first().getByRole("img", { name: "Fixture creative" })).toBeVisible();
+  await expect(page.getByRole("img", { name: "0 active, 3 paused, 0 other campaigns" })).toBeVisible();
+  await expect(page.getByTestId("paid-creative-gallery").getByText("Preview unavailable", { exact: true })).toHaveCount(1);
+  const preview = page.getByTestId("paid-creative-gallery").getByRole("img", { name: "Fixture creative" }).first();
+  await expect.poll(() => preview.evaluate((node) => (node as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  await page.getByRole("button", { name: "Reported days", exact: true }).click();
+  const trend = page.getByRole("group", { name: "Paid performance trend", exact: true });
+  await trend.getByText("View chart data", { exact: true }).click();
+  await expect(trend.getByRole("table").getByRole("row")).toHaveCount(4);
+  await expect(trend.getByRole("row").filter({ hasText: "Aug 10" })).toContainText("Unavailable");
+  await trend.getByText("View chart data", { exact: true }).click();
+  await page.getByRole("button", { name: "Bar chart", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Bar chart", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expectContainedLayout(page);
+  await page.screenshot({ path: testInfo.outputPath("paid-desktop.png"), fullPage: true });
+  await page.getByRole("button", { name: "Chart Conversions", exact: true }).click();
+  await expect(trend).toContainText("is unavailable for this source.");
+  await page.getByRole("button", { name: "Chart Ad spend", exact: true }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectContainedLayout(page);
+  await page.screenshot({ path: testInfo.outputPath("paid-mobile.png"), fullPage: true });
+  await trend.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("paid-mobile-chart.png") });
+  await page.getByTestId("paid-creative-gallery").getByRole("article").first().scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("paid-mobile-creative.png") });
 });

@@ -702,8 +702,9 @@ function metaCreative(creative: ProviderRecord | undefined): Pick<AdCreative, "c
   const video = optionalRecord(platform, story?.video_data);
   const linkCallToAction = optionalRecord(platform, link?.call_to_action);
   const videoCallToAction = optionalRecord(platform, video?.call_to_action);
-  const thumbnailUrl = optionalText(platform, creative?.thumbnail_url)
-    ?? optionalText(platform, creative?.image_url);
+  const thumbnail = optionalText(platform, creative?.thumbnail_url);
+  const image = optionalText(platform, creative?.image_url);
+  const thumbnailUrl = image ?? thumbnail;
   const objectType = optionalText(platform, creative?.object_type);
   return {
     creativeType: video || objectType?.toUpperCase().includes("VIDEO")

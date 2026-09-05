@@ -1,254 +1,136 @@
 "use client";
 
 import { useState } from "react";
-import {
-  LuActivity,
-  LuArrowUpRight,
-  LuChartNoAxesCombined,
-  LuCircleAlert,
-  LuCircleCheck,
-  LuEye,
-  LuPause,
-  LuPlay,
-} from "react-icons/lu";
-import {
-  compact,
-  coverageLabel,
-  metricIsUnavailable,
-  money0,
-  pct,
-  sourceStateColor,
-  sourceStateLabel,
-  type MetricKey,
-  type PaidCampaign,
-  type PaidDashboardData,
-} from "./format";
+import { LuArrowUpRight, LuCircleDollarSign, LuEye, LuMousePointer2, LuPercent, LuTarget, LuTrendingUp } from "react-icons/lu";
+import { SiGoogleads, SiMeta } from "react-icons/si";
+import { MetricTrendChart } from "./MetricTrendChart";
+import { COLUMNS, MONEY_METRICS, compact, dailyValue, dayLabel, deltaFor, metricIsUnavailable, money2, type MetricKey, type PaidCampaign, type PaidDashboardData } from "./format";
 
-const REPORTING_METRICS: MetricKey[] = ["spend", "revenue", "roas", "conversions", "clicks", "ctr"];
+const METRICS = [
+  { key: "spend", label: "Ad spend", icon: LuCircleDollarSign },
+  { key: "impressions", label: "Impressions", icon: LuEye },
+  { key: "clicks", label: "Clicks", icon: LuMousePointer2 },
+  { key: "ctr", label: "Click-through rate", icon: LuPercent },
+  { key: "conversions", label: "Conversions", icon: LuTarget },
+  { key: "roas", label: "Return on ad spend", icon: LuTrendingUp },
+] satisfies { key: MetricKey; label: string; icon: typeof LuEye }[];
 
-function sourceTimezone(data: PaidDashboardData): string | null {
-  const zones = [...new Set(data.sources.map((source) => source.timezone).filter((value): value is string => !!value))];
-  return zones.length === 1 ? zones[0] : zones.length > 1 ? "multiple source timezones" : null;
-}
+export type CampaignStatusFilter = "all" | "active" | "paused" | "other";
 
-function campaignStatus(value: string | null): "active" | "paused" | "other" {
+export function campaignStatus(value: string | null): Exclude<CampaignStatusFilter, "all"> {
   const status = value?.toLowerCase();
-  if (status === "active" || status === "enabled") return "active";
-  if (status === "paused") return "paused";
-  return "other";
+  return status === "active" || status === "enabled" ? "active" : status === "paused" ? "paused" : "other";
 }
 
-function statusStyle(status: "active" | "paused" | "other"): React.CSSProperties {
-  if (status === "active") return { background: "#E7EEE0", color: "#4C6B40" };
-  if (status === "paused") return { background: "#EFEBE4", color: "#6B6359" };
-  return { background: "#F2E2EA", color: "#7E2F50" };
+export function PlatformMark({ platform, size = 16 }: { platform: string; size?: number }): React.JSX.Element {
+  return platform === "meta_ads" ? <SiMeta size={size} aria-hidden className="text-[#1877F2]" /> : <SiGoogleads size={size} aria-hidden className="text-[#4285F4]" />;
 }
 
-function statusLabel(status: "active" | "paused" | "other"): string {
-  if (status === "active") return "active";
-  if (status === "paused") return "paused";
-  return "other status";
+function unavailable(data: PaidDashboardData, key: MetricKey): boolean {
+  return metricIsUnavailable(key, data.totals[key], data.currency)
+    || (data.mixedCurrency && (MONEY_METRICS.has(key) || key === "roas"));
 }
 
-function sourceStateMessage(data: PaidDashboardData): string {
-  if (data.state === "available") return "Connected sources are available for sync.";
-  if (data.state === "partial") return "Some requested metrics were not returned by the connected source.";
-  if (data.state === "stale") return "This view contains saved observations that may no longer be current.";
-  if (data.state === "failed") return "Saved observations remain visible, but the most recent source refresh failed.";
-  if (data.state === "revoked") return "One or more accounts need to be reconnected before their data can refresh.";
-  return "Source health is currently unavailable.";
-}
-
-function CampaignVisual({ campaign }: { campaign: PaidCampaign }): React.JSX.Element {
-  const [imageAvailable, setImageAvailable] = useState(true);
-  const thumbnail = campaign.ads.find((ad) => !!ad.thumbnailUrl)?.thumbnailUrl;
-  const hasThumbnail = !!thumbnail && imageAvailable;
-  const status = campaignStatus(campaign.status);
-
-  return (
-    <div className="relative flex h-[116px] w-full overflow-hidden rounded-[8px] border border-line-3 bg-[#F4F1EB] sm:h-[132px]" aria-hidden>
-      {hasThumbnail ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={thumbnail as string} alt="" referrerPolicy="no-referrer" onError={() => setImageAvailable(false)} className="h-full w-full object-cover" />
-      ) : (
-        <>
-          <div className="absolute inset-y-0 left-0 w-[34%] bg-plum-soft" />
-          <div className="absolute left-[12%] top-[18px] h-[52px] w-[52px] rounded-[8px] border border-plum-border bg-white sm:h-[58px] sm:w-[58px]" />
-          <div className="absolute left-[12%] top-[80px] h-[7px] w-[46%] rounded-full bg-plum-muted/70 sm:top-[89px]" />
-          <div className="absolute left-[12%] top-[94px] h-[6px] w-[35%] rounded-full bg-[#C9C4BA] sm:top-[103px]" />
-          <div className="absolute right-[13px] top-[16px] flex h-[28px] w-[28px] items-center justify-center rounded-[7px] border border-line-3 bg-white text-plum">
-            <LuActivity size={15} />
-          </div>
-          <div className="absolute bottom-[15px] right-[14px] font-mono text-[9px] font-semibold uppercase tracking-[0.08em] text-ink-300">{campaign.label}</div>
-        </>
-      )}
-      <span className="absolute left-[10px] top-[10px] rounded-pill font-mono text-[9px] font-semibold" style={{ padding: "2px 7px", ...statusStyle(status) }}>
-        {statusLabel(status)}
-      </span>
-    </div>
-  );
-}
-
-function CampaignFocusCard({ campaign, maxSpend, onSelect }: { campaign: PaidCampaign; maxSpend: number; onSelect: (campaign: PaidCampaign) => void }): React.JSX.Element {
-  const spendUnavailable = metricIsUnavailable("spend", campaign.spend, campaign.currency);
-  const barWidth = spendUnavailable || campaign.spend == null ? 0 : Math.max(8, Math.round((campaign.spend / maxSpend) * 100));
-
-  return (
-    <button
-      type="button"
-      onClick={() => onSelect(campaign)}
-      className="group w-full min-w-0 cursor-pointer text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-plum"
-      aria-label={`Open details for ${campaign.campaign}`}
-    >
-      <CampaignVisual campaign={campaign} />
-      <div className="pt-[10px]">
-        <div className="flex min-w-0 items-start justify-between gap-[8px]">
-          <div className="min-w-0">
-            <p className="truncate font-sans text-[13px] font-semibold text-ink-900 group-hover:text-plum">{campaign.campaign}</p>
-            <p className="mt-[2px] truncate font-mono text-[9.5px] text-ink-300">{campaign.accountName} · {campaign.objective ?? "Objective unavailable"}</p>
-          </div>
-          <LuArrowUpRight className="mt-[1px] flex-none text-ink-300 group-hover:text-plum" aria-hidden size={15} />
-        </div>
-        <div className="mt-[10px] flex items-baseline justify-between gap-[8px]">
-          <span className="font-mono text-[16px] font-semibold text-ink-900">{spendUnavailable ? "—" : money0(campaign.spend, campaign.currency)}</span>
-          <span className="font-mono text-[10.5px] text-ink-300">{campaign.ctr == null ? "CTR unavailable" : `${pct(campaign.ctr)} CTR`}</span>
-        </div>
-        <div className="mt-[6px] h-[4px] overflow-hidden rounded-full bg-track-1" aria-hidden>
-          <div className="h-full rounded-full bg-plum" style={{ width: `${barWidth}%` }} />
-        </div>
-      </div>
-    </button>
-  );
-}
-
-export function PaidOverview({
-  data,
-  campaigns,
-  onSelectCampaign,
-  onOpenDrafts,
-}: {
+export function PaidOverview({ data, campaigns, statusFilter, onStatusFilter, onOpenDrafts, onSelectCampaign }: {
   data: PaidDashboardData;
   campaigns: PaidCampaign[];
-  onSelectCampaign: (campaign: PaidCampaign) => void;
+  statusFilter: CampaignStatusFilter;
+  onStatusFilter: (status: CampaignStatusFilter) => void;
   onOpenDrafts: () => void;
+  onSelectCampaign: (campaign: PaidCampaign) => void;
 }): React.JSX.Element {
-  const timezone = sourceTimezone(data);
-  const coverage = coverageLabel(data.observedFrom, data.observedTo, timezone);
-  const spendUnavailable = metricIsUnavailable("spend", data.totals.spend, data.currency);
-  const activeCount = campaigns.filter((campaign) => campaignStatus(campaign.status) === "active").length;
-  const pausedCount = campaigns.filter((campaign) => campaignStatus(campaign.status) === "paused").length;
-  const otherCount = Math.max(0, campaigns.length - activeCount - pausedCount);
-  const availableMetrics = REPORTING_METRICS.filter((key) => !metricIsUnavailable(key, data.totals[key], data.currency));
-  const unavailableMetrics = REPORTING_METRICS.filter((key) => metricIsUnavailable(key, data.totals[key], data.currency));
-  const focusCampaigns = [...campaigns]
-    .sort((left, right) => (right.spend ?? -1) - (left.spend ?? -1) || left.campaign.localeCompare(right.campaign))
-    .slice(0, 3);
-  const maxSpend = Math.max(...focusCampaigns.map((campaign) => campaign.spend ?? 0), 1);
-  const sourceTone = sourceStateColor(data.state);
-  const postureLabel = campaigns.length === 0
-    ? "No campaign snapshots"
-    : activeCount === 0 && pausedCount === campaigns.length
-      ? `All ${campaigns.length} campaigns are paused`
-      : `${activeCount} active · ${pausedCount} paused${otherCount > 0 ? ` · ${otherCount} other` : ""}`;
-  const postureIcon = activeCount > 0 ? <LuPlay size={15} aria-hidden /> : <LuPause size={15} aria-hidden />;
+  const [metric, setMetric] = useState<MetricKey>("spend");
+  const [failedPreviews, setFailedPreviews] = useState<Set<string>>(() => new Set());
+  const featured = campaigns.find((campaign) => campaign.ads.some((ad) => !!ad.thumbnailUrl && !failedPreviews.has(ad.thumbnailUrl)));
+  const featuredAd = featured?.ads.find((ad) => !!ad.thumbnailUrl && !failedPreviews.has(ad.thumbnailUrl));
+  const [chartScope, setChartScope] = useState<"requested" | "observed">("requested");
+  const missing = unavailable(data, metric);
+  const knownDays = data.series.filter((point) => dailyValue(point, metric) != null);
+  const first = knownDays[0]?.date;
+  const last = knownDays.at(-1)?.date;
+  // Trim only the outside of the reporting window; preserve every internal gap.
+  const chartSeries = chartScope === "observed" && first && last
+    ? data.series.filter((point) => point.date >= first && point.date <= last)
+    : data.series;
+  const counts = { active: 0, paused: 0, other: 0 };
+  campaigns.forEach((campaign) => counts[campaignStatus(campaign.status)]++);
+  const segments = [
+    { key: "active" as const, label: "Active", count: counts.active, color: "#BFD6AF" },
+    { key: "paused" as const, label: "Paused", count: counts.paused, color: "#D998B4" },
+    { key: "other" as const, label: "Other", count: counts.other, color: "#DED8D0" },
+  ];
+  let offset = 0;
 
   return (
-    <section aria-label="Paid campaign overview" className="mb-[18px]" data-testid="paid-overview">
-      <div className="grid gap-[10px] lg:grid-cols-[minmax(0,1.18fr)_minmax(270px,0.82fr)]">
-        <article className="relative min-w-0 overflow-hidden rounded-card border border-line-3 bg-surface-card p-[18px] sm:p-[20px]">
-          <div className="absolute right-[18px] top-[18px] flex h-[34px] w-[34px] items-center justify-center rounded-[8px] bg-plum-soft text-plum" aria-hidden>
-            <LuChartNoAxesCombined size={18} />
-          </div>
-          <div className="pr-[52px]">
-            <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-300">Performance snapshot</p>
-            <h2 className="mt-[8px] font-serif text-[27px] font-medium leading-[1] text-ink-900 sm:text-[32px]">
-              {spendUnavailable ? "Spend unavailable" : money0(data.totals.spend, data.currency)}
-            </h2>
-            <p className="mt-[6px] font-sans text-[12px] text-ink-400">Observed spend · {coverage}</p>
-          </div>
-
-          <div className="mt-[22px] grid grid-cols-2 gap-[8px] sm:grid-cols-3">
-            <div className="border-l-2 border-plum pl-[9px]">
-              <p className="font-mono text-[10px] text-ink-300">CTR</p>
-              <p className="mt-[2px] font-mono text-[16px] font-semibold text-ink-900">{data.totals.ctr == null ? "—" : pct(data.totals.ctr)}</p>
-            </div>
-            <div className="border-l-2 border-[#C7C2B8] pl-[9px]">
-              <p className="font-mono text-[10px] text-ink-300">Clicks</p>
-              <p className="mt-[2px] font-mono text-[16px] font-semibold text-ink-900">{data.totals.clicks == null ? "—" : compact(data.totals.clicks)}</p>
-            </div>
-            <div className="col-span-2 border-l-2 border-[#C7C2B8] pl-[9px] sm:col-span-1">
-              <p className="font-mono text-[10px] text-ink-300">Results</p>
-              <p className="mt-[2px] font-mono text-[16px] font-semibold text-ink-900">{data.totals.conversions == null ? "—" : compact(data.totals.conversions)}</p>
-            </div>
-          </div>
-        </article>
-
-        <article className="min-w-0 rounded-card border border-line-3 bg-surface-card p-[18px] sm:p-[20px]">
-          <div className="flex items-start justify-between gap-[12px]">
-            <div>
-              <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-300">Campaign posture</p>
-              <h2 className="mt-[8px] font-sans text-[16px] font-semibold text-ink-900">{postureLabel}</h2>
-            </div>
-            <span className="flex h-[32px] w-[32px] flex-none items-center justify-center rounded-[8px]" style={activeCount > 0 ? { background: "#E7EEE0", color: "#4C6B40" } : { background: "#EFEBE4", color: "#6B6359" }}>
-              {postureIcon}
-            </span>
-          </div>
-          {campaigns.length > 0 ? (
-            <div className="mt-[22px] flex h-[10px] overflow-hidden rounded-full bg-track-1" aria-label={`${activeCount} active, ${pausedCount} paused, ${otherCount} other campaign statuses`}>
-              {activeCount > 0 ? <span style={{ width: `${(activeCount / campaigns.length) * 100}%`, background: "#5E7B52" }} /> : null}
-              {pausedCount > 0 ? <span style={{ width: `${(pausedCount / campaigns.length) * 100}%`, background: "#C7C2B8" }} /> : null}
-              {otherCount > 0 ? <span style={{ width: `${(otherCount / campaigns.length) * 100}%`, background: "#9A3D63" }} /> : null}
-            </div>
-          ) : null}
-          <div className="mt-[10px] flex flex-wrap gap-x-[12px] gap-y-[5px] font-mono text-[10px] text-ink-300">
-            <span><i className="mr-[5px] inline-block h-[6px] w-[6px] rounded-full bg-pos-500" />{activeCount} active</span>
-            <span><i className="mr-[5px] inline-block h-[6px] w-[6px] rounded-full bg-[#C7C2B8]" />{pausedCount} paused</span>
-            {otherCount > 0 ? <span><i className="mr-[5px] inline-block h-[6px] w-[6px] rounded-full bg-plum" />{otherCount} other</span> : null}
-          </div>
-          {activeCount === 0 && campaigns.length > 0 ? (
-            <button type="button" onClick={onOpenDrafts} className="mt-[17px] inline-flex items-center gap-[6px] font-sans text-[12px] font-semibold text-plum hover:text-plum-deep focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-plum">
-              Review campaign drafts <LuArrowUpRight aria-hidden size={14} />
+    <section aria-label="Paid campaign overview" data-testid="paid-overview" className="mb-7 min-w-0">
+      <div className="grid grid-cols-2 overflow-hidden rounded-[8px] border border-line-3 bg-white md:grid-cols-3 xl:grid-cols-6" aria-label="Performance metrics">
+        {METRICS.map(({ key, label, icon: Icon }) => {
+          const isMissing = unavailable(data, key);
+          const selected = metric === key;
+          const delta = isMissing ? null : deltaFor(key, data.totals[key], data.previous[key]);
+          return (
+            <button key={key} type="button" aria-label={`Chart ${label}`} aria-pressed={selected} onClick={() => setMetric(key)}
+              className={`relative min-w-0 border-b border-r border-line-3 px-4 py-4 text-left transition-colors focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-plum sm:px-5 ${selected ? "bg-plum-soft/70" : "hover:bg-surface-chip"}`}>
+              <span className={`absolute inset-x-0 top-0 h-[3px] ${selected ? "bg-plum" : "bg-transparent"}`} />
+              <span className="flex items-center justify-between gap-2 text-[11px] font-medium text-ink-400"><span>{label}</span><Icon size={15} aria-hidden className={selected ? "flex-none text-plum" : "flex-none text-ink-300/70"} /></span>
+              <span data-testid="kpi-value" className={`mt-3 block max-w-full break-words font-sans font-semibold leading-tight tabular-nums ${isMissing ? "text-[17px] text-ink-300" : "text-[25px] text-ink-900"}`}>
+                {isMissing ? "Unavailable" : MONEY_METRICS.has(key) ? money2(data.totals[key], data.currency) : COLUMNS[key].fmt(data.totals[key], data.currency)}
+              </span>
+              <span className={`mt-2 block text-[10px] ${delta?.tone === "good" ? "text-pos-500" : delta?.tone === "bad" ? "text-[#B23A4B]" : "text-ink-300"}`}>
+                {isMissing ? (data.mixedCurrency && (MONEY_METRICS.has(key) || key === "roas") ? "Select one currency" : "Not reported") : delta && delta.label !== "—" ? `${delta.label} vs previous period` : "Observed in this period"}
+              </span>
             </button>
-          ) : null}
-        </article>
+          );
+        })}
       </div>
 
-      <div className="mt-[10px] grid gap-[10px] lg:grid-cols-[minmax(0,1.18fr)_minmax(270px,0.82fr)]">
-        <article className="flex min-w-0 items-start gap-[10px] rounded-[8px] border border-line-3 bg-surface-rec px-[13px] py-[12px]">
-          <span className="mt-[1px] flex h-[25px] w-[25px] flex-none items-center justify-center rounded-[6px]" style={{ background: `${sourceTone}1A`, color: sourceTone }}>
-            {data.state === "available" ? <LuCircleCheck size={14} aria-hidden /> : <LuCircleAlert size={14} aria-hidden />}
-          </span>
-          <div className="min-w-0">
-            <p className="font-sans text-[12px] font-semibold text-ink-800">{sourceStateLabel(data.state)} source data</p>
-            <p className="mt-[2px] font-sans text-[11.5px] leading-[1.45] text-ink-400">{sourceStateMessage(data)}</p>
+      <div className="mt-4 grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_280px] xl:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="min-w-0 rounded-[8px] border border-line-3 bg-white p-4 sm:p-5" role="group" aria-label="Paid performance trend">
+          <MetricTrendChart embedded series={chartSeries} metric={metric} currency={data.currency} height={190} title={`${COLUMNS[metric].full} over time`}
+            unavailableReason={data.mixedCurrency && (MONEY_METRICS.has(metric) || metric === "roas") ? "Select an account to view this metric in its source currency." : null} />
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-line-3 pt-3 text-[10px] text-ink-400">
+            <span><span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-plum" />{missing ? "No comparable observations" : `${knownDays.length} reported ${knownDays.length === 1 ? "day" : "days"}`}{chartScope === "observed" && first && last && !missing ? ` · ${dayLabel(first)} – ${dayLabel(last)}` : ""}</span>
+            {knownDays.length > 0 && knownDays.length < data.series.length && !missing ? <div className="flex gap-1" role="group" aria-label="Chart date coverage">{(["requested", "observed"] as const).map((scope) => <button type="button" key={scope} aria-pressed={scope === chartScope} onClick={() => setChartScope(scope)} className={`rounded-[4px] px-2 py-1 text-[10px] font-medium ${scope === chartScope ? "bg-surface-sidebar text-ink-900" : "text-ink-400 hover:bg-surface-chip"}`}>{scope === "requested" ? "Full period" : "Reported days"}</button>)}</div> : <span>Missing data is not zero</span>}
           </div>
-        </article>
-        <article className="flex min-w-0 items-start gap-[10px] rounded-[8px] border border-line-3 bg-surface-rec px-[13px] py-[12px]">
-          <span className="mt-[1px] flex h-[25px] w-[25px] flex-none items-center justify-center rounded-[6px] bg-plum-soft text-plum"><LuEye size={14} aria-hidden /></span>
-          <div className="min-w-0">
-            <p className="font-sans text-[12px] font-semibold text-ink-800">What the source reported</p>
-            <p className="mt-[2px] font-sans text-[11.5px] leading-[1.45] text-ink-400">
-              {availableMetrics.length > 0 ? `Available: ${availableMetrics.map((key) => key === "ctr" ? "CTR" : key[0].toUpperCase() + key.slice(1)).join(", ")}. ` : "No summary metrics were returned. "}
-              {unavailableMetrics.length > 0 ? `Not reported: ${unavailableMetrics.map((key) => key === "roas" ? "ROAS" : key === "ctr" ? "CTR" : key[0].toUpperCase() + key.slice(1)).join(", ")}.` : ""}
-            </p>
+        </div>
+
+        <aside className="flex min-w-0 flex-col overflow-hidden rounded-[8px] bg-[#412333] p-5 text-white" aria-label="Campaign activity">
+          <div className="flex items-center justify-between"><h2 className="text-[14px] font-semibold">Campaign activity</h2><span className="text-[10px] text-[#D9C7D1]">Source status</span></div>
+          {featured && featuredAd?.thumbnailUrl ? <button type="button" onClick={() => onSelectCampaign(featured)} aria-label={`Open featured creative for ${featured.campaign}`} className="relative mt-3 block h-[125px] w-full overflow-hidden rounded-[5px] bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-white">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={featuredAd.thumbnailUrl} alt={featuredAd.title ?? featuredAd.name} referrerPolicy="no-referrer" onError={() => setFailedPreviews((previous) => new Set([...previous, featuredAd.thumbnailUrl as string]))} className="h-full w-full object-contain" />
+            <span className="absolute bottom-0 left-0 right-0 flex items-center justify-between gap-2 bg-[#412333]/90 px-2 py-1 text-[10px] text-white"><span className="truncate">{featured.campaign}</span><LuArrowUpRight size={12} aria-hidden /></span>
+          </button> : null}
+          <div className={featuredAd ? "mt-2 flex items-center" : ""}>
+          <div className="my-2 flex items-center justify-center">
+            <svg viewBox="0 0 180 180" className={featuredAd ? "h-[100px] w-[100px] flex-none" : "h-[150px] w-[150px] flex-none"} role="img" aria-label={`${counts.active} active, ${counts.paused} paused, ${counts.other} other campaigns`}>
+              <circle cx="90" cy="90" r="70" fill="none" stroke="#634151" strokeWidth="10" />
+              {segments.filter((segment) => segment.count > 0).map((segment) => {
+                const share = segment.count / campaigns.length * 100;
+                const start = offset;
+                offset += share;
+                return <circle key={segment.key} cx="90" cy="90" r="70" pathLength="100" fill="none" stroke={segment.color} strokeWidth="10" strokeDasharray={`${Math.max(share - (share < 100 ? 1.5 : 0), 0)} ${100 - Math.max(share - (share < 100 ? 1.5 : 0), 0)}`} strokeDashoffset={-start} transform="rotate(-90 90 90)" />;
+              })}
+              <text x="90" y="91" textAnchor="middle" fill="white" fontSize="42" fontWeight="500" className="font-sans">{campaigns.length}</text>
+              <text x="90" y="112" textAnchor="middle" fill="#D9C7D1" fontSize="11" className="font-sans">campaigns</text>
+            </svg>
           </div>
-        </article>
+          <div className="grid flex-1 grid-cols-3 gap-1" role="group" aria-label="Filter campaign status">
+            {segments.map((segment) => <button type="button" key={segment.key} onClick={() => onStatusFilter(statusFilter === segment.key ? "all" : segment.key)} aria-pressed={statusFilter === segment.key} aria-label={`Show ${segment.label.toLowerCase()} campaigns`} className={`min-w-0 rounded-[6px] py-2 text-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-white ${statusFilter === segment.key ? "bg-white/15" : "hover:bg-white/10"}`}><span className="block text-[20px] font-medium tabular-nums">{segment.count}</span><span className="mt-0.5 block text-[10px] text-[#D9C7D1]"><i className="mr-1 inline-block h-1.5 w-1.5 rounded-full" style={{ background: segment.color }} />{segment.label}</span></button>)}
+          </div>
+          </div>
+          <button type="button" onClick={onOpenDrafts} className="mt-auto flex w-full items-center justify-between gap-2 border-t border-white/15 pt-4 text-left text-[12px] font-medium text-white hover:text-[#D998B4] focus-visible:outline focus-visible:outline-2 focus-visible:outline-white">Campaign drafts <LuArrowUpRight size={16} aria-hidden /></button>
+        </aside>
       </div>
 
-      {focusCampaigns.length > 0 ? (
-        <section className="mt-[18px]" aria-labelledby="campaign-focus-heading" data-testid="paid-campaign-focus-grid">
-          <div className="mb-[10px] flex flex-wrap items-end justify-between gap-[8px]">
-            <div>
-              <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-300">Campaign focus</p>
-              <h2 id="campaign-focus-heading" className="mt-[3px] font-serif text-[22px] font-medium text-ink-900">Highest observed spend</h2>
-            </div>
-            <p className="font-sans text-[11.5px] text-ink-400">Open a campaign for its creative and daily detail.</p>
-          </div>
-          <div className="grid gap-x-[14px] gap-y-[18px] sm:grid-cols-2 xl:grid-cols-3">
-            {focusCampaigns.map((campaign) => <CampaignFocusCard key={campaign.identity} campaign={campaign} maxSpend={maxSpend} onSelect={onSelectCampaign} />)}
-          </div>
-        </section>
-      ) : null}
+      {data.platforms.length > 0 ? <div className="mt-4 grid gap-x-7 gap-y-3 border-b border-line-3 pb-4 sm:grid-cols-2" aria-label="Platform spend">
+        {data.platforms.map((platform) => {
+          const missingSpend = platform.mixedCurrency || metricIsUnavailable("spend", platform.spend, platform.currency);
+          const total = data.totals.spend;
+          const share = !data.mixedCurrency && !missingSpend && total != null && total > 0 && platform.spend != null ? Math.min(100, platform.spend / total * 100) : null;
+          return <div key={platform.platform} className="flex min-w-0 items-center gap-3"><PlatformMark platform={platform.platform} size={19} /><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-3 text-[11px]"><span className="font-medium text-ink-800">{platform.label}</span><span className="font-mono text-ink-600">{missingSpend ? "Spend unavailable" : money2(platform.spend, platform.currency)}</span></div>{share != null ? <div className="mt-2 h-1 overflow-hidden rounded-full bg-line-3" aria-label={`${platform.label}: ${Math.round(share)}% of spend`}><div className="h-full bg-plum" style={{ width: `${share}%` }} /></div> : null}</div><span className="w-12 text-right text-[10px] text-ink-300">{share == null ? "" : `${compact(share)}%`}</span></div>;
+        })}
+      </div> : null}
     </section>
   );
 }

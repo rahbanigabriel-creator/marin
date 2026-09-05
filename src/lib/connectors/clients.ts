@@ -806,7 +806,7 @@ function extractMetaCreative(c: MetaCreative | undefined): {
           : "text";
   return {
     creativeType,
-    thumbnailUrl: c.thumbnail_url ?? c.image_url ?? null,
+    thumbnailUrl: c.image_url ?? c.thumbnail_url ?? null,
     title: c.title ?? link?.name ?? video?.title ?? null,
     body: c.body ?? link?.message ?? video?.message ?? null,
     callToAction: c.call_to_action_type ?? link?.call_to_action?.type ?? video?.call_to_action?.type ?? null,

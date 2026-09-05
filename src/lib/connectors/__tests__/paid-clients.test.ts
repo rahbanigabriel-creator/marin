@@ -370,6 +370,21 @@ test("Meta rejects data containing a malformed inner row", async () => {
   }
 });
 
+test("Meta prefers the source image over its small thumbnail and retains thumbnail fallback", async () => {
+  const fetchMock = (async (request: string | URL | Request) => {
+    const url = new URL(typeof request === "string" ? request : request instanceof URL ? request.toString() : request.url);
+    if (url.pathname.endsWith("/act_123")) return json({ currency: "EUR", timezone_name: "Europe/Madrid" });
+    if (url.pathname.endsWith("/insights")) return json({ data: [] });
+    return json({ data: [
+      { id: "image", name: "Image ad", creative: { image_url: "https://example.test/full.jpg", thumbnail_url: "https://example.test/small.jpg" } },
+      { id: "video", name: "Video ad", creative: { thumbnail_url: "https://example.test/video.jpg" } },
+    ] });
+  }) as typeof fetch;
+  const result = await createPaidReadClient("meta_ads", fetchMock, tokenProvider).fetchAdsSnapshot(connection("meta_ads"), RANGE);
+  assert.equal(result.items[0].thumbnailUrl, "https://example.test/full.jpg");
+  assert.equal(result.items[1].thumbnailUrl, "https://example.test/video.jpg");
+});
+
 test("Meta rejects malformed nested creative fields before reconciliation", async () => {
   const malformedCreatives = [
     { object_story_spec: { link_data: "not-an-object" } },

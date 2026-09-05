@@ -1,32 +1,22 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LuFileText, LuPlug, LuRefreshCw } from "react-icons/lu";
-import type { KpiCardData } from "@/types/artifacts";
-import { KpiRow } from "@/components/canvas/KpiRow";
-import { MetricTrendChart } from "@/components/dashboard/MetricTrendChart";
+import { LuFileText, LuPlug, LuRefreshCw, LuLayoutGrid, LuList, LuSearch, LuX } from "react-icons/lu";
 import { DateRangePicker } from "@/components/dashboard/DateRangePicker";
 import { ColumnChooser } from "@/components/dashboard/ColumnChooser";
 import { CampaignsTable } from "@/components/dashboard/CampaignsTable";
 import { DrillDownPanel } from "@/components/dashboard/DrillDownPanel";
-import { PaidOverview } from "@/components/dashboard/PaidOverview";
+import { PaidOverview, PlatformMark, campaignStatus, type CampaignStatusFilter } from "@/components/dashboard/PaidOverview";
+import { PaidCreativeGallery } from "@/components/dashboard/PaidCreativeGallery";
 import { PaidDraftWorkspace } from "@/components/paid/PaidDraftWorkspace";
 import {
-  COLUMNS,
   DEFAULT_COLUMNS,
-  MONEY_METRICS,
   coverageLabel,
-  dailyValue,
-  deltaFor,
   emptyPaidDashboard,
-  metricIsUnavailable,
-  money0,
   normalizePaidDashboard,
   normalizeSourceState,
-  roasColor,
   sourceStateColor,
   sourceStateLabel,
-  totalValue,
   type MetricKey,
   type MetricRecord,
   type PaidCampaign,
@@ -44,16 +34,6 @@ interface Notice {
   tone: NoticeTone;
   text: string;
 }
-
-const KPI_METRICS: MetricKey[] = ["spend", "revenue", "roas", "conversions", "cpa", "ctr"];
-const HERO_METRICS: MetricKey[] = ["spend", "revenue", "roas", "conversions", "clicks", "cpa"];
-
-const KPI_LABEL: Partial<Record<MetricKey, string>> = {
-  conversions: "Conversions",
-  roas: "ROAS",
-  cpa: "Avg CPA",
-  ctr: "Avg CTR",
-};
 
 const ADDITIVE: MetricKey[] = ["spend", "revenue", "conversions", "clicks", "impressions"];
 const CACHED_SOURCE_STATES = new Set<PaidSourceState>(["failed", "revoked", "stale"]);
@@ -235,34 +215,6 @@ function currencySafetyLabel(data: PaidDashboardData): string {
     : `Multiple currencies selected (${known}).`;
 }
 
-function metricUnavailableForSummary(data: PaidDashboardData, key: MetricKey, value: number | null): boolean {
-  if (data.mixedCurrency && (MONEY_METRICS.has(key) || key === "roas")) return true;
-  return metricIsUnavailable(key, value, data.currency);
-}
-
-function buildKpis(data: PaidDashboardData): KpiCardData[] {
-  return KPI_METRICS.map((key) => {
-    const current = totalValue(data.totals, key);
-    const previous = totalValue(data.previous, key);
-    const unavailable = metricUnavailableForSummary(data, key, current);
-    const delta = unavailable ? { label: "—", tone: "neutral" as const } : deltaFor(key, current, previous);
-    const sparkValues = data.series.map((point) => dailyValue(point, key)).filter((value): value is number => value != null);
-    const spark = unavailable || sparkValues.length === 0
-      ? [0, 0]
-      : sparkValues.length === 1
-        ? [sparkValues[0], sparkValues[0]]
-        : sparkValues.map((value) => Number(value.toFixed(2)));
-    return {
-      label: KPI_LABEL[key] ?? COLUMNS[key].label,
-      value: unavailable ? "Unavailable" : COLUMNS[key].fmt(current, data.currency),
-      delta: delta.label,
-      tone: delta.tone,
-      sparkColor: unavailable ? "#BEB9AF" : "#9A3D63",
-      spark,
-    };
-  });
-}
-
 function statusCopy(state: PaidSourceState): string {
   if (state === "partial") return "Some accounts returned partial data. Only supplied metrics and observed dates are shown.";
   if (state === "failed") return "At least one account failed to sync. Existing observations remain visible and are not presented as fresh.";
@@ -387,7 +339,8 @@ export function CampaignsScreen({
   const [syncing, setSyncing] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [columns, setColumns] = useState<MetricKey[]>(DEFAULT_COLUMNS);
-  const [heroMetric, setHeroMetric] = useState<MetricKey>("spend");
+  const [campaignView, setCampaignView] = useState<"creatives" | "table">("creatives");
+  const [statusFilter, setStatusFilter] = useState<CampaignStatusFilter>("all");
   const [platformFilter, setPlatformFilter] = useState<Set<string>>(new Set());
   const [accountFilter, setAccountFilter] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
@@ -469,19 +422,22 @@ export function CampaignsScreen({
 
   const hasSourceFilter = accountFilter.size > 0 || platformFilter.size > 0;
   const viewData = useMemo(
-    () => hasSourceFilter ? scopedDashboard(data, sourceScopedCampaigns, scopedSources) : data,
+    () => hasSourceFilter && (sourceScopedCampaigns.length !== data.campaigns.length || scopedSources.length !== data.sources.length)
+      ? scopedDashboard(data, sourceScopedCampaigns, scopedSources)
+      : data,
     [data, hasSourceFilter, sourceScopedCampaigns, scopedSources],
   );
 
   const tableCampaigns = useMemo(() => {
     const query = search.trim().toLowerCase();
-    const matching = !query ? sourceScopedCampaigns : sourceScopedCampaigns.filter((campaign) =>
+    const statusScoped = sourceScopedCampaigns.filter((campaign) => statusFilter === "all" || campaignStatus(campaign.status) === statusFilter);
+    const matching = !query ? statusScoped : statusScoped.filter((campaign) =>
       campaign.campaign.toLowerCase().includes(query)
       || campaign.label.toLowerCase().includes(query)
       || campaign.accountName.toLowerCase().includes(query)
       || (campaign.externalId?.toLowerCase().includes(query) ?? false));
     return matching.map((campaign) => campaignWithIntegrityLabel(campaign, data.sources, data.state));
-  }, [sourceScopedCampaigns, search, data.sources, data.state]);
+  }, [sourceScopedCampaigns, statusFilter, search, data.sources, data.state]);
 
   const overviewCampaigns = useMemo(
     () => sourceScopedCampaigns.map((campaign) => campaignWithIntegrityLabel(campaign, data.sources, data.state)),
@@ -532,7 +488,6 @@ export function CampaignsScreen({
     return `${rowScope} use cached metrics because the source state is ${states.join(" / ").toLowerCase()}. Observation coverage: ${coverageLabel(observedFrom, observedTo, timezone)}. Keep them for context, but do not treat them as current until an owner or admin reconnects and syncs the source.`;
   }, [cachedViewCampaigns, cachedViewSources, hasCachedPerformance, viewData.state]);
 
-  const kpis = useMemo(() => buildKpis(viewData), [viewData]);
   const selected = useMemo(
     () => {
       if (!selectedKey) return null;
@@ -542,14 +497,6 @@ export function CampaignsScreen({
     [selectedKey, data.campaigns, data.sources, data.state],
   );
   const closeDrillDown = useCallback(() => setSelectedKey(null), []);
-  const usablePlatformSpend = !viewData.mixedCurrency
-    ? viewData.platforms.map((platform) => platform.spend).filter((value): value is number => value != null)
-    : [];
-  const maxPlatformSpend = Math.max(...usablePlatformSpend, 1);
-  const chartUnavailable = viewData.mixedCurrency && (MONEY_METRICS.has(heroMetric) || heroMetric === "roas")
-    ? "Unavailable across mixed currencies. Filter to one account or currency to view this trend."
-    : null;
-
   const showWorkspaceView = useCallback((next: "performance" | "drafts") => {
     setWorkspaceView(next);
     const url = new URL(window.location.href);
@@ -580,47 +527,26 @@ export function CampaignsScreen({
   const sourceWarning = statusCopy(data.state);
 
   return (
-    <section className="min-h-0 min-w-0 w-full max-w-full flex-1 overflow-y-auto overflow-x-hidden bg-surface-page p-[14px] sm:p-[20px] lg:p-[24px]">
-      <div className="mx-auto w-full min-w-0 max-w-[1240px]">
-        <div className="mb-[14px] flex flex-wrap items-start justify-between gap-[14px]">
-          <div>
-            <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-plum">Paid campaigns</p>
-            <h1 className="mt-[4px] font-serif text-[28px] font-medium leading-none text-ink-900 sm:text-[32px]">Paid command center</h1>
-            <p className="mt-[6px] font-sans text-[12.5px] text-ink-400">A visual view of connected Google Ads and Meta Ads accounts.</p>
-            {!canManage && !accessLoading ? (
-              <p className="mt-[4px] font-sans text-[11.5px] text-ink-400">
-                Read-only access: you can view and filter saved data; only workspace owners and admins can sync ad accounts.
-              </p>
-            ) : null}
+    <section className="min-h-0 min-w-0 w-full max-w-full flex-1 overflow-y-auto overflow-x-hidden bg-surface-page p-4 sm:p-6 lg:p-7">
+      <div className="mx-auto w-full min-w-0 max-w-[1440px]">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-3"><h1 className="font-serif text-[28px] font-medium leading-tight text-ink-900 sm:text-[30px]">Paid command center</h1><StatusBadge mode={mode} state={data.state} /></div>
+            {!canManage && !accessLoading ? <p className="mt-1 text-[11px] text-ink-400">Read-only access. Only owners and admins can sync accounts.</p> : null}
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-[10px]">
-            <StatusBadge mode={mode} state={data.state} />
-            <button
-              type="button"
-              onClick={() => showWorkspaceView("drafts")}
-              className="inline-flex cursor-pointer items-center gap-[6px] rounded-[8px] border border-plum-border bg-plum-soft px-[12px] py-[7px] font-sans text-[12.5px] font-semibold text-plum-deep focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-plum"
-            >
-              <LuFileText aria-hidden /> Campaign drafts
-            </button>
-            <PaidSyncButton
-              canManage={canManage}
-              accessLoading={accessLoading}
-              syncing={syncing}
-              loading={loading}
-              onSync={sync}
-              className="inline-flex cursor-pointer items-center gap-[6px] rounded-[8px] border border-line-3 bg-transparent px-[12px] py-[7px] font-sans text-[12.5px] font-semibold text-ink-600 disabled:cursor-not-allowed disabled:opacity-60"
-            />
+          <div className="flex flex-wrap items-center gap-2">
+            <PaidSyncButton canManage={canManage} accessLoading={accessLoading} syncing={syncing} loading={loading} onSync={sync}
+              className="inline-flex items-center gap-2 rounded-[6px] border border-line-3 bg-white px-3 py-2 text-[12px] font-medium text-ink-600 disabled:cursor-not-allowed disabled:opacity-60" />
+            <button type="button" onClick={() => showWorkspaceView("drafts")} className="inline-flex items-center gap-2 rounded-[6px] border border-plum bg-plum px-3 py-2 text-[12px] font-semibold text-white hover:bg-plum-deep focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-plum"><LuFileText aria-hidden /> Campaign drafts</button>
           </div>
         </div>
-
-        <div className="mb-[16px] flex flex-wrap items-center justify-between gap-[10px] rounded-[8px] border border-line-3 bg-surface-card px-[12px] py-[10px] sm:px-[14px]">
-          <div className="min-w-0 font-mono text-[10.5px] text-ink-300">
-            <span className="block">Requested {coverageLabel(data.range.from || range.from, data.range.to || range.to, coverageTimezone(data.sources))}</span>
-            <span className="mt-[2px] block text-ink-400">Observed {coverageLabel(data.observedFrom, data.observedTo, coverageTimezone(data.sources))}</span>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-line-3 pb-4">
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter by ad platform">
+            <button type="button" aria-pressed={platformFilter.size === 0} onClick={() => setPlatformFilter(new Set())} className={`rounded-[5px] px-3 py-2 text-[12px] font-medium ${platformFilter.size === 0 ? "bg-ink-900 text-white" : "text-ink-600 hover:bg-white"}`}>All platforms</button>
+            {data.platforms.map((platform) => <button key={platform.platform} type="button" aria-pressed={platformFilter.has(platform.platform)} onClick={() => toggleSetValue(setPlatformFilter, platform.platform)} className={`inline-flex items-center gap-2 rounded-[5px] border px-3 py-2 text-[12px] font-medium ${platformFilter.has(platform.platform) ? "border-plum-border bg-plum-soft text-plum-deep" : "border-transparent text-ink-600 hover:bg-white"}`}><PlatformMark platform={platform.platform} size={15} />{platform.label}</button>)}
           </div>
           <DateRangePicker range={data.range.days > 0 ? data.range : { ...range, days: 0 }} disabled={loading} onChange={(from, to) => setRange({ from, to })} />
         </div>
-
         {loadError ? (
           <div role="alert" className="mb-[14px] border-l-[3px] border-[#B23A4B] bg-[#FBF0F1] px-[12px] py-[10px] font-sans text-[12.5px] text-[#7F2837]">
             Campaign data could not be loaded: {loadError}
@@ -640,14 +566,6 @@ export function CampaignsScreen({
             {notice.text}
           </div>
         ) : null}
-        {sourceWarning ? (
-          <div
-            role={data.state === "failed" || data.state === "revoked" ? "alert" : "status"}
-            className="mb-[14px] border-y border-line-3 py-[9px] font-sans text-[12px] text-ink-500"
-          >
-            {sourceWarning}{data.stateDetail ? ` ${data.stateDetail}` : ""}
-          </div>
-        ) : null}
         {cachedIntegrityCopy ? (
           <div
             id="paid-cached-performance-notice"
@@ -659,48 +577,25 @@ export function CampaignsScreen({
           </div>
         ) : null}
 
-        {data.sources.length > 0 ? (
-          <section aria-label="Connected ad accounts" className="mb-[16px] border-y border-line-3 py-[10px]">
-            <div className="mb-[8px] flex flex-wrap items-center justify-between gap-[6px]">
-              <h2 className="font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-300">Accounts &amp; sources</h2>
-              <span className="font-sans text-[10.5px] text-ink-300">Filter applies to summaries and campaigns</span>
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+          {data.sources.length > 0 ? (
+            <section aria-label="Connected ad accounts" className="min-w-0">
+              <div className="flex max-w-full flex-wrap items-center gap-1.5" role="group" aria-label="Filter by ad account">
+                <button type="button" aria-pressed={accountFilter.size === 0} onClick={() => setAccountFilter(new Set())} className={`rounded-[5px] border px-2.5 py-1.5 text-[11px] font-medium ${accountFilter.size === 0 ? "border-ink-300 bg-white text-ink-900" : "border-transparent text-ink-400"}`}>All accounts <span className="ml-1 text-ink-300">{data.sources.length}</span></button>
+                {data.sources.map((source) => <button key={source.key} type="button" aria-pressed={accountFilter.has(source.key)} onClick={() => toggleSetValue(setAccountFilter, source.key)} title={`${source.platformLabel} · ${source.currency ?? "Unknown currency"} · ${sourceStateLabel(source.state)} · ${coverageLabel(source.observedFrom, source.observedTo, source.timezone)}${source.detail ? " · " + source.detail : ""}`} className={`inline-flex max-w-full items-center gap-1.5 rounded-[5px] border px-2.5 py-1.5 text-[11px] font-medium ${accountFilter.has(source.key) ? "border-plum-border bg-plum-soft text-plum-deep" : "border-line-3 bg-white text-ink-600 hover:border-ink-300"}`}><span className="h-1.5 w-1.5 flex-none rounded-full" style={{ background: sourceStateColor(source.state) }} aria-hidden /><span className="max-w-[180px] truncate">{source.accountName}</span><span className="text-[9px] opacity-70">{source.currency ?? "?"}</span></button>)}
+                <button type="button" onClick={onOpenConnections} aria-label="Manage connections" title="Manage connections" className="flex h-8 w-8 items-center justify-center rounded-[5px] text-ink-400 hover:bg-white hover:text-plum"><LuPlug size={15} aria-hidden /></button>
+              </div>
+            </section>
+          ) : null}
+          <details className="group min-w-0 max-w-full text-[11px] text-ink-400">
+            <summary className="cursor-pointer select-none marker:text-plum">Data coverage <span className="ml-1 text-ink-300">{sourceStateLabel(data.state)}</span></summary>
+            <div className="mt-2 max-w-[540px] border-l-2 border-plum-border pl-3 text-[11px] leading-relaxed">
+              <p>Requested {coverageLabel(data.range.from || range.from, data.range.to || range.to, coverageTimezone(data.sources))}</p>
+              <p>Observed {coverageLabel(data.observedFrom, data.observedTo, coverageTimezone(data.sources))}</p>
+              {sourceWarning ? <p className="mt-1">{sourceWarning}{data.stateDetail ? ` ${data.stateDetail}` : ""}</p> : null}
             </div>
-            <div className="flex max-w-full flex-wrap gap-[6px]" role="group" aria-label="Filter by ad account">
-              <button
-                type="button"
-                aria-pressed={accountFilter.size === 0}
-                onClick={() => setAccountFilter(new Set())}
-                className="min-h-[48px] cursor-pointer rounded-[6px] border px-[10px] py-[6px] text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-plum"
-                style={accountFilter.size === 0 ? { borderColor: "#2B2722", background: "#2B2722", color: "#fff" } : { borderColor: "#E5E3DB", background: "#fff", color: "#5A544A" }}
-              >
-                <span className="block font-sans text-[11.5px] font-semibold">All accounts</span>
-                <span className="block font-mono text-[9.5px] opacity-70">{data.sources.length} source{data.sources.length === 1 ? "" : "s"}</span>
-              </button>
-              {data.sources.map((source) => {
-                const active = accountFilter.has(source.key);
-                return (
-                  <button
-                    key={source.key}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => toggleSetValue(setAccountFilter, source.key)}
-                    title={source.detail ?? undefined}
-                    className="min-h-[48px] max-w-full cursor-pointer rounded-[6px] border px-[10px] py-[6px] text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-plum"
-                    style={active ? { borderColor: "#2B2722", background: "#F1EFE9", color: "#2B2722" } : { borderColor: "#E5E3DB", background: "#fff", color: "#5A544A" }}
-                  >
-                    <span className="flex max-w-[210px] items-center gap-[6px]">
-                      <span className="h-[7px] w-[7px] flex-shrink-0 rounded-full" style={{ background: sourceStateColor(source.state) }} aria-hidden />
-                      <span className="truncate font-sans text-[11.5px] font-semibold">{source.accountName}</span>
-                    </span>
-                    <span className="mt-[1px] block max-w-[210px] truncate font-mono text-[9.5px] opacity-75">
-                      {source.platformLabel} · {source.currency ?? "currency unavailable"} · {sourceStateLabel(source.state)} · observed {coverageLabel(source.observedFrom, source.observedTo, source.timezone)}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-        ) : null}
+          </details>
+        </div>
 
         {genuinelyEmpty ? (
           <section className="flex flex-col items-center justify-center border-y border-line-3 py-[48px] text-center">
@@ -735,134 +630,30 @@ export function CampaignsScreen({
               </div>
             ) : null}
 
-            <div
-              className="mb-[18px]"
-              role="group"
-              aria-label={hasCachedPerformance ? "Cached paid campaign overview" : "Paid campaign overview"}
-              aria-describedby={hasCachedPerformance ? "paid-cached-performance-notice" : undefined}
-            >
-              <PaidOverview
-                data={viewData}
-                campaigns={overviewCampaigns}
-                onSelectCampaign={(campaign) => setSelectedKey(campaign.identity)}
-                onOpenDrafts={() => showWorkspaceView("drafts")}
-              />
+            <div role="group" aria-label={hasCachedPerformance ? "Cached paid performance summary" : "Paid performance summary"} aria-describedby={hasCachedPerformance ? "paid-cached-performance-notice" : undefined}>
+              <PaidOverview data={viewData} campaigns={overviewCampaigns} statusFilter={statusFilter} onStatusFilter={setStatusFilter} onOpenDrafts={() => showWorkspaceView("drafts")} onSelectCampaign={(campaign) => setSelectedKey(campaign.identity)} />
             </div>
 
-            <div
-              className="mb-[16px]"
-              role="group"
-              aria-label={hasCachedPerformance ? "Cached paid performance summary" : "Paid performance summary"}
-              aria-describedby={hasCachedPerformance ? "paid-cached-performance-notice" : undefined}
-            >
-              <KpiRow kpis={kpis} />
-            </div>
-
-            <div
-              className="mb-[16px]"
-              role="group"
-              aria-label={hasCachedPerformance ? "Cached paid performance trend" : "Paid performance trend"}
-              aria-describedby={hasCachedPerformance ? "paid-cached-performance-notice" : undefined}
-            >
-              <MetricTrendChart
-                series={viewData.series}
-                metric={heroMetric}
-                metricOptions={HERO_METRICS}
-                onMetricChange={setHeroMetric}
-                title={`${COLUMNS[heroMetric].full} over time`}
-                height={260}
-                currency={viewData.currency}
-                unavailableReason={chartUnavailable}
-              />
-            </div>
-
-            {viewData.platforms.length > 0 ? (
-              <section
-                className="mb-[16px] rounded-card border border-line-3 bg-surface-card p-[14px_16px]"
-                aria-labelledby="platform-breakdown-title"
-                aria-describedby={hasCachedPerformance ? "paid-cached-performance-notice" : undefined}
-              >
-                <div className="mb-[12px] flex flex-wrap items-center justify-between gap-[6px]">
-                  <h2 id="platform-breakdown-title" className="font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-300">By platform · spend</h2>
-                  {viewData.mixedCurrency ? <span className="font-sans text-[10.5px] text-ink-300">Comparative bars hidden for mixed currencies</span> : null}
-                </div>
-                <div className="flex flex-col gap-[11px]">
-                  {viewData.platforms.map((platform) => {
-                    const spendUnavailable = metricIsUnavailable("spend", platform.spend, platform.currency) || platform.mixedCurrency;
-                    return (
-                      <div key={platform.platform}>
-                        <div className="mb-[5px] flex min-w-0 items-center justify-between gap-[10px]">
-                          <span className="truncate font-sans text-[13px] font-medium text-ink-900">{platform.label}</span>
-                          <span className="flex flex-shrink-0 flex-wrap items-baseline justify-end gap-x-[12px] gap-y-[2px]">
-                            <span className="font-mono text-[11.5px] text-ink-300">{spendUnavailable ? "Spend unavailable" : money0(platform.spend, platform.currency)}</span>
-                            <span className="font-mono text-[11.5px]" style={{ color: roasColor(platform.roas) }}>
-                              {platform.roas == null ? "ROAS unavailable" : `${Number(platform.roas.toFixed(2))}× ROAS`}
-                            </span>
-                          </span>
-                        </div>
-                        {!viewData.mixedCurrency && !spendUnavailable && platform.spend != null ? (
-                          <div className="h-[7px] overflow-hidden rounded-[4px] bg-track-1" aria-hidden>
-                            <div className="h-full rounded-[4px] bg-plum" style={{ width: `${Math.round((platform.spend / maxPlatformSpend) * 100)}%` }} />
-                          </div>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-            ) : null}
-
-            <div className="mb-[12px] flex flex-col gap-[10px] lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex max-w-full flex-wrap items-center gap-[6px]" role="group" aria-label="Filter by ad platform">
-                {data.platforms.map((platform) => {
-                  const active = platformFilter.has(platform.platform);
-                  return (
-                    <button
-                      key={platform.platform}
-                      type="button"
-                      aria-pressed={active}
-                      onClick={() => toggleSetValue(setPlatformFilter, platform.platform)}
-                      className="cursor-pointer rounded-pill border px-[10px] py-[4px] font-sans text-[12px] font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-plum"
-                      style={active ? { background: "#2B2722", color: "#fff", borderColor: "#2B2722" } : { background: "#fff", color: "#5A544A", borderColor: "#E5E3DB" }}
-                    >
-                      {platform.label}
-                    </button>
-                  );
-                })}
-                {platformFilter.size > 0 ? (
-                  <button type="button" onClick={() => setPlatformFilter(new Set())} className="cursor-pointer border-0 bg-transparent px-[5px] py-[4px] font-sans text-[12px] font-medium text-plum">
-                    Clear platforms
-                  </button>
-                ) : null}
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3"><h2 className="font-sans text-[18px] font-semibold text-ink-900">Campaigns</h2><span className="font-mono text-[11px] text-ink-400">{tableCampaigns.length}</span>
+                {cachedViewCampaigns.length > 0 ? <span className="rounded-[4px] bg-[#FBF6E8] px-2 py-1 text-[10px] text-[#745616]">{cachedViewCampaigns.length} cached</span> : null}
+                {statusFilter !== "all" ? <button type="button" onClick={() => setStatusFilter("all")} aria-label="Clear campaign status filter" className="inline-flex items-center gap-1 rounded-[4px] bg-plum-soft px-2 py-1 text-[10px] font-medium text-plum">{statusFilter}<LuX size={12} aria-hidden /></button> : null}
               </div>
-              <div className="flex min-w-0 flex-col gap-[8px] sm:flex-row sm:items-center">
-                <label htmlFor="campaign-search" className="sr-only">Search campaigns or accounts</label>
-                <input
-                  id="campaign-search"
-                  type="search"
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Search campaigns or accounts"
-                  className="min-w-0 rounded-[8px] border border-line-3 bg-white px-[10px] py-[6px] font-sans text-[12.5px] text-ink-800 outline-none focus:border-plum sm:min-w-[220px]"
-                />
-                <ColumnChooser visible={columns} onChange={setColumns} />
+              <div className="flex items-center rounded-[6px] border border-line-3 bg-white p-0.5" role="group" aria-label="Campaign view">
+                <button type="button" aria-pressed={campaignView === "creatives"} onClick={() => setCampaignView("creatives")} className={`inline-flex items-center gap-1.5 rounded-[4px] px-3 py-1.5 text-[11px] font-medium ${campaignView === "creatives" ? "bg-ink-900 text-white" : "text-ink-400"}`}><LuLayoutGrid size={13} aria-hidden />Creatives</button>
+                <button type="button" aria-pressed={campaignView === "table"} onClick={() => setCampaignView("table")} className={`inline-flex items-center gap-1.5 rounded-[4px] px-3 py-1.5 text-[11px] font-medium ${campaignView === "table" ? "bg-ink-900 text-white" : "text-ink-400"}`}><LuList size={14} aria-hidden />Table</button>
               </div>
             </div>
-
-            <div className="mb-[7px] flex flex-wrap items-center justify-between gap-[6px]">
-              <h2 className="font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-300">Campaigns</h2>
-              {cachedViewCampaigns.length > 0 ? (
-                <span className="rounded-pill border border-[#D8BD7A] bg-[#FBF6E8] px-[8px] py-[2px] font-mono text-[9.5px] font-semibold text-[#745616]">
-                  {cachedViewCampaigns.length} cached row{cachedViewCampaigns.length === 1 ? "" : "s"}
-                </span>
-              ) : null}
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="relative min-w-0 flex-1 sm:max-w-[300px]"><LuSearch size={14} aria-hidden className="absolute left-3 top-2.5 text-ink-300" /><label htmlFor="campaign-search" className="sr-only">Search campaigns or accounts</label><input id="campaign-search" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search campaigns or accounts" className="w-full min-w-0 rounded-[6px] border border-line-3 bg-white py-2 pl-9 pr-3 text-[12px] text-ink-800 outline-none focus:border-plum" /></div>
+              {campaignView === "table" ? <ColumnChooser visible={columns} onChange={setColumns} /> : <span className="hidden text-[10px] text-ink-400 sm:block">Source creatives · Campaign-level metrics</span>}
             </div>
             <div
               role="region"
               aria-label={cachedViewCampaigns.length > 0 ? "Campaign performance with cached rows" : "Campaign performance"}
               aria-describedby={hasCachedPerformance ? "paid-cached-performance-notice" : undefined}
             >
-              <CampaignsTable campaigns={tableCampaigns} columns={columns} onRowClick={(campaign) => setSelectedKey(campaign.identity)} />
+              {campaignView === "table" ? <CampaignsTable campaigns={tableCampaigns} columns={columns} onRowClick={(campaign) => setSelectedKey(campaign.identity)} /> : <PaidCreativeGallery campaigns={tableCampaigns} onSelect={(campaign) => setSelectedKey(campaign.identity)} />}
             </div>
           </>
         )}
