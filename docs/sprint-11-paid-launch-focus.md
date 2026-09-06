@@ -84,6 +84,12 @@ Live signed-in smoke confirmed the three-area navigation, connected Meta
 campaigns, Analytics source/coverage states, and Agents entitlement state.
 Connections offers only Google Ads, Meta Ads and GA4. The current workspace is
 on Free with its one connection occupied by Meta; Google/GA4 additions and
-agent checks are gated. No plan or provider permissions were changed. The final
-paid-context correction and a live read-only chat review remain to be deployed
-and verified.
+agent checks are gated. No plan or provider permissions were changed.
+
+The final paid-context correction, commit `365c28c`, deployed READY as
+`dpl_5YT5LnDoJZEvhKSsRGzCZCBqbu7S` and was aliased to `www.marpin.ai`.
+The production database readiness endpoint returned ready during release.
+The Mac then locked, preventing the final signed-in browser reload and real
+read-only chat review. Those final live checks remain pending; the automated
+paid-context tests passed. No claim is made that live scheduler delivery or
+automatic campaign optimization has been verified.
