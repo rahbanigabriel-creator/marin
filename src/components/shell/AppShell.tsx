@@ -1031,7 +1031,7 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
             ) : screen === "dashboard" ? (
               <PaidWorkspaceFrame chatOpen={paidChatOpen} onClose={closePaidChat} chat={
                 <PaidChatPanel
-                  hasAsked={hasAsked} brandName={brand?.name ?? null} onClose={closePaidChat} onNewChat={newChat}
+                  hasAsked={hasAsked} workspaceName={workspaceName} onClose={closePaidChat} onNewChat={newChat}
                   historyLoading={conversationLoading} historyError={conversationLoadError}
                   draftText={chatDraft} onDraftChange={setChatDraft}
                   step={displayStep} turns={turns} choices={displayChoices} onChoose={ask} typed={displayTyped}

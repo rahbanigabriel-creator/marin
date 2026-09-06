@@ -32,6 +32,7 @@ async function setup(page: Page) {
 test("launch has three work areas and paid chat preserves the active conversation", async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   const requests = await setup(page);
+  await page.route(/\/api\/brands(?:\?.*)?$/, (route) => json(route, { brands: [{ id: "unrelated_audit", name: "Unrelated saved audit", isPrimary: true }] }));
   await page.goto("/app");
   await expect(page).toHaveURL(/mode=paid&view=campaigns/);
   const nav = page.getByRole("navigation", { name: "Workspace" });
@@ -40,6 +41,8 @@ test("launch has three work areas and paid chat preserves the active conversatio
   await expect(nav.getByRole("button", { name: "Agents", exact: true })).toBeVisible();
   await expect(nav.getByRole("button", { name: /Assistant|Organic|SEO/ })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Campaign chat" })).toBeVisible();
+  await expect(page.locator("#paid-chat-panel").getByText("Marpin QA", { exact: true })).toBeVisible();
+  await expect(page.locator("#paid-chat-panel").getByText("Unrelated saved audit", { exact: true })).toHaveCount(0);
   await page.getByPlaceholder("Ask about your campaigns...").fill("Review my campaigns");
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.getByTestId("assistant-response")).toContainText("Here is your campaign review");

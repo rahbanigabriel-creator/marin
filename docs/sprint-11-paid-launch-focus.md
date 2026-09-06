@@ -40,7 +40,7 @@ are retained for later development, not removed or presented as launch features.
 - [x] Scheduled checks handle duplicates, paused policies, missing data and
   revoked access without provider mutations or false improvement claims.
 - [x] Unit, browser, database and release checks recorded below.
-- [ ] Production migration/deployment and owner-visible smoke recorded below.
+- [x] Production migration/deployment and owner-visible smoke recorded below.
 
 ## External launch gates retained
 
@@ -52,7 +52,7 @@ release gates are not waived by reducing the navigation scope.
 
 September 6 local verification:
 
-- 758 unit tests passed, no skips.
+- 759 unit tests passed, no skips.
 - 82 database integration tests passed against disposable local PostgreSQL,
   with all 25 migrations applied. No production data used by the test runner.
 - 27 targeted launch browser tests passed at desktop/mobile widths, including
@@ -60,6 +60,9 @@ September 6 local verification:
   account currencies, missing observations, goal create/check/review/pause/resume,
   accessibility, and existing Meta paused-creation recovery. The final rerun
   after the container-responsive metric layout also passed all 27 cases.
+- The final paid-context correction passed all 8 paid-launch browser cases.
+  Paid chat no longer inherits an unrelated primary website audit; its identity
+  comes from the workspace, connected ad-account evidence and explicit briefs.
 - Type checking, lint, Prisma validation, secret scan and dependency audit
   passed. Dependency audit found no known vulnerabilities.
 - No live campaigns created, activated, paused or otherwise modified. Browser
@@ -73,6 +76,14 @@ totals; unverifiable stored zeros are unknown. Public provider access, paid plan
 entitlements, attribution setup and worker availability still apply.
 
 The additive `20260906000000_add_paid_agent_goals` migration applied successfully
-to Marpin's known Neon production database on September 6. The previous
-production application remains active until deployment completes. Live smoke
-verification is still pending.
+to Marpin's known Neon production database on September 6; all 25 migrations are
+up to date. Release `bd6ac4f` deployed READY as
+`dpl_ELNzVWPS6HMCc57yzuT7hsXmfWCY` and was aliased to `www.marpin.ai`.
+
+Live signed-in smoke confirmed the three-area navigation, connected Meta
+campaigns, Analytics source/coverage states, and Agents entitlement state.
+Connections offers only Google Ads, Meta Ads and GA4. The current workspace is
+on Free with its one connection occupied by Meta; Google/GA4 additions and
+agent checks are gated. No plan or provider permissions were changed. The final
+paid-context correction and a live read-only chat review remain to be deployed
+and verified.

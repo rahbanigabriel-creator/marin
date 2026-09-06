@@ -16,7 +16,7 @@ export function PaidChatPanel(props: SplitViewProps & {
   hasAsked: boolean;
   onClose: () => void;
   onNewChat: () => void;
-  brandName: string | null;
+  workspaceName: string;
   historyLoading: boolean;
   historyError: string | null;
   draftText: string;
@@ -59,7 +59,7 @@ export function PaidChatPanel(props: SplitViewProps & {
             <div className="min-w-0 overflow-x-auto"><AnswerCanvas step={props.step} artifacts={props.artifacts} channels={props.channels} onConnect={props.onConnect} /></div>
           </details> : null}
         </> : <div className="my-auto py-8">
-          <p className="text-[11px] font-medium text-plum">{props.brandName ?? "Your paid workspace"}</p>
+          <p className="text-[11px] font-medium text-plum">{props.workspaceName}</p>
           <h3 className="mt-2 text-[20px] font-semibold leading-tight text-ink-900">What should we work on?</h3>
           <div className="mt-6 divide-y divide-line-2">
             {props.suggestions.map((suggestion) => <button key={suggestion} type="button" disabled={props.readOnly} onClick={() => props.onSend(suggestion)} className="flex w-full items-center gap-3 py-3 text-left text-[12px] leading-relaxed text-ink-500 hover:text-plum disabled:opacity-50">

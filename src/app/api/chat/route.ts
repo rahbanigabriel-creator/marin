@@ -470,7 +470,7 @@ export async function POST(req: Request): Promise<Response> {
         }
         const [brand, workspaceTimeZone] = workspaceId
           ? await bounded(Promise.all([
-              getPrimaryBrandPromptContext(workspaceId).catch(() => null),
+              body.mode === "paid" ? Promise.resolve(null) : getPrimaryBrandPromptContext(workspaceId).catch(() => null),
               getWorkspaceTimeZone(workspaceId).catch(() => null),
             ]))
           : [null, null];

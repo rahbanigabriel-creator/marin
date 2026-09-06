@@ -12,6 +12,15 @@ test("paid chat stays in launch scope and cannot claim execution", () => {
   assert.match(system, /Do not direct users to hidden Organic, SEO/);
 });
 
+test("paid chat does not inherit an unrelated workspace website audit", () => {
+  const brand = { id: "brand_old", name: "Unrelated business", websiteUrl: "https://unrelated.example", summary: "Unrelated audit summary", audience: [], voice: [], offers: [], competitors: [], proofPoints: [], locale: "en", timezone: "UTC", currency: "EUR", contextVersion: 1 };
+  const paid = buildAgentPrompt({ question: "Review my ad accounts", persona: "founder", mode: "paid", brand });
+  assert.doesNotMatch(paid.userContent, /Unrelated business|unrelated\.example|VERIFIED AUDIT CONTEXT/);
+  assert.match(paid.system, /Ground campaign identity in connected account evidence/);
+  const organic = buildAgentPrompt({ question: "Review this website", persona: "founder", mode: "organic", brand });
+  assert.match(organic.userContent, /Unrelated business/);
+});
+
 test("planning prompts carry an explicit timezone and Monday-start next week", () => {
   const { userContent } = buildAgentPrompt({
     question: "Plan next week's posts",
