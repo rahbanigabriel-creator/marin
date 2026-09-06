@@ -37,4 +37,9 @@ statuses were changed during diagnosis.
   Empty chat starts at the top rather than scrolling past its welcome content.
 - Type checking, lint and secret scan passed. Responsive browser verification
   uses an isolated test build with no production credentials.
-- Live post-deployment verification is pending.
+- Commit `0ca781d` deployed READY as `dpl_2EKECgVbBhrkUFCa2eAmNEMvdf3H`
+  and was aliased to `www.marpin.ai`.
+- A signed-in live reload opened chat automatically. Manage connections showed
+  Meta Connected with optional Update access, and Google/GA4 Limit reached.
+  A second fresh Meta sync, after deployment, reported all successful without
+  reconnection. The production database readiness endpoint returned ready.
