@@ -1,6 +1,6 @@
-import { createHmac, createSign } from "node:crypto";
+import { createHash, createHmac, createSign } from "node:crypto";
 
-import type { Connection } from "@prisma/client";
+import type { Connection, Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/db";
 import { decryptToken, encryptToken, isVaultConfigured, tokenAad } from "@/lib/security/vault";
@@ -51,9 +51,32 @@ function requireAccessToken(connection: Connection, platform: ConnectorPlatform)
   );
 }
 
-async function accessTokenFor(connection: Connection, platform: ConnectorPlatform): Promise<string> {
+export class ConnectionCredentialsChangedError extends Error {
+  readonly code = "connection_changed";
+  constructor() { super("The connection credentials changed during this read."); this.name = "ConnectionCredentialsChangedError"; }
+}
+
+/** Ciphertext is compared only in the database; never persist or expose this predicate. */
+export function connectionCredentialWhere(connection: Connection): Prisma.ConnectionWhereInput {
+  return {
+    id: connection.id, workspaceId: connection.workspaceId, platform: connection.platform,
+    externalAccountId: connection.externalAccountId,
+    encAccessToken: connection.encAccessToken, encRefreshToken: connection.encRefreshToken,
+    expiresAt: connection.expiresAt, scopes: connection.scopes,
+    status: { in: ["connected", "error"] },
+  };
+}
+
+export interface ConnectionTokenOptions {
+  signal?: AbortSignal;
+  guard?: (db?: Prisma.TransactionClient) => Promise<void>;
+  onRefresh?: (connection: Connection) => void;
+}
+
+async function accessTokenFor(connection: Connection, platform: ConnectorPlatform, options: ConnectionTokenOptions = {}): Promise<string> {
+  options.signal?.throwIfAborted();
   if (connection.expiresAt && connection.expiresAt.getTime() < Date.now() + 60_000) {
-    const refreshed = await refreshStoredToken(connection, platform);
+    const refreshed = await refreshStoredToken(connection, platform, options);
     if (refreshed) return refreshed;
     if (connection.expiresAt.getTime() <= Date.now()) {
       throw new ConnectorNotReadyError(platform, "access token expired; reconnect the account");
@@ -82,14 +105,19 @@ export function coalesceConnectionToken(
 export async function getConnectionAccessToken(
   connection: Connection,
   platform: ConnectorPlatform,
+  options: ConnectionTokenOptions = {},
 ): Promise<string> {
   // Meta has no refresh exchange here. Read this exact credential generation;
   // a reconnect must never reuse a concurrent read of the old token.
-  if (platform === "meta_ads") return accessTokenFor(connection, platform);
-  return coalesceConnectionToken(`${platform}:${connection.id}`, () => accessTokenFor(connection, platform));
+  if (platform === "meta_ads") return accessTokenFor(connection, platform, options);
+  // A guarded sync owns its one token flight. Sharing it would cross cancellation
+  // scopes and lose the refresh callback that advances its credential fence.
+  if (options.signal || options.guard || options.onRefresh) return accessTokenFor(connection, platform, options);
+  const generation = createHash("sha256").update(JSON.stringify(connectionCredentialWhere(connection))).digest("hex");
+  return coalesceConnectionToken(`${platform}:${connection.id}:${generation}`, () => accessTokenFor(connection, platform));
 }
 
-async function refreshStoredToken(connection: Connection, platform: ConnectorPlatform): Promise<string | null> {
+async function refreshStoredToken(connection: Connection, platform: ConnectorPlatform, options: ConnectionTokenOptions): Promise<string | null> {
   if (!connection.encRefreshToken) return null;
   const refreshToken = decryptToken(
     connection.encRefreshToken,
@@ -108,15 +136,16 @@ async function refreshStoredToken(connection: Connection, platform: ConnectorPla
   const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
   if (!clientId || !clientSecret) return null;
 
+  options.signal?.throwIfAborted();
+  await options.guard?.();
   const refreshed = await refreshAccessToken({
     tokenUrl: GOOGLE_TOKEN_URL,
     clientId,
     clientSecret,
     refreshToken,
+    signal: options.signal,
   });
-  await prisma.connection.update({
-    where: { id: connection.id },
-    data: {
+  const data = {
       encAccessToken: encryptToken(
         refreshed.accessToken,
         tokenAad({
@@ -128,8 +157,21 @@ async function refreshStoredToken(connection: Connection, platform: ConnectorPla
       ),
       expiresAt: refreshed.expiresAt ?? connection.expiresAt,
       scopes: refreshed.scope ?? connection.scopes,
-    },
+  };
+  await prisma.$transaction(async (tx) => {
+    // Use the same workspace-first lock order as policy pause, billing and OAuth
+    // reconnect. An old refresh can neither restore credentials nor race a stop.
+    const locked = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id" FROM "workspaces" WHERE "id" = ${connection.workspaceId} FOR UPDATE
+    `;
+    if (!locked.length) throw new ConnectionCredentialsChangedError();
+    options.signal?.throwIfAborted();
+    await options.guard?.(tx);
+    const updated = await tx.connection.updateMany({ where: connectionCredentialWhere(connection), data });
+    if (updated.count !== 1) throw new ConnectionCredentialsChangedError();
+    options.signal?.throwIfAborted();
   });
+  options.onRefresh?.({ ...connection, ...data });
   return refreshed.accessToken;
 }
 
@@ -398,8 +440,34 @@ function prettyToken(t: string | undefined): string | null {
 interface Ga4Report {
   rows?: Array<{
     dimensionValues?: Array<{ value?: string }>;
-    metricValues?: Array<{ value?: string }>;
+    metricValues?: Array<{ value?: unknown }>;
   }>;
+}
+
+export function normalizeGa4Report(payload: Ga4Report): CanonicalMetric[] {
+  // Omitted or malformed provider values are not evidence of a numeric zero.
+  const metricValue = (value: unknown): number | undefined => {
+    if (typeof value !== "number" && typeof value !== "string") return undefined;
+    if (typeof value === "string" && value.trim() === "") return undefined;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  };
+  return (payload.rows ?? []).flatMap((row) => {
+    const date = compactDate(row.dimensionValues?.[0]?.value ?? isoDate(new Date()));
+    const campaignValue = row.dimensionValues?.[1]?.value;
+    const campaign =
+      campaignValue && campaignValue !== "(not set)" && campaignValue !== "(direct)"
+        ? campaignValue
+        : undefined;
+    return rowsFor({
+      platform: "ga4",
+      date,
+      campaign,
+      sessions: metricValue(row.metricValues?.[0]?.value),
+      conversions: metricValue(row.metricValues?.[1]?.value),
+      revenue: metricValue(row.metricValues?.[2]?.value),
+    });
+  });
 }
 
 export class Ga4Client implements ConnectorClient {
@@ -428,26 +496,7 @@ export class Ga4Client implements ConnectorClient {
     if (!res.ok) {
       throw new ConnectorNotReadyError(this.platform, `GA4 Data API responded ${res.status}`);
     }
-    return this.normalize((await res.json()) as Ga4Report);
-  }
-
-  private normalize(payload: Ga4Report): CanonicalMetric[] {
-    return (payload.rows ?? []).flatMap((row) => {
-      const date = compactDate(row.dimensionValues?.[0]?.value ?? isoDate(new Date()));
-      const campaignValue = row.dimensionValues?.[1]?.value;
-      const campaign =
-        campaignValue && campaignValue !== "(not set)" && campaignValue !== "(direct)"
-          ? campaignValue
-          : undefined;
-      return rowsFor({
-        platform: this.platform,
-        date,
-        campaign,
-        sessions: n(row.metricValues?.[0]?.value),
-        conversions: n(row.metricValues?.[1]?.value),
-        revenue: n(row.metricValues?.[2]?.value),
-      });
-    });
+    return normalizeGa4Report((await res.json()) as Ga4Report);
   }
 }
 

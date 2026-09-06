@@ -101,7 +101,7 @@ export const PLANS: Record<PlanId, Plan> = {
     launch: true,
     selfServe: true,
     entitlements: {
-      maxConnections: 2,
+      maxConnections: 3,
       maxBrands: 1,
       maxSeats: 1,
       maxScheduledPosts: 100,

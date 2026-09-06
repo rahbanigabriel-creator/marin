@@ -6,6 +6,7 @@ import { useState } from "react";
 import type { RecentChat } from "@/types/views";
 import type { Account } from "@/lib/data/personas";
 import type { ProductMode } from "@/lib/product/platforms";
+import { LAUNCH_FEATURES } from "@/lib/product/features";
 import {
   LuChevronLeft,
   LuChevronRight,
@@ -13,7 +14,6 @@ import {
   LuChartNoAxesCombined,
   LuLeaf,
   LuMegaphone,
-  LuMessageSquare,
   LuPlus,
   LuPlug,
   LuScanSearch,
@@ -57,7 +57,6 @@ export function Sidebar({
   showClients,
   onViewClients,
   onViewDashboard,
-  onViewAssistant,
   onViewOrganic,
   onViewAnalytics,
   onViewAgents,
@@ -74,8 +73,6 @@ export function Sidebar({
     "mb-[8px] flex w-full items-center gap-[9px] rounded-btn font-sans text-[13px] font-semibold";
   const realProductNavigation = Boolean(
     onViewDashboard
-      && onViewAssistant
-      && onViewOrganic
       && onViewAnalytics
       && onViewAgents,
   );
@@ -90,6 +87,7 @@ export function Sidebar({
       type="button"
       onClick={onClick}
       title={label}
+      aria-label={label}
       aria-current={activeArea === area ? "page" : undefined}
       className={`${buttonBase} ${collapsed ? "justify-center" : ""}`}
       style={{
@@ -157,6 +155,7 @@ export function Sidebar({
         type="button"
         onClick={onNewChat}
         title="New conversation"
+        aria-label="New conversation"
         className={`${buttonBase} border border-line-1 bg-surface-chip text-ink-900 ${collapsed ? "justify-center" : ""}`}
         style={{ padding: collapsed ? "10px 0" : "10px 12px", cursor: "pointer" }}
       >
@@ -165,15 +164,15 @@ export function Sidebar({
       </button>
       {realProductNavigation ? (
         <nav aria-label="Workspace" className="mb-[10px]">
-          {navButton("Assistant", "assistant", onViewAssistant, <LuMessageSquare aria-hidden />)}
-          {navButton("Organic + SEO", "organic", onViewOrganic, <LuLeaf aria-hidden />)}
+          {LAUNCH_FEATURES.organicWorkspace && navButton("Organic + SEO", "organic", onViewOrganic, <LuLeaf aria-hidden />)}
           {navButton("Paid campaigns", "paid", onViewDashboard, <LuMegaphone aria-hidden />)}
           {navButton("Analytics", "analytics", onViewAnalytics, <LuChartNoAxesCombined aria-hidden />)}
-          {navButton("Agent runs", "agents", onViewAgents, <LuBot aria-hidden />)}
+          {navButton("Agents", "agents", onViewAgents, <LuBot aria-hidden />)}
           <button
             type="button"
             onClick={onOpenModal}
             title="Manage connections"
+            aria-label="Manage connections"
             className={`${buttonBase} ${collapsed ? "justify-center" : ""}`}
             style={{
               padding: collapsed ? "10px 0" : "10px 12px",

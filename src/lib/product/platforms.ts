@@ -1,6 +1,6 @@
 import type { ConnectorPlatform } from "@/lib/connectors/types";
 
-/** The two operating modes Marpin is launching with. */
+/** Includes the deferred organic mode so saved work remains compatible. */
 export type ProductMode = "organic" | "paid";
 
 /**
@@ -106,7 +106,6 @@ export const PRODUCT_PLATFORMS = [
     id: "ga4",
     label: "Google Analytics 4",
     section: "measurement",
-    mode: "organic",
     description: "Website traffic, engagement, and conversion evidence.",
     connectorPlatform: "ga4",
     capabilities: { connect: "available", draft: "planned", schedule: "planned", execute: "planned" },
@@ -127,7 +126,7 @@ export const PRODUCT_PLATFORM_BY_ID = Object.fromEntries(
 ) as Record<ProductPlatformId, ProductPlatform>;
 
 /** Only these OAuth/data connectors are exposed in the current launch product. */
-export const LAUNCH_CONNECTOR_PLATFORMS = ["google_ads", "meta_ads"] as const satisfies readonly ConnectorPlatform[];
+export const LAUNCH_CONNECTOR_PLATFORMS = ["google_ads", "meta_ads", "ga4"] as const satisfies readonly ConnectorPlatform[];
 
 export const PAID_PLATFORM_IDS = ["google_ads", "meta_ads"] as const;
 export const ORGANIC_PLATFORM_IDS = [

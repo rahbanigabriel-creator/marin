@@ -53,7 +53,8 @@ integrationTest("Meta paused execution claims one exact approval, persists every
     assert.ok(settled.some((result) => result.status === "fulfilled"));
     assert.equal(writes, 1);
     assert.equal(await prisma.paidCampaignOperationAttempt.count({ where: { draftId: input.draftId } }), 1);
-    const result = await executePaidCampaignDraftOperation(input, dependencies);
+    const winner = await prisma.paidCampaignOperationAttempt.findFirstOrThrow({ where: { draftId: input.draftId } });
+    const result = await executePaidCampaignDraftOperation({ ...input, body: { ...input.body, requestId: winner.requestId } }, dependencies);
     assert.equal(result.replayed, true);
     assert.equal(result.draft.state, "provider_paused");
     assert.equal(result.draft.version, 4);

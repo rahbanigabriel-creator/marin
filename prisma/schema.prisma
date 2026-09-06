@@ -68,8 +68,77 @@ model Workspace {
   agentRunApprovals               AgentRunApproval[]
   agentRunCommands                AgentRunCommand[]
   manualCreationRequests          ManualCreationRequest[]
+  paidAgentPolicies               PaidAgentPolicy[]
+  paidAgentChecks                 PaidAgentCheck[]
 
   @@map("workspaces")
+}
+
+/// Account-bound, recommendation-only monitoring. No brand or provider-write approval.
+model PaidAgentPolicy {
+  id             String    @id @default(cuid())
+  workspaceId    String    @map("workspace_id")
+  connectionId   String    @map("connection_id")
+  platform       String
+  accountId      String    @map("account_id")
+  accountName    String    @map("account_name")
+  currency       String
+  timezone       String
+  name           String
+  goal           String
+  threshold      Float
+  windowDays     Int       @map("window_days")
+  minSpend       Float     @map("min_spend")
+  minConversions Int       @map("min_conversions")
+  cadenceHours   Int       @map("cadence_hours")
+  policyKey      String    @map("policy_key")
+  version        Int       @default(1)
+  status         String    @default("active")
+  createdBy      String    @map("created_by")
+  lastCheckAt    DateTime? @map("last_check_at")
+  nextCheckAt    DateTime? @map("next_check_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  workspace Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  checks    PaidAgentCheck[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, policyKey])
+  @@index([status, nextCheckAt])
+  @@map("paid_agent_policies")
+}
+
+/// Immutable policy/evidence snapshots survive account disconnects. Review only
+/// acknowledges or dismisses advice; it cannot authorize provider mutations.
+model PaidAgentCheck {
+  id             String    @id @default(cuid())
+  workspaceId    String    @map("workspace_id")
+  policyId       String    @map("policy_id")
+  policyVersion  Int       @map("policy_version")
+  snapshot       Json
+  status         String    @default("queued")
+  reason         String
+  result         Json?
+  syncAttemptId  String?   @map("sync_attempt_id")
+  reviewStatus   String    @default("none") @map("review_status")
+  reviewedBy     String?   @map("reviewed_by")
+  reviewedAt     DateTime? @map("reviewed_at")
+  reviewExpiresAt DateTime? @map("review_expires_at")
+  dueAt          DateTime  @map("due_at")
+  deadlineAt     DateTime  @map("deadline_at")
+  startedAt      DateTime? @map("started_at")
+  completedAt    DateTime? @map("completed_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  policy    PaidAgentPolicy @relation(fields: [policyId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([policyId, policyVersion, dueAt])
+  @@index([workspaceId, policyId, createdAt])
+  @@index([status, deadlineAt])
+  @@index([reviewStatus, reviewExpiresAt])
+  @@map("paid_agent_checks")
 }
 
 /// Durable response ledger for user-initiated creation commands. The workspace

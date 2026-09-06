@@ -459,6 +459,7 @@ test("visual workspace preserves sparse data, exact small spend, and source crea
   await mockApp(page, fixture);
   await page.goto("/app?mode=paid&view=campaigns");
   await expect(page.getByRole("button", { name: "Chart Ad spend" })).toContainText("€10.24");
+  expect(await page.getByTestId("kpi-value").evaluateAll((nodes) => nodes.filter((node) => node.textContent === "Unavailable").every((node) => node.getBoundingClientRect().height <= Number.parseFloat(getComputedStyle(node).lineHeight) + 1))).toBe(true);
   await page.getByRole("group", { name: "Filter by ad account" }).getByRole("button", { name: /Fixture account/ }).click();
   await expect(page.getByRole("button", { name: "Chart Ad spend" })).toContainText("€10.24");
   const selector = page.getByRole("combobox", { name: "Preview creative for Founder story in Fixture account" });

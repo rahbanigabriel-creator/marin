@@ -22,6 +22,7 @@ import {
   DeletionValidationError,
 } from "../../privacy/deletion/errors";
 import { deletionConfirmationPhrase } from "../../privacy/deletion/validation";
+import { buildWorkspaceExport } from "../../privacy/workspace-export";
 
 function disposableDatabaseEnabled(): boolean {
   if (process.env.MARPIN_INTEGRATION_DATABASE !== "1") return false;
@@ -147,6 +148,23 @@ integrationTest(
         },
       });
 
+      const policy = await prisma.paidAgentPolicy.create({ data: {
+        workspaceId: workspace.id, connectionId: `old-meta-${prefix}`, platform: "meta_ads",
+        accountId: "12345", accountName: "Saved paid account", currency: "EUR", timezone: "Europe/Madrid",
+        name: "Maintain ROAS", goal: "min_roas", threshold: 2, windowDays: 7, minSpend: 25,
+        minConversions: 5, cadenceHours: 24, policyKey: `private-policy-key-${prefix}`, createdBy: ownerId,
+        nextCheckAt: new Date("2026-08-22T12:00:00.000Z"),
+      } });
+      const check = await prisma.paidAgentCheck.create({ data: {
+        workspaceId: workspace.id, policyId: policy.id, policyVersion: 1, snapshot: { goal: "min_roas", threshold: 2 },
+        status: "running", reason: "Checking account", reviewStatus: "pending", dueAt: new Date("2026-08-21T12:00:00.000Z"),
+        deadlineAt: new Date("2026-08-21T12:05:00.000Z"),
+      } });
+      const portability = await buildWorkspaceExport(workspace.id);
+      assert.equal(portability?.workspace.paidAgentPolicies[0]?.id, policy.id);
+      assert.equal(portability?.workspace.paidAgentPolicies[0]?.checks[0]?.id, check.id);
+      assert.equal(JSON.stringify(portability).includes(`private-policy-key-${prefix}`), false);
+
       await assert.rejects(
         () =>
           createWorkspaceDeletionRequest({
@@ -172,6 +190,13 @@ integrationTest(
       assert.equal(created.replayed, false);
       assert.equal(created.deletion.status, "needs_attention");
       assert.equal(created.deletion.failureCode, "dispatch_unavailable");
+      const fencedPolicy = await prisma.paidAgentPolicy.findUniqueOrThrow({ where: { id: policy.id } });
+      assert.equal(fencedPolicy.status, "paused");
+      assert.equal(fencedPolicy.nextCheckAt, null);
+      assert.equal(fencedPolicy.version, 2);
+      const fencedCheck = await prisma.paidAgentCheck.findUniqueOrThrow({ where: { id: check.id } });
+      assert.equal(fencedCheck.status, "cancelled");
+      assert.equal(fencedCheck.reviewStatus, "expired");
       assert.equal(
         (await prisma.agentRun.findUniqueOrThrow({ where: { id: runId } })).status,
         "cancelled",

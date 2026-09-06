@@ -12,7 +12,7 @@ import { PostHogProvider } from "@/components/analytics/PostHogProvider";
 const SITE_URL = "https://www.marpin.ai";
 const TITLE = "Marpin — The AI Marketing Operator";
 const DESCRIPTION =
-  "Marpin turns your website into a practical distribution workspace: audit your site, plan organic content, prepare reviewable Google and Meta campaign drafts, and read connected performance without losing context.";
+  "Marpin brings Google Ads and Meta campaigns, connected analytics, campaign chat and reviewable agent checks into one paid marketing workspace.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -32,7 +32,7 @@ export const metadata: Metadata = {
     "campaign planning",
     "Google Ads",
     "Meta Ads",
-    "SEO",
+    "campaign analytics",
     "GA4",
     "growth marketing",
   ],

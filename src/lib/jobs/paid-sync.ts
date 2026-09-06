@@ -1,5 +1,6 @@
 import type { PaidSyncPlatform } from "@/lib/connectors/paid-clients";
 import type { MetricRange } from "@/lib/connectors/types";
+import { PaidSyncInProgressError } from "@/lib/connectors/paid-sync";
 
 export const PAID_SYNC_JOB_TRIGGERS = {
   scheduled: "scheduled",
@@ -22,6 +23,7 @@ interface PaidSyncJobRunnerInput {
 }
 
 interface PaidSyncJobRunnerResult {
+  deferredConnectionIds?: string[];
   results: Array<{
     connectionId: string;
     phases: { metrics: { complete: boolean; rows: number } };
@@ -35,6 +37,7 @@ export type PaidSyncJobRunner = (
 export interface PaidSyncJobSummary {
   connections: number;
   metrics: number;
+  deferred?: boolean;
 }
 
 export function isBackgroundPaidPlatform(platform: string): platform is PaidSyncPlatform {
@@ -75,16 +78,23 @@ export async function runPaidSyncJob(
 
   const syncPaidWorkspace = dependencies.syncPaidWorkspace ?? (async (syncInput) => {
     const paidSync = await import("@/lib/connectors/paid-sync");
-    return paidSync.syncPaidWorkspace(syncInput);
+    return paidSync.syncPaidWorkspace({ ...syncInput, skipBusy: true });
   });
-  const result = await syncPaidWorkspace({
-    workspaceId: input.workspaceId,
-    range: input.range,
-    trigger: input.trigger,
-    platforms,
-  });
+  let result: PaidSyncJobRunnerResult;
+  try {
+    result = await syncPaidWorkspace({
+      workspaceId: input.workspaceId,
+      range: input.range,
+      trigger: input.trigger,
+      platforms,
+    });
+  } catch (error) {
+    if (error instanceof PaidSyncInProgressError) return { connections: 0, metrics: 0, deferred: true };
+    throw error;
+  }
 
   return {
+    ...(result.deferredConnectionIds?.length ? { deferred: true } : {}),
     connections: new Set(result.results.map((account) => account.connectionId)).size,
     metrics: result.results.reduce(
       (total, account) => total + (account.phases.metrics.complete ? account.phases.metrics.rows : 0),

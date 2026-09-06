@@ -62,8 +62,8 @@ export function PaidOverview({ data, campaigns, statusFilter, onStatusFilter, on
   let offset = 0;
 
   return (
-    <section aria-label="Paid campaign overview" data-testid="paid-overview" className="mb-7 min-w-0">
-      <div className="grid grid-cols-2 overflow-hidden rounded-[8px] border border-line-3 bg-white md:grid-cols-3 xl:grid-cols-6" aria-label="Performance metrics">
+    <section aria-label="Paid campaign overview" data-testid="paid-overview" className="mb-7 min-w-0 [container-type:inline-size]">
+      <div className="grid grid-cols-1 overflow-hidden rounded-[8px] border border-line-3 bg-white [@container(min-width:280px)]:grid-cols-2 [@container(min-width:520px)]:grid-cols-3 [@container(min-width:1040px)]:grid-cols-6" aria-label="Performance metrics">
         {METRICS.map(({ key, label, icon: Icon }) => {
           const isMissing = unavailable(data, key);
           const selected = metric === key;
@@ -84,7 +84,7 @@ export function PaidOverview({ data, campaigns, statusFilter, onStatusFilter, on
         })}
       </div>
 
-      <div className="mt-4 grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_280px] xl:grid-cols-[minmax(0,1fr)_300px]">
+      <div className="mt-4 grid min-w-0 gap-4 [@container(min-width:700px)]:grid-cols-[minmax(0,1fr)_280px] [@container(min-width:1040px)]:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0 rounded-[8px] border border-line-3 bg-white p-4 sm:p-5" role="group" aria-label="Paid performance trend">
           <MetricTrendChart embedded series={chartSeries} metric={metric} currency={data.currency} height={190} title={`${COLUMNS[metric].full} over time`}
             unavailableReason={data.mixedCurrency && (MONEY_METRICS.has(metric) || metric === "roas") ? "Select an account to view this metric in its source currency." : null} />

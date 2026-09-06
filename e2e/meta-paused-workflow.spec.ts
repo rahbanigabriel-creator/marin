@@ -250,6 +250,7 @@ test("normal desktop shows editor beside preview and mobile keeps the form first
   await page.setViewportSize({ width: 1280, height: 900 });
   await mockMeta(page, { direct: false });
   await openDraft(page);
+  await page.getByRole("button", { name: "Hide campaign chat", exact: true }).click();
   await expect(page.locator("#saved-paid-drafts")).toBeHidden();
   const campaignBox = await page.getByLabel("Campaign name", { exact: true }).boundingBox();
   const previewBox = await page.getByLabel("Live draft ad preview", { exact: true }).boundingBox();

@@ -26,7 +26,7 @@ test("launch scope contains exactly the approved paid and organic destinations",
 });
 
 test("only launch-ready data connectors are exposed", () => {
-  assert.deepEqual(LAUNCH_CONNECTOR_PLATFORMS, ["google_ads", "meta_ads"]);
+  assert.deepEqual(LAUNCH_CONNECTOR_PLATFORMS, ["google_ads", "meta_ads", "ga4"]);
   const ids = PRODUCT_PLATFORMS.map((platform) => String(platform.id));
   assert.equal(ids.includes("linkedin_ads"), false);
   assert.equal(ids.includes("x_ads"), false);

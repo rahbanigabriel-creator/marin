@@ -374,9 +374,10 @@ export function CampaignsScreen({
   }, [load, range.from, range.to]);
 
   useEffect(() => {
-    if (new URL(window.location.href).searchParams.get("paidView") === "drafts") {
-      setWorkspaceView("drafts");
-    }
+    const restoreView = () => setWorkspaceView(new URL(window.location.href).searchParams.get("paidView") === "drafts" ? "drafts" : "performance");
+    restoreView();
+    window.addEventListener("popstate", restoreView);
+    return () => window.removeEventListener("popstate", restoreView);
   }, []);
 
   const sync = useCallback(async () => {

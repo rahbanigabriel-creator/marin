@@ -11,7 +11,7 @@ import { Composer } from "@/components/chat/Composer";
 import { AnswerCanvas } from "@/components/canvas/AnswerCanvas";
 import { ThinkingDots } from "@/components/ui/ThinkingDots";
 
-interface SplitViewProps {
+export interface SplitViewProps {
   step: number;
   turns: ChatTurn[];
   typed: string;

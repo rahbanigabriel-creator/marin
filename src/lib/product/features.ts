@@ -4,6 +4,7 @@
  */
 export const LAUNCH_FEATURES = {
   opusResponses: false,
+  organicWorkspace: false,
 } as const;
 
 export function applyLaunchFeatureGates<T extends { canUseOpus: boolean }>(

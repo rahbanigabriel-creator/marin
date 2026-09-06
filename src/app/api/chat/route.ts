@@ -502,6 +502,7 @@ export async function POST(req: Request): Promise<Response> {
           ac.signal.addEventListener("abort", abortLiveAgent, { once: true });
           try {
             const { system, userContent } = buildAgentPrompt({
+              mode: body.mode,
               question: body.question,
               persona: body.persona,
               timeZone: planningTimeZone,

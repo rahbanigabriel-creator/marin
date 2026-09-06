@@ -3,6 +3,7 @@ import type { Connection } from "@prisma/client";
 import { GOOGLE_ADS_API_VERSION, META_GRAPH_VERSION } from "./registry";
 import { getConnectionAccessToken, metaAppSecretProof } from "./clients";
 import { PaidProviderError, providerHttpError, sanitizePaidProviderError } from "./paid-errors";
+import { readBoundedResponseText, ResponseLimitError, withAbortSignal } from "./oauth";
 import {
   boundedPages,
   normalizeCurrency,
@@ -37,6 +38,112 @@ export interface PaidReadClient {
   fetchMetricsSnapshot(connection: Connection, range: MetricRange): Promise<FetchSnapshot<CanonicalMetric>>;
   fetchCampaignsSnapshot(connection: Connection): Promise<FetchSnapshot<CampaignConfig>>;
   fetchAdsSnapshot(connection: Connection, range: MetricRange): Promise<FetchSnapshot<AdCreative>>;
+}
+
+export class PaidSyncStoppedError extends Error {
+  constructor(readonly code: "sync_cancelled" | "sync_limit_exceeded" | "connection_changed", cause?: unknown) {
+    super(code === "sync_limit_exceeded" ? "The bounded reporting limit was exceeded." : "The reporting sync was cancelled.", { cause });
+    this.name = "PaidSyncStoppedError";
+  }
+}
+
+export interface PaidReadLimits {
+  maxRows: number;
+  maxResponseBytes: number;
+  maxTotalResponseBytes: number;
+  maxRequests: number;
+}
+
+export const DEFAULT_PAID_READ_LIMITS: Readonly<PaidReadLimits> = Object.freeze({
+  maxRows: 100_000, maxResponseBytes: 8 * 1024 * 1024,
+  maxTotalResponseBytes: 32 * 1024 * 1024, maxRequests: 400,
+});
+
+export function resolvePaidReadLimits(input: Partial<PaidReadLimits> = {}): PaidReadLimits {
+  const result = { ...DEFAULT_PAID_READ_LIMITS };
+  for (const key of Object.keys(result) as Array<keyof PaidReadLimits>) {
+    const value = input[key] ?? result[key];
+    if (!Number.isSafeInteger(value) || value < 1 || value > result[key]) throw new RangeError(`Invalid paid read limit: ${key}`);
+    result[key] = value;
+  }
+  return result;
+}
+
+export interface PaidReadOptions {
+  signal?: AbortSignal;
+  guard?: () => Promise<void>;
+  limits?: Partial<PaidReadLimits>;
+}
+
+class PaidReadBudget {
+  readonly limits: PaidReadLimits;
+  readonly signal: AbortSignal;
+  private readonly controller = new AbortController();
+  private requests = 0;
+  private bytes = 0;
+
+  constructor(private readonly options: PaidReadOptions) {
+    this.limits = resolvePaidReadLimits(options.limits);
+    this.signal = AbortSignal.any([this.controller.signal, options.signal ?? AbortSignal.timeout(180_000)]);
+  }
+
+  stop(error: PaidSyncStoppedError): never {
+    this.controller.abort(error);
+    throw error;
+  }
+
+  rows(count: number): void {
+    if (count > this.limits.maxRows) this.stop(new PaidSyncStoppedError("sync_limit_exceeded"));
+  }
+
+  metrics<T>(rows: T[], normalize: (row: T) => CanonicalMetric[]): CanonicalMetric[] {
+    const result: CanonicalMetric[] = [];
+    for (const row of rows) {
+      const normalized = normalize(row);
+      this.rows(result.length + normalized.length);
+      result.push(...normalized);
+    }
+    return result;
+  }
+
+  async check(): Promise<void> {
+    if (this.signal.aborted) throw this.signal.reason instanceof PaidSyncStoppedError
+      ? this.signal.reason : new PaidSyncStoppedError("sync_cancelled", this.signal.reason);
+    try { await this.options.guard?.(); }
+    catch (error) { this.stop(error instanceof PaidSyncStoppedError ? error : new PaidSyncStoppedError("sync_cancelled", error)); }
+    if (this.signal.aborted) throw new PaidSyncStoppedError("sync_cancelled", this.signal.reason);
+  }
+
+  fetch(fetchImpl: typeof fetch): typeof fetch {
+    return async (url, init) => {
+      await this.check();
+      if (++this.requests > this.limits.maxRequests) this.stop(new PaidSyncStoppedError("sync_limit_exceeded"));
+      const signal = AbortSignal.any([this.signal, init?.signal ?? AbortSignal.timeout(20_000)]);
+      let response: Response | undefined;
+      try {
+        response = await withAbortSignal(fetchImpl(url, { ...init, signal }), signal);
+        await this.check();
+        if (!response.ok) {
+          void response.body?.cancel().catch(() => undefined);
+          return new Response(null, { status: response.status, statusText: response.statusText });
+        }
+        const body = await readBoundedResponseText(response, {
+          signal, maxBytes: this.limits.maxResponseBytes,
+          onBytes: (bytes) => {
+            this.bytes += bytes;
+            if (this.bytes > this.limits.maxTotalResponseBytes) throw new ResponseLimitError();
+          },
+        });
+        await this.check();
+        return new Response(body, { status: response.status, headers: response.headers });
+      } catch (error) {
+        if (response && !response.bodyUsed) void response.body?.cancel().catch(() => undefined);
+        if (error instanceof ResponseLimitError) this.stop(new PaidSyncStoppedError("sync_limit_exceeded"));
+        if (this.signal.aborted) await this.check();
+        throw error;
+      }
+    };
+  }
 }
 
 type FetchLike = typeof fetch;
@@ -160,6 +267,7 @@ async function responseJson<T>(
   try {
     response = await fetchImpl(url, { ...init, signal: init.signal ?? AbortSignal.timeout(20_000) });
   } catch (error) {
+    if (error instanceof PaidSyncStoppedError) throw error;
     throw sanitizePaidProviderError(platform, error);
   }
   if (!response.ok) throw providerHttpError(platform, response.status);
@@ -179,6 +287,7 @@ class GooglePaidClient implements PaidReadClient {
   constructor(
     private readonly fetchImpl: FetchLike,
     private readonly tokenProvider: ConnectionTokenProvider,
+    private readonly budget: PaidReadBudget,
   ) {}
 
   private headers(token: string): Record<string, string> {
@@ -206,6 +315,7 @@ class GooglePaidClient implements PaidReadClient {
         signal: AbortSignal.timeout(20_000),
       });
     } catch (error) {
+      if (error instanceof PaidSyncStoppedError) throw error;
       throw sanitizePaidProviderError(this.platform, error);
     }
     if (!response.ok) throw providerHttpError(this.platform, response.status);
@@ -229,6 +339,7 @@ class GooglePaidClient implements PaidReadClient {
     } catch {
       throw new PaidProviderError(this.platform, "invalid_response", true);
     }
+    this.budget.rows(batches.reduce((count, batch) => count + (batch.results?.length ?? 0), 0));
     return batches.flatMap((batch) => batch.results as T[]);
   }
 
@@ -270,7 +381,7 @@ class GooglePaidClient implements PaidReadClient {
         "ORDER BY segments.date",
       ].join(" ")),
     ]);
-    const items = raw.flatMap((row) => {
+    const items = this.budget.metrics(raw, (row) => {
       const campaign = optionalRecord(this.platform, row.campaign);
       const metrics = optionalRecord(this.platform, row.metrics);
       const segments = optionalRecord(this.platform, row.segments);
@@ -441,6 +552,7 @@ class MetaPaidClient implements PaidReadClient {
   constructor(
     private readonly fetchImpl: FetchLike,
     private readonly tokenProvider: ConnectionTokenProvider,
+    private readonly budget: PaidReadBudget,
   ) {}
 
   private accountId(connection: Connection): string {
@@ -494,6 +606,7 @@ class MetaPaidClient implements PaidReadClient {
   }
 
   private async pages<T>(token: string, first: URL): Promise<T[]> {
+    let count = 0;
     return boundedPages({
       platform: this.platform,
       first: first.toString(),
@@ -502,6 +615,8 @@ class MetaPaidClient implements PaidReadClient {
         if (!isRecord(page) || !Array.isArray(page.data) || !page.data.every(isRecord)) {
           throw new PaidProviderError(this.platform, "invalid_response", true);
         }
+        count += page.data.length;
+        this.budget.rows(count);
         const paging = optionalRecord(this.platform, page.paging);
         const next = optionalText(this.platform, paging?.next) ?? null;
         if (next) this.pageUrl(next);
@@ -522,7 +637,7 @@ class MetaPaidClient implements PaidReadClient {
       this.accountMeta(connection, token),
       this.pages<MetaInsight>(token, url),
     ]);
-    const items = raw.flatMap((row) => {
+    const items = this.budget.metrics(raw, (row) => {
       const campaignId = requiredId(this.platform, row.campaign_id);
       const date = strictDay(this.platform, row.date_start);
       const spend = optionalNumber(this.platform, row.spend);
@@ -742,6 +857,7 @@ class TikTokPaidClient implements PaidReadClient {
   constructor(
     private readonly fetchImpl: FetchLike,
     private readonly tokenProvider: ConnectionTokenProvider,
+    private readonly budget: PaidReadBudget,
   ) {}
 
   private async page<T>(token: string, path: string, params: Record<string, string>, page: number): Promise<TikTokEnvelope<T>> {
@@ -770,7 +886,8 @@ class TikTokPaidClient implements PaidReadClient {
     for (let page = 1; page <= 100; page += 1) {
       const payload = await this.page<T>(token, path, params, page);
       const rows = payload.data?.list as T[];
-      out.push(...rows);
+      this.budget.rows(out.length + rows.length);
+      for (const row of rows) out.push(row);
       const totalPage = payload.data?.page_info?.total_page ?? page;
       if (page >= totalPage) return out;
       if (page === 100) throw new PaidProviderError(this.platform, "pagination_incomplete", true);
@@ -805,7 +922,7 @@ class TikTokPaidClient implements PaidReadClient {
       this.accountMeta(connection, token),
       this.pages<TikTokReportRow>(token, "/report/integrated/get/", params),
     ]);
-    const items = raw.flatMap((row) => {
+    const items = this.budget.metrics(raw, (row) => {
       const dimensions = optionalRecord(this.platform, row.dimensions);
       const metrics = optionalRecord(this.platform, row.metrics);
       if (!dimensions || !metrics) invalidResponse(this.platform);
@@ -937,17 +1054,29 @@ export function createPaidReadClient(
   platform: PaidReadPlatform,
   fetchImpl: FetchLike = fetch,
   tokenProvider: ConnectionTokenProvider = getConnectionAccessToken,
+  options: PaidReadOptions = {},
 ): PaidReadClient {
-  if (platform === "google_ads") return new GooglePaidClient(fetchImpl, tokenProvider);
-  if (platform === "meta_ads") return new MetaPaidClient(fetchImpl, tokenProvider);
-  return new TikTokPaidClient(fetchImpl, tokenProvider);
+  const budget = new PaidReadBudget(options);
+  const boundedFetch = budget.fetch(fetchImpl);
+  const readToken: ConnectionTokenProvider = async (connection, tokenPlatform) => {
+    await budget.check();
+    const token = await withAbortSignal(tokenProvider === getConnectionAccessToken
+      ? getConnectionAccessToken(connection, tokenPlatform, { signal: budget.signal, guard: () => budget.check() })
+      : tokenProvider(connection, tokenPlatform), budget.signal);
+    await budget.check();
+    return token;
+  };
+  if (platform === "google_ads") return new GooglePaidClient(boundedFetch, readToken, budget);
+  if (platform === "meta_ads") return new MetaPaidClient(boundedFetch, readToken, budget);
+  return new TikTokPaidClient(boundedFetch, readToken, budget);
 }
 
 export function safePaidClient(
   platform: ConnectorPlatform,
   fetchImpl: FetchLike = fetch,
   tokenProvider: ConnectionTokenProvider = getConnectionAccessToken,
+  options: PaidReadOptions = {},
 ): PaidReadClient {
   if (!isPaidSyncPlatform(platform)) throw new PaidProviderError(platform, "not_supported", false);
-  return createPaidReadClient(platform, fetchImpl, tokenProvider);
+  return createPaidReadClient(platform, fetchImpl, tokenProvider, options);
 }

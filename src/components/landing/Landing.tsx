@@ -3,15 +3,7 @@ import type { IconType } from "react-icons";
 import {
   SiGoogleads,
   SiMeta,
-  SiTiktok,
   SiGoogleanalytics,
-  SiGooglesearchconsole,
-  SiFacebook,
-  SiInstagram,
-  SiYoutube,
-  SiSnapchat,
-  SiPinterest,
-  SiReddit,
 } from "react-icons/si";
 import { HeroUrlInput } from "./HeroUrlInput";
 
@@ -25,15 +17,7 @@ import { HeroUrlInput } from "./HeroUrlInput";
 const CONNECTORS: { name: string; Icon: IconType; color: string }[] = [
   { name: "Google Ads", Icon: SiGoogleads, color: "#4285F4" },
   { name: "Meta", Icon: SiMeta, color: "#0467DF" },
-  { name: "TikTok", Icon: SiTiktok, color: "#111111" },
-  { name: "YouTube", Icon: SiYoutube, color: "#FF0033" },
-  { name: "Instagram", Icon: SiInstagram, color: "#C13584" },
-  { name: "Facebook", Icon: SiFacebook, color: "#0866FF" },
-  { name: "Snapchat", Icon: SiSnapchat, color: "#E2BD00" },
   { name: "Google Analytics 4", Icon: SiGoogleanalytics, color: "#E37400" },
-  { name: "Google Search Console", Icon: SiGooglesearchconsole, color: "#4285F4" },
-  { name: "Pinterest", Icon: SiPinterest, color: "#BD081C" },
-  { name: "Reddit", Icon: SiReddit, color: "#FF4500" },
 ];
 
 // The three lead cards carry the operator story as a funnel: free hook →
@@ -60,12 +44,12 @@ const LEAD_CARDS = [
 // De-emphasized second row — still indexable, but the three above lead.
 const SECONDARY_CARDS = [
   {
-    title: "SEO & content",
-    body: "Site and funnel audits, content gaps, and the highest-leverage fixes — with the page copy and meta already drafted.",
+    title: "Traffic & attribution",
+    body: "Keep Google Analytics evidence alongside your ad performance, with clear dates, sources and measurement gaps.",
   },
   {
-    title: "Always-on copilot",
-    body: "Ask anything in plain language. Marpin answers like a sharp CMO and shows the work as designed cards, not walls of text.",
+    title: "Campaign chat",
+    body: "Review performance and prepare your next move in the same workspace as your campaigns.",
   },
 ];
 
@@ -85,7 +69,7 @@ function JsonLd() {
         applicationCategory: "BusinessApplication",
         operatingSystem: "Web",
         description:
-          "AI marketing operating system — audit a website, plan organic content, prepare paid campaigns, and review performance across the channels Marpin supports.",
+          "Paid campaign workspace for Google Ads and Meta, with connected analytics, campaign chat and reviewable agent checks.",
         url: "https://www.marpin.ai",
         offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
       },
@@ -147,7 +131,7 @@ function LeadTeaser({ kind }: { kind: "scan" | "campaign" | "diagnosis" }) {
             className="rounded-pill font-sans text-[9px] font-semibold"
             style={{ background: "#F2E2EA", color: "#9A3D63", padding: "2px 8px" }}
           >
-            TikTok · post
+            Meta · campaign draft
           </span>
           <span
             className="rounded-chip font-sans text-[9px] font-semibold text-white"
@@ -229,11 +213,11 @@ export function Landing() {
           The AI marketing operator
         </div>
         <h1 className="mx-auto max-w-[760px] font-serif text-[clamp(34px,6vw,58px)] font-medium leading-[1.08] tracking-[-0.01em] text-ink-900">
-          Marpin, your distribution operating system.
+          Marpin, your paid campaign workspace.
         </h1>
         <p className="mx-auto mt-[18px] max-w-[620px] font-sans text-[clamp(15px,2.2vw,18px)] leading-[1.6] text-ink-500">
-          Free website audit from just your URL: technical gaps, content signals, and the first fixes to make.
-          Connect your accounts and Marpin prepares campaigns, drafts content, and keeps the work organized.
+          Google and Meta campaigns, connected analytics, and campaign agents in one workspace.
+          Start with your website, review your ad performance, and prepare your next campaign.
           Nothing goes live without your approval.
         </p>
         <div className="mt-[26px]">
@@ -265,11 +249,10 @@ export function Landing() {
         <div className="mx-auto max-w-[1080px] px-[24px]">
           <div className="text-center">
             <h2 className="font-serif text-[clamp(26px,4vw,38px)] font-medium tracking-[-0.01em] text-ink-900">
-              One operating system for distribution
+              Campaigns. Analytics. Agents.
             </h2>
             <p className="mx-auto mt-[12px] max-w-[600px] font-sans text-[16px] leading-[1.6] text-ink-500">
-              Research, organic planning, paid reporting, SEO, and creative share one business context and one
-              set of editable records.
+              Ad performance, creative drafts, and reviewable next steps share one business context.
             </p>
           </div>
           <div className="mt-[36px] grid gap-[18px] md:grid-cols-3">
@@ -299,8 +282,8 @@ export function Landing() {
             Not a chatbot. An operator.
           </h2>
           <p className="mx-auto mt-[16px] max-w-[620px] font-sans text-[17px] leading-[1.65] text-ink-500">
-            Most AI tools stop at advice. Marpin gives you reviewable campaign drafts, editable posts, and
-            prioritized fixes in the same workspace. You steer every change, and nothing goes live without
+            Marpin brings reviewable campaign drafts, connected measurements, and
+            prioritized checks into the same workspace. You steer every change, and nothing goes live without
             an explicit approval and a confirmed provider response.
           </p>
         </div>

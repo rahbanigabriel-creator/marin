@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { PaidSyncInProgressError } from "@/lib/connectors/paid-sync";
 
 import {
   clampPaidBackfillDays,
@@ -12,6 +13,23 @@ const RANGE = {
   from: new Date("2026-08-01T00:00:00.000Z"),
   to: new Date("2026-08-30T12:00:00.000Z"),
 };
+
+test("account contention is deferred without failing the whole scheduled workspace loop", async () => {
+  const result = await runPaidSyncJob({ workspaceId: "workspace", range: RANGE, trigger: "scheduled" }, {
+    syncPaidWorkspace: async () => { throw new PaidSyncInProgressError(); },
+  });
+  assert.deepEqual(result, { connections: 0, metrics: 0, deferred: true });
+  await assert.rejects(runPaidSyncJob({ workspaceId: "workspace", range: RANGE, trigger: "scheduled" }, {
+    syncPaidWorkspace: async () => { throw new Error("database unavailable"); },
+  }), /database unavailable/);
+});
+
+test("background batch reports deferred accounts without losing completed account counts", async () => {
+  const result = await runPaidSyncJob({ workspaceId: "workspace", range: RANGE, trigger: "scheduled" }, {
+    syncPaidWorkspace: async () => ({ deferredConnectionIds: ["busy"], results: [{ connectionId: "complete", phases: { metrics: { complete: true, rows: 7 } } }] }),
+  });
+  assert.deepEqual(result, { connections: 1, metrics: 7, deferred: true });
+});
 
 function successfulRunner(
   calls: Parameters<PaidSyncJobRunner>[0][],

@@ -124,6 +124,18 @@ async function lockWorkspaceAndFence(
   `;
   if (!locked.length) return false;
 
+  await tx.paidAgentPolicy.updateMany({
+    where: { workspaceId, status: "active" },
+    data: { status: "paused", nextCheckAt: null, version: { increment: 1 } },
+  });
+  await tx.paidAgentCheck.updateMany({
+    where: { workspaceId, status: { in: ["queued", "running"] } },
+    data: { status: "cancelled", reason: "workspace_deletion", completedAt: now },
+  });
+  await tx.paidAgentCheck.updateMany({
+    where: { workspaceId, reviewStatus: "pending" },
+    data: { reviewStatus: "expired" },
+  });
   await tx.agentRun.updateMany({
     where: { workspaceId, status: { in: ACTIVE_AGENT_STATUSES } },
     data: {

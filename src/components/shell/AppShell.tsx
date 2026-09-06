@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { LuPanelRight } from "react-icons/lu";
 import type {
   Channel,
   ChatTurn,
@@ -28,8 +29,9 @@ import { CampaignsScreen } from "@/components/screens/CampaignsScreen";
 import { WelcomeScreen } from "@/components/screens/WelcomeScreen";
 import { BrandWorkspace } from "@/components/screens/BrandWorkspace";
 import { OrganicPlanner } from "@/components/organic";
-import { AgentRunsWorkspace } from "@/components/agents";
+import { PaidAgentsWorkspace } from "@/components/agents";
 import { DistributionAnalytics } from "@/components/analytics/DistributionAnalytics";
+import { PaidChatPanel, PaidWorkspaceFrame } from "@/components/paid/PaidChatPanel";
 import type { BillingSnapshotDto } from "@/lib/billing/types";
 import {
   connectorStatusFeedback,
@@ -143,7 +145,7 @@ function looksLikeWebsite(value: string): boolean {
  */
 export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
   const [persona, setPersona] = useState<Persona>("founder");
-  const [screen, setScreen] = useState<Screen>("chat");
+  const [screen, setScreen] = useState<Screen>(DEMO_MODE ? "chat" : "dashboard");
   const [scenario, setScenario] = useState<Scenario>(() => defaultScenarioFor("founder", SCENARIOS));
   const [question, setQuestion] = useState(scenario.question);
   const [channels, setChannels] = useState<Channel[]>(PRODUCT_CHANNELS);
@@ -154,7 +156,13 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
   const [activeClient, setActiveClient] = useState<string | null>(null);
   const [founderConfig, setFounderConfig] = useState<ForecastConfig>(DEFAULT_FORECAST);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [productMode, setProductMode] = useState<ProductMode | "assistant">("assistant");
+  const [productMode, setProductMode] = useState<ProductMode | "assistant">(DEMO_MODE ? "assistant" : "paid");
+  const [paidChatOpen, setPaidChatOpen] = useState(false);
+  const [chatDraft, setChatDraft] = useState("");
+  const closePaidChat = useCallback(() => setPaidChatOpen(false), []);
+  const [conversationLoading, setConversationLoading] = useState(false);
+  const [conversationLoadError, setConversationLoadError] = useState<string | null>(null);
+  const conversationLoadSequence = useRef(0);
   // "auto" = conservative router. Picking a specific model in the composer
   // forces it; Extra/Opus stays disabled in the UI for now.
   const [model, setModel] = useState("auto");
@@ -215,7 +223,7 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
         id: conversationId ?? undefined,
         title: hasAsked ? chatTitle(question) : "New conversation",
         question: hasAsked ? question : "",
-        mode: productMode === "organic" ? ("organic" as const) : ("assistant" as const),
+        mode: productMode,
       },
       ...conversations
         .filter((conversation) => conversation.id !== conversationId)
@@ -257,7 +265,7 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
     errorAction,
     done,
   } = useStreamingChat(scenario, {
-    enabled: screen === "chat" && !idle && streamEnabled,
+    enabled: (realProductMode || screen === "chat") && hasAsked && streamEnabled,
     model,
     history,
     conversationId,
@@ -290,10 +298,9 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
             "Turn one product idea into seven platform posts",
           ]
         : [
-            "Build a growth strategy for my business",
-            "Analyze my top competitors and where I can win",
-            "Plan a paid campaign I can launch this month",
-            "Audit my website and funnel — what should I fix first?",
+            "Which campaigns need my attention?",
+            "Help me prepare a Google or Meta campaign",
+            "Where is my ad spend underperforming?",
           ],
     [productMode],
   );
@@ -401,6 +408,14 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
   }, []);
 
   useEffect(() => {
+    const media = window.matchMedia("(min-width: 1280px)");
+    setPaidChatOpen(media.matches);
+    const closeOnNarrowScreen = () => { if (!media.matches) setPaidChatOpen(false); };
+    media.addEventListener("change", closeOnNarrowScreen);
+    return () => media.removeEventListener("change", closeOnNarrowScreen);
+  }, []);
+
+  useEffect(() => {
     if (!realProductMode) return;
     const params = new URLSearchParams(window.location.search);
     if (!params.has("connect")) return;
@@ -427,7 +442,11 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
     (text: string) => {
       const trimmed = text.trim();
       if (!trimmed) return;
-      setScreen("chat");
+      setScreen(realProductMode ? "dashboard" : "chat");
+      if (realProductMode) {
+        setProductMode("paid");
+        setPaidChatOpen(true);
+      }
       setActiveChat(0);
       setActiveClient(null);
       // Archive the just-finished answer into conversation memory before asking
@@ -546,9 +565,14 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
   // "New conversation" returns the real product to the clean welcome state
   // rather than re-streaming the previous answer (demo keeps the replay).
   const newChat = useCallback(() => {
+    setChatDraft("");
+    conversationLoadSequence.current += 1;
+    setConversationLoading(false);
+    setConversationLoadError(null);
     stop();
-    setScreen("chat");
-    setProductMode("assistant");
+    setScreen(realProductMode ? "dashboard" : "chat");
+    setProductMode(realProductMode ? "paid" : "assistant");
+    setPaidChatOpen(true);
     setActiveChat(0);
     setActiveClient(null);
     setTurns([]);
@@ -560,7 +584,9 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
     setRestoredChips([]);
     setRestoredChoices(null);
     setRestoredClosing(null);
-    writeWorkspaceLocation({ area: "assistant" });
+    if (realProductMode && new URLSearchParams(window.location.search).get("mode") !== "paid") {
+      writeWorkspaceLocation({ area: "paid" });
+    }
     if (realProductMode) {
       setHasAsked(false);
       return;
@@ -592,15 +618,6 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
     setRestoredClosing(null);
   }, [displayArtifacts, displayChoices, displayTyped, hasAsked, question, stop]);
 
-  const openAssistant = useCallback(() => {
-    if (productMode === "assistant" && screen === "chat") return;
-    parkCurrentAnswer();
-    setProductMode("assistant");
-    setScreen("chat");
-    setActiveClient(null);
-    writeWorkspaceLocation({ area: "assistant" });
-  }, [parkCurrentAnswer, productMode, screen]);
-
   const openOrganic = useCallback(() => {
     if (productMode === "organic" && screen === "organic") return;
     parkCurrentAnswer();
@@ -621,34 +638,30 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
 
   const openPaid = useCallback(() => {
     if (productMode === "paid" && screen === "dashboard") return;
-    parkCurrentAnswer();
     setProductMode("paid");
     setScreen("dashboard");
     setActiveClient(null);
     writeWorkspaceLocation({ area: "paid", view: "campaigns" });
-  }, [parkCurrentAnswer, productMode, screen]);
+  }, [productMode, screen]);
 
   const openAgents = useCallback(() => {
     if (screen === "agents") return;
-    parkCurrentAnswer();
     setScreen("agents");
     setActiveClient(null);
     writeWorkspaceLocation({ area: "agents" });
-  }, [parkCurrentAnswer, screen]);
+  }, [screen]);
 
   const openAnalytics = useCallback(() => {
     if (screen === "analytics") return;
-    parkCurrentAnswer();
     setScreen("analytics");
     setActiveClient(null);
     writeWorkspaceLocation({ area: "analytics" });
-  }, [parkCurrentAnswer, screen]);
+  }, [screen]);
 
   useEffect(() => {
     if (!realProductMode) return;
     const restoreLocation = () => {
       const location = parseWorkspaceLocation(window.location.search);
-      stop();
       setActiveClient(null);
       if (location.area === "organic") {
         setProductMode("organic");
@@ -657,28 +670,41 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
         setProductMode("paid");
         setScreen("dashboard");
       } else if (location.area === "analytics") {
-        setProductMode("assistant");
+        setProductMode("paid");
         setScreen("analytics");
       } else if (location.area === "agents") {
-        setProductMode("assistant");
+        setProductMode("paid");
         setScreen("agents");
       } else {
-        setProductMode("assistant");
-        setScreen("chat");
+        setProductMode("paid");
+        setScreen("dashboard");
+      }
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("mode") !== location.area) {
+        params.set("mode", location.area);
+        if (location.view) params.set("view", location.view);
+        else params.delete("view");
+        window.history.replaceState({}, "", `/app?${params.toString()}`);
       }
     };
 
     restoreLocation();
     window.addEventListener("popstate", restoreLocation);
     return () => window.removeEventListener("popstate", restoreLocation);
-  }, [realProductMode, stop]);
+  }, [realProductMode]);
 
   const selectChat = useCallback(
     async (index: number) => {
-      setScreen("chat");
+      setScreen(realProductMode ? "dashboard" : "chat");
       setActiveClient(null);
       if (realProductMode) {
+        setProductMode("paid");
+        setPaidChatOpen(true);
+        if (new URLSearchParams(window.location.search).get("mode") !== "paid") writeWorkspaceLocation({ area: "paid" });
         if (index <= 0) {
+          conversationLoadSequence.current += 1;
+          setConversationLoading(false);
+          setConversationLoadError(null);
           setActiveChat(0);
           return;
         }
@@ -687,13 +713,17 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
           setActiveChat(0);
           return;
         }
-        stop();
-        const response = await fetch(`/api/conversations/${encodeURIComponent(selected.id)}`, {
-          cache: "no-store",
-        });
-        if (!response.ok) return;
-        const payload = (await response.json()) as { conversation?: ConversationDto };
-        if (!payload.conversation) return;
+        const sequence = ++conversationLoadSequence.current;
+        setConversationLoading(true);
+        setConversationLoadError(null);
+        try {
+          const response = await fetch(`/api/conversations/${encodeURIComponent(selected.id)}`, { cache: "no-store" });
+          if (!response.ok) throw new Error("conversation_unavailable");
+          const payload = (await response.json()) as { conversation?: ConversationDto };
+          if (!payload.conversation) throw new Error("conversation_unavailable");
+          if (sequence !== conversationLoadSequence.current) return;
+          stop();
+          setChatDraft("");
         const restored = restoreConversation(payload.conversation);
         setActiveChat(0);
         setConversationId(payload.conversation.id);
@@ -708,14 +738,13 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
         setRestoredClosing(restored.closing);
         setRestoredDataMode(restored.dataMode);
         setStreamEnabled(false);
-        const restoredMode = payload.conversation.mode === "organic" ? "organic" : "assistant";
-        setProductMode(restoredMode);
-        writeWorkspaceLocation(
-          restoredMode === "organic"
-            ? { area: "organic", view: "assistant" }
-            : { area: "assistant" },
-        );
+        setProductMode("paid");
         setHasAsked(true);
+        } catch {
+          if (sequence === conversationLoadSequence.current) setConversationLoadError("That conversation could not be loaded. Select it again to retry; your current chat is unchanged.");
+        } finally {
+          if (sequence === conversationLoadSequence.current) setConversationLoading(false);
+        }
         return;
       }
       setProductMode("assistant");
@@ -843,6 +872,7 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
   );
 
   const retryCurrent = useCallback(() => {
+    if (realProductMode && (workspaceReadOnly || workspaceAccessLoading || conversationLoading)) return;
     if (restoredTurnInterrupted || !turnId) {
       setTurnId(globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`);
     }
@@ -854,7 +884,7 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
     setRestoredDataMode("empty");
     setStreamEnabled(true);
     replay();
-  }, [replay, restoredTurnInterrupted, turnId]);
+  }, [replay, restoredTurnInterrupted, turnId, realProductMode, workspaceReadOnly, workspaceAccessLoading, conversationLoading]);
 
   const askFromOrganicPlanner = useCallback(
     (prompt: string) => {
@@ -875,7 +905,6 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
         showClients={persona === "agency"}
         onViewClients={() => setScreen("clients")}
         onViewDashboard={realProductMode ? openPaid : undefined}
-        onViewAssistant={realProductMode ? openAssistant : undefined}
         onViewOrganic={realProductMode ? openOrganic : undefined}
         onViewAnalytics={realProductMode ? openAnalytics : undefined}
         onViewAgents={realProductMode ? openAgents : undefined}
@@ -922,7 +951,7 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
                     : screen === "analytics"
                       ? "Analytics"
                       : screen === "agents"
-                        ? "Agent runs"
+                        ? "Agents"
                       : screen === "brand"
                         ? "Website audit"
                         : screen === "organic"
@@ -936,6 +965,7 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
               chatControls={screen === "chat"}
               activeClient={screen === "chat" ? activeClient : null}
               showPersonaSwitcher={!realProductMode}
+              actions={realProductMode && screen === "dashboard" ? <button type="button" onClick={() => setPaidChatOpen((open) => !open)} aria-label={paidChatOpen ? "Hide campaign chat" : "Open campaign chat"} title={paidChatOpen ? "Hide campaign chat" : "Open campaign chat"} aria-expanded={paidChatOpen} aria-controls="paid-chat-panel" className={`flex h-8 shrink-0 items-center gap-2 rounded-[6px] px-3 text-[12px] font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-plum ${paidChatOpen ? "bg-plum-soft text-plum" : "text-ink-500 hover:bg-surface-chip"}`}><LuPanelRight aria-hidden /><span className="hidden sm:inline">Chat</span></button> : undefined}
             />
 
             {screen === "brand" ? (
@@ -949,13 +979,9 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
                 onSave={saveBrand}
               />
             ) : screen === "agents" ? (
-              <AgentRunsWorkspace
-                brandId={brand?.id ?? null}
-                canManage={workspaceCanManage}
-                onStartAudit={openWebsiteAudit}
-              />
+              <PaidAgentsWorkspace canManage={workspaceCanManage} onOpenConnections={openConnections} />
             ) : screen === "analytics" ? (
-              <DistributionAnalytics />
+              <DistributionAnalytics onOpenConnections={openConnections} />
             ) : screen === "organic" ? (
               brand ? (
                 <OrganicPlanner
@@ -1003,11 +1029,23 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
                 onOpenClient={openClient}
               />
             ) : screen === "dashboard" ? (
-              <CampaignsScreen
-                onOpenConnections={openConnections}
-                canManage={workspaceCanManage}
-                accessLoading={workspaceAccessLoading}
-              />
+              <PaidWorkspaceFrame chatOpen={paidChatOpen} onClose={closePaidChat} chat={
+                <PaidChatPanel
+                  hasAsked={hasAsked} brandName={brand?.name ?? null} onClose={closePaidChat} onNewChat={newChat}
+                  historyLoading={conversationLoading} historyError={conversationLoadError}
+                  draftText={chatDraft} onDraftChange={setChatDraft}
+                  step={displayStep} turns={turns} choices={displayChoices} onChoose={ask} typed={displayTyped}
+                  status={displayStatus} error={displayError} errorAction={streamEnabled ? errorAction : null}
+                  isStreaming={isStreaming} done={displayDone} onStop={stop} onRetry={retryCurrent}
+                  question={question} scenario={scenario} artifacts={displayArtifacts} chips={displayChips}
+                  closing={displayClosing} onSend={ask} onSuggest={ask} suggestions={liveSuggestions}
+                  dataMode={displayDataMode} onOpenConnections={openConnections} connectedCount={connectedCount}
+                  channels={realChannels} onConnect={connectChannel} model={model} onModelChange={setModel}
+                  canUseOpus={billing?.entitlements.canUseOpus ?? false} readOnly={workspaceReadOnly || workspaceAccessLoading || conversationLoading}
+                />
+              }>
+                <CampaignsScreen onOpenConnections={openConnections} canManage={workspaceCanManage} accessLoading={workspaceAccessLoading} />
+              </PaidWorkspaceFrame>
             ) : (
               <SplitView
                 step={displayStep}

@@ -150,6 +150,7 @@ export function buildAgentPrompt(input: {
   brand?: BrandPromptContext | null;
   dataMode?: DataMode;
   metricsWindowDays?: number;
+  mode?: "assistant" | "organic" | "paid" | "seo";
 }): { system: string; userContent: string } {
   const clock = buildAgentCalendarContext(input.now, input.timeZone);
   const brand = input.brand;
@@ -171,5 +172,6 @@ ${accountContext}
 ${input.question}
 
 Read what they actually want, then default to delivering. If the question maps to known marketing craft — diagnosing a metric, writing copy, naming competitors, a benchmark, a plan from a URL — answer it now from your own expertise and/or live research, and only offer to tailor as a short closing line. If you don't know the business, ask for it in one plain sentence (no buttons). If you're about to build a strategy or plan, first use ask_questions for the parameters that change it — budget + target market — in one panel of clickable options, always including a "Decide for me". Otherwise just deliver. When you deliver, BUILD the answer as one to three designed cards (the right template — add_market_scan for a competitor/market landscape, add_diagnosis for a "why is my metric moving" question, add_audit for a site/funnel review, add_action_plan when there's something to launch/post, otherwise add_canvas_card) — then keep the chat reply to 1–3 short sentences of plain conversational text that lead with the single headline and point to the canvas. Don't restate the analysis as a wall of chat text, and don't use markdown headings/bold/bullets/"---" in chat; only a quick factual answer or a couple of tweets can stay in chat. Don't mention tools, frameworks, or whether anything is connected — and never surface account-connection language on creative, factual, or strategy asks.`;
-  return { system: SYSTEM_SEED, userContent };
+  const paidScope = input.mode === "paid" ? `\n\nPAID WORKSPACE CONTRACT: This conversation is embedded beside Google Ads and Meta campaigns. The current live product consists of paid campaigns, measurement analytics, and paid agent checks. Do not direct users to hidden Organic, SEO, influencer, or standalone Assistant tabs. Website and App Store evidence may inform a campaign brief. These chat tools provide analysis and proposals, not saved campaign drafts, provider writes, or scheduled agents. Never claim you saved, created, activated, paused, changed a budget, or scheduled monitoring through this chat. Direct users to campaign drafts or Agents for those explicit workflows. Google execution is assisted. Meta has a separately approved paused-creation path for supported templates; activation and existing budget changes are not available through chat. ROAS is return divided by spend: higher is better. For a goal like 'ROAS below 2', clarify whether they mean alert below 2 or maintain at least 2; never silently optimize in the wrong direction. No guaranteed outcomes or unlimited optimization loops.` : "";
+  return { system: SYSTEM_SEED + paidScope, userContent };
 }

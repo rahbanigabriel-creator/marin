@@ -18,6 +18,8 @@ interface ComposerProps {
   onStop?: () => void;
   canUseOpus?: boolean;
   readOnly?: boolean;
+  draftText?: string;
+  onDraftChange?: (text: string) => void;
 }
 
 export function Composer({
@@ -33,8 +35,12 @@ export function Composer({
   onStop,
   canUseOpus = false,
   readOnly = false,
+  draftText,
+  onDraftChange,
 }: ComposerProps) {
-  const [input, setInput] = useState("");
+  const [localInput, setLocalInput] = useState("");
+  const input = draftText ?? localInput;
+  const setInput = onDraftChange ?? setLocalInput;
   const opusAvailable = LAUNCH_FEATURES.opusResponses && canUseOpus;
 
   function send() {

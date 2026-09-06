@@ -6,7 +6,6 @@ import {
   LuArrowLeft,
   LuArrowRight,
   LuBadgeCheck,
-  LuCalendarDays,
   LuCheck,
   LuCircleAlert,
   LuCreditCard,
@@ -39,14 +38,14 @@ const planFeatures = {
   free: [
     "25 Marpin credits each month",
     "1 connected platform",
-    "10 scheduled posts",
+    "Manual and AI-assisted campaign drafts",
     "Auto and High model routing",
   ],
   solo: [
     "120 Marpin credits each month",
-    "Google Ads and Meta Ads connections",
-    "100 scheduled posts",
-    "Paid monitoring, campaign drafts, and assisted publishing",
+    "3 connections for Google Ads, Meta and GA4",
+    "Goal-based campaign checks",
+    "Reviewable campaign preparation and supported paused creation",
   ],
 } as const;
 
@@ -165,11 +164,6 @@ function ResourceUsage({ billing }: { billing: BillingSnapshotDto }) {
       label: "Seats",
       valueText: `${billing.resources.seats} of ${billing.entitlements.maxSeats} used`,
       icon: LuUsers,
-    },
-    {
-      label: "Calendar",
-      valueText: `${billing.resources.scheduledPosts} of ${billing.entitlements.maxScheduledPosts} used`,
-      icon: LuCalendarDays,
     },
     {
       label: "Storage",

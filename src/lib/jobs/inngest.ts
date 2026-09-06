@@ -667,6 +667,42 @@ export const reconcileWorkspaceDeletionLeases = inngest.createFunction(
   },
 );
 
+export const checkPaidAgentGoal = inngest.createFunction(
+  {
+    id: "check-paid-agent-goal", name: "Check paid agent goal", retries: 0,
+    concurrency: [{ limit: 1, key: "event.data.connectionId" }, { limit: 4 }],
+  },
+  { event: "paid-agent/check.requested" },
+  async ({ event, step }) => {
+    const data = event.data as Record<string, unknown>;
+    if (!data || [data.workspaceId, data.checkId, data.connectionId].some((value) => typeof value !== "string" || !/^[A-Za-z0-9_-]{1,191}$/.test(value))) {
+      return { ran: false, reason: "invalid_event" };
+    }
+    return step.run("fresh-sync-and-evaluate", async () => {
+      const { executePaidAgentCheck } = await import("@/lib/paid-agents/runner");
+      return executePaidAgentCheck({ workspaceId: data.workspaceId as string, checkId: data.checkId as string });
+    });
+  },
+);
+
+export const schedulePaidAgentGoals = inngest.createFunction(
+  { id: "schedule-paid-agent-goals", name: "Schedule bounded paid goal checks", retries: 1, concurrency: { limit: 1 } },
+  { cron: "*/5 * * * *" },
+  async ({ step }) => {
+    const { isDatabaseConfigured } = await import("@/lib/db");
+    if (!isDatabaseConfigured() || !isAgentRunDispatchConfigured()) return { ran: false, reason: "worker_unavailable" };
+    const queued = await step.run("claim-bounded-due-goals", async () => {
+      const { reconcilePaidChecks } = await import("@/lib/paid-agents/runner");
+      return reconcilePaidChecks();
+    });
+    if (queued.length) await step.sendEvent("dispatch-paid-goal-checks", queued.map((check) => ({
+      name: "paid-agent/check.requested", id: `paid-check:${check.id}:${new Date(check.dueAt).getTime()}`,
+      data: { workspaceId: check.workspaceId, checkId: check.id, connectionId: check.policy.connectionId },
+    })));
+    return { ran: true, dispatched: queued.length };
+  },
+);
+
 /** All Inngest functions served by the /api/inngest endpoint. */
 export const inngestFunctions = [
   scheduledSync,
@@ -677,6 +713,8 @@ export const inngestFunctions = [
   reconcileAgentRunDeadlines,
   executeWorkspaceDeletion,
   reconcileWorkspaceDeletionLeases,
+  checkPaidAgentGoal,
+  schedulePaidAgentGoals,
 ];
 
 /**

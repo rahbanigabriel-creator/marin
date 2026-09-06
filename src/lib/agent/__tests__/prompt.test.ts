@@ -3,6 +3,15 @@ import test from "node:test";
 
 import { buildAgentPrompt } from "../prompt";
 
+test("paid chat stays in launch scope and cannot claim execution", () => {
+  const { system } = buildAgentPrompt({ question: "Maintain ROAS below 2", persona: "founder", mode: "paid" });
+  assert.match(system, /PAID WORKSPACE CONTRACT/);
+  assert.match(system, /ROAS is return divided by spend: higher is better/);
+  assert.match(system, /clarify whether they mean alert below 2 or maintain at least 2/);
+  assert.match(system, /not saved campaign drafts, provider writes, or scheduled agents/);
+  assert.match(system, /Do not direct users to hidden Organic, SEO/);
+});
+
 test("planning prompts carry an explicit timezone and Monday-start next week", () => {
   const { userContent } = buildAgentPrompt({
     question: "Plan next week's posts",

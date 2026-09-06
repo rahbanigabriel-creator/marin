@@ -1,17 +1,24 @@
 import type { Connection, Prisma, SyncAttempt } from "@prisma/client";
 
 import { prisma } from "@/lib/db";
+import { ConnectionCredentialsChangedError, connectionCredentialWhere, getConnectionAccessToken } from "./clients";
+import { withAbortSignal } from "./oauth";
 import { PaidProviderError, sanitizePaidProviderError } from "./paid-errors";
 import {
   createPaidReadClient,
   isPaidSyncPlatform,
   PAID_SYNC_PLATFORMS,
+  PaidSyncStoppedError,
+  resolvePaidReadLimits,
+  type PaidReadLimits,
   type PaidReadClient,
   type PaidSyncPlatform,
 } from "./paid-clients";
 import type { AdCreative, CampaignConfig, CanonicalMetric, FetchSnapshot, MetricRange } from "./types";
 
-export type SyncPhaseState = "succeeded" | "partial" | "failed";
+export { PaidSyncStoppedError } from "./paid-clients";
+
+export type SyncPhaseState = "succeeded" | "partial" | "failed" | "skipped";
 export type PaidSyncState = "succeeded" | "partial" | "failed";
 
 export interface SyncPhaseOutcome {
@@ -48,6 +55,7 @@ export interface PaidWorkspaceSyncResult {
   requestedFrom: string;
   requestedTo: string;
   results: PaidAccountSyncOutcome[];
+  deferredConnectionIds?: string[];
 }
 
 export class PaidSyncPersistenceError extends Error {
@@ -100,6 +108,25 @@ interface PhaseResult<T> {
 
 export type PaidClientFactory = (platform: PaidSyncPlatform) => PaidReadClient;
 
+export interface PaidSyncOptions {
+  signal?: AbortSignal;
+  /** Called at request boundaries and under the workspace lock before commits. */
+  guard?: (db?: Prisma.TransactionClient) => Promise<void>;
+  limits?: Partial<PaidReadLimits>;
+  metricsOnly?: boolean;
+}
+
+async function lockSyncWorkspace(tx: Prisma.TransactionClient, workspaceId: string): Promise<void> {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT "id" FROM "workspaces" WHERE "id" = ${workspaceId} FOR UPDATE
+  `;
+  if (!rows.length) throw new PaidSyncStoppedError("connection_changed");
+}
+
+function skippedPhase(): PhaseResult<never> {
+  return { snapshot: null, outcome: { state: "skipped", complete: false, rows: 0, errorCode: null, errorMessage: null, observedFrom: null, observedTo: null } };
+}
+
 function isoOrNull(date: Date | null): string | null {
   return date?.toISOString() ?? null;
 }
@@ -143,11 +170,15 @@ async function runPhase<T>(
   platform: PaidSyncPlatform,
   operation: () => Promise<FetchSnapshot<T>>,
   partialWhen?: (snapshot: FetchSnapshot<T>) => boolean,
+  signal?: AbortSignal,
 ): Promise<PhaseResult<T>> {
   try {
-    const value = await operation();
+    const value = await (signal ? withAbortSignal(operation(), signal) : operation());
     return snapshotPhase(value, partialWhen?.(value) ?? false);
   } catch (error) {
+    if (error instanceof PaidSyncStoppedError) throw error;
+    if (error instanceof ConnectionCredentialsChangedError) throw new PaidSyncStoppedError("connection_changed");
+    if (signal?.aborted) throw new PaidSyncStoppedError("sync_cancelled", signal.reason);
     return emptyPhase(sanitizePaidProviderError(platform, error));
   }
 }
@@ -157,6 +188,7 @@ function hasMoneyMetrics(snapshotValue: FetchSnapshot<CanonicalMetric>): boolean
 }
 
 function overallState(phases: SyncPhaseOutcome[]): PaidSyncState {
+  phases = phases.filter((phase) => phase.state !== "skipped");
   const successful = phases.filter((phase) => phase.complete).length;
   if (successful === 0) return "failed";
   return phases.every((phase) => phase.state === "succeeded") ? "succeeded" : "partial";
@@ -421,6 +453,7 @@ async function persistTerminalPersistenceFailure(input: {
   connection: Connection;
   range: MetricRange;
   trigger: string;
+  guard: (db?: Prisma.TransactionClient) => Promise<void>;
 }): Promise<void> {
   const completedAt = new Date();
   const terminalData = {
@@ -441,27 +474,15 @@ async function persistTerminalPersistenceFailure(input: {
   } satisfies Prisma.SyncAttemptUncheckedUpdateInput;
 
   await prisma.$transaction(async (tx) => {
+    await lockSyncWorkspace(tx, input.connection.workspaceId);
     if (!await lockConnection(tx, input.connection.id)) return;
+    await input.guard(tx);
     const existing = await tx.syncAttempt.findUnique({
       where: { id: input.attempt.id },
       select: { status: true },
     });
     let ownsCurrentAttempt = false;
-    if (!existing) {
-      await tx.syncAttempt.create({
-        data: {
-          id: input.attempt.id,
-          workspaceId: input.connection.workspaceId,
-          connectionId: input.connection.id,
-          trigger: input.trigger,
-          requestedFrom: input.range.from,
-          requestedTo: input.range.to,
-          startedAt: input.attempt.startedAt,
-          ...terminalData,
-        },
-      });
-      ownsCurrentAttempt = true;
-    } else if (existing.status === "running") {
+    if (existing?.status === "running") {
       await tx.syncAttempt.update({ where: { id: input.attempt.id }, data: terminalData });
       ownsCurrentAttempt = true;
     }
@@ -480,15 +501,31 @@ async function persistTerminalPersistenceFailure(input: {
   }, { maxWait: 5_000, timeout: SYNC_DB_TRANSACTION_TIMEOUT_MS });
 }
 
+async function cancelSyncAttempt(attemptId: string, connection: Connection, code: string): Promise<void> {
+  // A cancelled attempt is audit history, not an account-health verdict. Never
+  // recreate an attempt removed by disconnect or overwrite a successor's state.
+  await prisma.syncAttempt.updateMany({
+    where: { id: attemptId, workspaceId: connection.workspaceId, connectionId: connection.id, status: "running" },
+    data: {
+      status: "cancelled", metricsStatus: "skipped", campaignsStatus: "skipped", adsStatus: "skipped",
+      errorCode: code, errorMessage: "Reporting stopped without changing saved account evidence or health.",
+      phaseDetails: { lifecycle: { state: "cancelled", errorCode: code } }, completedAt: new Date(),
+    },
+  });
+}
+
 async function claimSyncAttempt(input: {
   connection: Connection;
   range: MetricRange;
   trigger: string;
+  guard: (db?: Prisma.TransactionClient) => Promise<void>;
 }): Promise<Pick<SyncAttempt, "id" | "startedAt">> {
   return prisma.$transaction(async (tx) => {
+    await lockSyncWorkspace(tx, input.connection.workspaceId);
     if (!await lockConnection(tx, input.connection.id)) {
-      throw new PaidSyncPersistenceError();
+      throw new PaidSyncStoppedError("connection_changed");
     }
+    await input.guard(tx);
     const now = new Date();
     await recoverStaleAttempts(tx, input.connection.id, now);
     const running = await tx.syncAttempt.findFirst({
@@ -520,12 +557,31 @@ export async function syncPaidConnection(input: {
   range: MetricRange;
   trigger?: string;
   client?: PaidReadClient;
-}): Promise<PaidAccountSyncOutcome> {
+} & PaidSyncOptions): Promise<PaidAccountSyncOutcome> {
   if (!isPaidSyncPlatform(input.connection.platform)) {
     throw new PaidProviderError(input.connection.platform, "not_supported", false);
   }
   const platform = input.connection.platform;
-  const client = input.client ?? createPaidReadClient(platform);
+  const limits = resolvePaidReadLimits(input.limits);
+  const controller = new AbortController();
+  const signal = AbortSignal.any([controller.signal, input.signal ?? AbortSignal.timeout(180_000)]);
+  let generation = { ...input.connection };
+  const guard = async (db: Prisma.TransactionClient = prisma) => {
+    if (signal.aborted) throw new PaidSyncStoppedError("sync_cancelled", signal.reason);
+    try { await input.guard?.(db); }
+    catch (error) { throw error instanceof PaidSyncStoppedError ? error : new PaidSyncStoppedError("sync_cancelled", error); }
+    const current = await db.connection.findFirst({ where: connectionCredentialWhere(generation), select: { id: true } });
+    if (!current) throw new PaidSyncStoppedError("connection_changed");
+    if (signal.aborted) throw new PaidSyncStoppedError("sync_cancelled", signal.reason);
+  };
+  let token: Promise<string> | undefined;
+  const client = input.client ?? createPaidReadClient(platform, fetch, async (_connection, tokenPlatform) => {
+    await guard();
+    token ??= getConnectionAccessToken(generation, tokenPlatform, {
+      signal, guard, onRefresh: (refreshed) => { generation = refreshed; },
+    });
+    return token;
+  }, { signal, guard, limits });
   const trigger = input.trigger ?? "manual";
   let startedAttempt: Pick<SyncAttempt, "id" | "startedAt"> | null = null;
   try {
@@ -533,6 +589,7 @@ export async function syncPaidConnection(input: {
       connection: input.connection,
       range: input.range,
       trigger,
+      guard,
     });
     startedAttempt = attempt;
 
@@ -540,10 +597,14 @@ export async function syncPaidConnection(input: {
     // A slow ads API therefore consumes no open database transaction or row
     // lock. The terminal transaction below fences on this exact running attempt.
     const [metrics, campaigns, ads] = await Promise.all([
-      runPhase(platform, () => client.fetchMetricsSnapshot(input.connection, input.range), (value) => hasMoneyMetrics(value) && !value.currency),
-      runPhase(platform, () => client.fetchCampaignsSnapshot(input.connection)),
-      runPhase(platform, () => client.fetchAdsSnapshot(input.connection, input.range)),
+      runPhase(platform, () => client.fetchMetricsSnapshot(input.connection, input.range), (value) => hasMoneyMetrics(value) && !value.currency, signal),
+      input.metricsOnly ? skippedPhase() : runPhase(platform, () => client.fetchCampaignsSnapshot(input.connection), undefined, signal),
+      input.metricsOnly ? skippedPhase() : runPhase(platform, () => client.fetchAdsSnapshot(input.connection, input.range), undefined, signal),
     ]);
+    await guard();
+    if ([metrics, campaigns, ads].reduce((count, phase) => count + (phase.snapshot?.items.length ?? 0), 0) > limits.maxRows) {
+      throw new PaidSyncStoppedError("sync_limit_exceeded");
+    }
     const metadata = firstMetadata([metrics.snapshot, campaigns.snapshot, ads.snapshot]);
     const observed = coverage([metrics.snapshot, ads.snapshot]);
     const phases = { metrics: metrics.outcome, campaigns: campaigns.outcome, ads: ads.outcome };
@@ -552,9 +613,11 @@ export async function syncPaidConnection(input: {
     const finishedAt = new Date();
 
     await prisma.$transaction(async (tx) => {
+      await lockSyncWorkspace(tx, input.connection.workspaceId);
       if (!await lockConnection(tx, input.connection.id)) {
-        throw new PaidSyncPersistenceError();
+        throw new PaidSyncStoppedError("connection_changed");
       }
+      await guard(tx);
       const fencedAttempt = await tx.syncAttempt.findFirst({
         where: {
           id: attempt.id,
@@ -564,7 +627,7 @@ export async function syncPaidConnection(input: {
         },
         select: { id: true },
       });
-      if (!fencedAttempt) throw new PaidSyncPersistenceError();
+      if (!fencedAttempt) throw new PaidSyncStoppedError("sync_cancelled");
       if (metrics.snapshot?.complete) {
         await reconcileMetrics(tx, { connection: input.connection, attemptId: attempt.id, range: input.range, snapshot: metrics.snapshot });
       }
@@ -574,6 +637,9 @@ export async function syncPaidConnection(input: {
       if (ads.snapshot?.complete) {
         await reconcileAds(tx, { connection: input.connection, attemptId: attempt.id, range: input.range, snapshot: ads.snapshot });
       }
+      // Also rolls back staged upserts if the deadline/authority changed while
+      // persistence was running; external changes serialize on the same locks.
+      await guard(tx);
       await tx.syncAttempt.update({
         where: { id: attempt.id },
         data: {
@@ -599,9 +665,9 @@ export async function syncPaidConnection(input: {
             : failed?.errorCode === "permission"
               ? "error"
               : "connected",
-          currency: metadata.currency,
-          timezone: metadata.timezone,
-          lastSuccessfulSyncAt: state === "failed" ? input.connection.lastSuccessfulSyncAt : finishedAt,
+          currency: metadata.currency ?? undefined,
+          timezone: metadata.timezone ?? undefined,
+          lastSuccessfulSyncAt: state === "failed" ? undefined : finishedAt,
           lastErrorCode: failed?.errorCode ?? null,
           lastErrorMessage: failed?.errorMessage ?? null,
         },
@@ -624,6 +690,18 @@ export async function syncPaidConnection(input: {
     };
   } catch (error) {
     if (error instanceof PaidSyncInProgressError) throw error;
+    let failure = error;
+    // Check the generation even after an old token's provider error or a failed
+    // transaction. That error is never evidence about the replacement token.
+    if (!(failure instanceof PaidSyncStoppedError)) {
+      try { await guard(); }
+      catch (guardError) { if (guardError instanceof PaidSyncStoppedError) failure = guardError; }
+    }
+    if (failure instanceof PaidSyncStoppedError) {
+      controller.abort(failure);
+      if (startedAttempt) await cancelSyncAttempt(startedAttempt.id, input.connection, failure.code).catch(() => undefined);
+      throw failure.cause instanceof Error && failure.code === "sync_cancelled" ? failure.cause : failure;
+    }
     if (startedAttempt) {
       try {
         await persistTerminalPersistenceFailure({
@@ -631,11 +709,18 @@ export async function syncPaidConnection(input: {
           connection: input.connection,
           range: input.range,
           trigger,
+          guard,
         });
-      } catch {
+      } catch (terminalError) {
+        if (terminalError instanceof PaidSyncStoppedError) {
+          controller.abort(terminalError);
+          await cancelSyncAttempt(startedAttempt.id, input.connection, terminalError.code).catch(() => undefined);
+          throw terminalError;
+        }
         // The original error is intentionally replaced with a stable, sanitized storage error.
       }
     }
+    controller.abort();
     throw new PaidSyncPersistenceError();
   }
 }
@@ -647,6 +732,8 @@ export async function syncPaidWorkspace(input: {
   platforms?: PaidSyncPlatform[];
   connectionIds?: string[];
   clientFactory?: PaidClientFactory;
+  /** Background batches defer busy accounts; explicit/manual requests still fail. */
+  skipBusy?: boolean;
 }): Promise<PaidWorkspaceSyncResult> {
   const platforms = input.platforms ?? [...PAID_SYNC_PLATFORMS];
   let connections: Connection[];
@@ -665,19 +752,25 @@ export async function syncPaidWorkspace(input: {
   }
 
   const results: PaidAccountSyncOutcome[] = [];
+  const deferredConnectionIds: string[] = [];
   for (const connection of connections) {
     if (!isPaidSyncPlatform(connection.platform)) continue;
-    results.push(await syncPaidConnection({
-      connection,
-      range: input.range,
-      trigger: input.trigger,
-      client: input.clientFactory?.(connection.platform),
-    }));
+    try {
+      results.push(await syncPaidConnection({
+        connection,
+        range: input.range,
+        trigger: input.trigger,
+        client: input.clientFactory?.(connection.platform),
+      }));
+    } catch (error) {
+      if (!input.skipBusy || !(error instanceof PaidSyncInProgressError || error instanceof PaidSyncStoppedError)) throw error;
+      deferredConnectionIds.push(connection.id);
+    }
   }
 
   const successful = results.filter((result) => result.state === "succeeded").length;
   const failed = results.filter((result) => result.state === "failed").length;
-  const state: PaidWorkspaceSyncResult["state"] = results.length === 0
+  const state: PaidWorkspaceSyncResult["state"] = deferredConnectionIds.length ? "partial" : results.length === 0
     ? "unavailable"
     : failed === results.length
       ? "failed"
@@ -689,5 +782,6 @@ export async function syncPaidWorkspace(input: {
     requestedFrom: input.range.from.toISOString(),
     requestedTo: input.range.to.toISOString(),
     results,
+    ...(deferredConnectionIds.length ? { deferredConnectionIds } : {}),
   };
 }

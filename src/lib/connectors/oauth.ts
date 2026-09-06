@@ -369,33 +369,91 @@ export class OAuthError extends Error {
   }
 }
 
+export class ResponseLimitError extends Error {
+  constructor() { super("Provider response exceeded the read limit."); this.name = "ResponseLimitError"; }
+}
+
+export async function withAbortSignal<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  let abort: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_resolve, reject) => {
+        abort = () => reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+        if (signal.aborted) abort();
+        else signal.addEventListener("abort", abort, { once: true });
+      }),
+    ]);
+  } finally {
+    if (abort) signal.removeEventListener("abort", abort);
+  }
+}
+
+/** Bound the decoded transport stream before allocating or parsing its full body. */
+export async function readBoundedResponseText(
+  response: Response,
+  options: { signal: AbortSignal; maxBytes: number; onBytes?: (bytes: number) => void },
+): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const decoder = new TextDecoder();
+  const chunks: string[] = [];
+  let bytes = 0;
+  try {
+    options.signal.throwIfAborted();
+    if (Number(response.headers.get("content-length")) > options.maxBytes) throw new ResponseLimitError();
+    for (;;) {
+      const next = await withAbortSignal(reader.read(), options.signal);
+      options.signal.throwIfAborted();
+      if (next.done) break;
+      bytes += next.value.byteLength;
+      if (bytes > options.maxBytes) throw new ResponseLimitError();
+      options.onBytes?.(next.value.byteLength);
+      chunks.push(decoder.decode(next.value, { stream: true }));
+    }
+    chunks.push(decoder.decode());
+    return chunks.join("");
+  } catch (error) {
+    void reader.cancel().catch(() => undefined);
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 export async function refreshAccessToken(input: {
   tokenUrl: string;
   clientId: string;
   clientSecret: string;
   refreshToken: string;
   signal?: AbortSignal;
+  fetchImpl?: typeof fetch;
 }): Promise<RefreshedOAuthToken> {
+  const signal = input.signal
+    ? AbortSignal.any([input.signal, AbortSignal.timeout(20_000)])
+    : AbortSignal.timeout(20_000);
+  signal.throwIfAborted();
   const form = new URLSearchParams();
   form.set("grant_type", "refresh_token");
   form.set("refresh_token", input.refreshToken);
   form.set("client_id", input.clientId);
   form.set("client_secret", input.clientSecret);
 
-  const res = await fetch(input.tokenUrl, {
+  const res = await withAbortSignal((input.fetchImpl ?? fetch)(input.tokenUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
       Accept: "application/json",
     },
     body: form.toString(),
-    signal: input.signal,
-  });
+    signal,
+  }), signal);
 
   let body: TokenResponseBody;
   try {
-    body = (await res.json()) as TokenResponseBody;
+    body = JSON.parse(await readBoundedResponseText(res, { signal, maxBytes: 64 * 1024 })) as TokenResponseBody;
   } catch {
+    signal.throwIfAborted();
     throw new OAuthError(`refresh endpoint returned non-JSON (status ${res.status})`);
   }
 
