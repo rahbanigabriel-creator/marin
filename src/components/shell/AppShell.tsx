@@ -157,9 +157,13 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
   const [founderConfig, setFounderConfig] = useState<ForecastConfig>(DEFAULT_FORECAST);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [productMode, setProductMode] = useState<ProductMode | "assistant">(DEMO_MODE ? "assistant" : "paid");
-  const [paidChatOpen, setPaidChatOpen] = useState(false);
+  const [paidChatOpen, setPaidChatOpen] = useState(true);
+  const paidChatToggleRef = useRef<HTMLButtonElement>(null);
   const [chatDraft, setChatDraft] = useState("");
-  const closePaidChat = useCallback(() => setPaidChatOpen(false), []);
+  const closePaidChat = useCallback(() => {
+    setPaidChatOpen(false);
+    paidChatToggleRef.current?.focus();
+  }, []);
   const [conversationLoading, setConversationLoading] = useState(false);
   const [conversationLoadError, setConversationLoadError] = useState<string | null>(null);
   const conversationLoadSequence = useRef(0);
@@ -405,14 +409,6 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
     sync();
     media.addEventListener("change", sync);
     return () => media.removeEventListener("change", sync);
-  }, []);
-
-  useEffect(() => {
-    const media = window.matchMedia("(min-width: 1280px)");
-    setPaidChatOpen(media.matches);
-    const closeOnNarrowScreen = () => { if (!media.matches) setPaidChatOpen(false); };
-    media.addEventListener("change", closeOnNarrowScreen);
-    return () => media.removeEventListener("change", closeOnNarrowScreen);
   }, []);
 
   useEffect(() => {
@@ -965,7 +961,7 @@ export function AppShell({ authEnabled = false }: { authEnabled?: boolean }) {
               chatControls={screen === "chat"}
               activeClient={screen === "chat" ? activeClient : null}
               showPersonaSwitcher={!realProductMode}
-              actions={realProductMode && screen === "dashboard" ? <button type="button" onClick={() => setPaidChatOpen((open) => !open)} aria-label={paidChatOpen ? "Hide campaign chat" : "Open campaign chat"} title={paidChatOpen ? "Hide campaign chat" : "Open campaign chat"} aria-expanded={paidChatOpen} aria-controls="paid-chat-panel" className={`flex h-8 shrink-0 items-center gap-2 rounded-[6px] px-3 text-[12px] font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-plum ${paidChatOpen ? "bg-plum-soft text-plum" : "text-ink-500 hover:bg-surface-chip"}`}><LuPanelRight aria-hidden /><span className="hidden sm:inline">Chat</span></button> : undefined}
+              actions={realProductMode && screen === "dashboard" ? <button ref={paidChatToggleRef} type="button" onClick={() => setPaidChatOpen((open) => !open)} aria-label={paidChatOpen ? "Hide campaign chat" : "Open campaign chat"} title={paidChatOpen ? "Hide campaign chat" : "Open campaign chat"} aria-expanded={paidChatOpen} aria-controls="paid-chat-panel" className={`flex h-8 shrink-0 items-center gap-2 rounded-[6px] px-3 text-[12px] font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-plum ${paidChatOpen ? "bg-plum-soft text-plum" : "text-ink-500 hover:bg-surface-chip"}`}><LuPanelRight aria-hidden /><span className="hidden sm:inline">Chat</span></button> : undefined}
             />
 
             {screen === "brand" ? (

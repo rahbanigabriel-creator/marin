@@ -26,8 +26,12 @@ export function PaidChatPanel(props: SplitViewProps & {
   const following = useRef(true);
   useEffect(() => {
     const scroll = scrollRef.current;
-    if (scroll && following.current) scroll.scrollTop = scroll.scrollHeight;
-  }, [props.typed, props.turns, props.status, props.choices]);
+    if (!scroll) return;
+    if (!props.hasAsked) {
+      scroll.scrollTop = 0;
+      following.current = true;
+    } else if (following.current) scroll.scrollTop = scroll.scrollHeight;
+  }, [props.hasAsked, props.typed, props.turns, props.status, props.choices]);
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col bg-surface-panel">
@@ -41,10 +45,10 @@ export function PaidChatPanel(props: SplitViewProps & {
       {props.hasAsked && props.dataMode === "sample" ? <p role="status" className="border-b border-line-2 px-4 py-2 text-[12px] text-amber-800">Sample data. This saved analysis does not reflect your connected accounts.</p> : null}
       {props.historyLoading ? <p role="status" className="px-4 py-2 text-[12px] text-ink-400">Loading conversation...</p> : null}
       {props.historyError ? <p role="alert" className="border-b border-line-2 px-4 py-2 text-[12px] text-neg-700">{props.historyError}</p> : null}
-      <div ref={scrollRef} onScroll={() => {
+      <div ref={scrollRef} data-testid="paid-chat-messages" onScroll={() => {
         const node = scrollRef.current;
-        if (node) following.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
-      }} className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-contain p-4 [overflow-wrap:anywhere]">
+        if (node) following.current = !props.hasAsked || node.scrollHeight - node.scrollTop - node.clientHeight < 80;
+      }} className={`flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-contain [overflow-wrap:anywhere] ${props.hasAsked ? "p-4" : "px-4 py-1 xl:p-4"}`}>
         {props.hasAsked ? <>
           <PriorTurns turns={props.turns} variant="split" />
           <UserBubble text={props.question} variant="split" />
@@ -58,11 +62,11 @@ export function PaidChatPanel(props: SplitViewProps & {
             <summary className="mb-3 cursor-pointer text-[12px] font-semibold text-ink-600">Campaign analysis</summary>
             <div className="min-w-0 overflow-x-auto"><AnswerCanvas step={props.step} artifacts={props.artifacts} channels={props.channels} onConnect={props.onConnect} /></div>
           </details> : null}
-        </> : <div className="my-auto py-8">
-          <p className="text-[11px] font-medium text-plum">{props.workspaceName}</p>
-          <h3 className="mt-2 text-[20px] font-semibold leading-tight text-ink-900">What should we work on?</h3>
-          <div className="mt-6 divide-y divide-line-2">
-            {props.suggestions.map((suggestion) => <button key={suggestion} type="button" disabled={props.readOnly} onClick={() => props.onSend(suggestion)} className="flex w-full items-center gap-3 py-3 text-left text-[12px] leading-relaxed text-ink-500 hover:text-plum disabled:opacity-50">
+        </> : <div className="my-auto py-1 xl:py-8">
+          <p className="hidden text-[11px] font-medium text-plum sm:block">{props.workspaceName}</p>
+          <h3 className="text-[14px] font-semibold leading-tight text-ink-900 sm:mt-1 xl:mt-2 xl:text-[20px]">What should we work on?</h3>
+          <div className="mt-1 divide-y divide-line-2 xl:mt-6">
+            {props.suggestions.map((suggestion) => <button key={suggestion} type="button" disabled={props.readOnly} onClick={() => props.onSend(suggestion)} className="flex w-full items-center gap-3 py-2 text-left text-[12px] leading-relaxed text-ink-500 hover:text-plum disabled:opacity-50 xl:py-3">
               <span className="min-w-0 flex-1">{suggestion}</span><LuArrowUpRight className="shrink-0" aria-hidden />
             </button>)}
           </div>
@@ -79,49 +83,17 @@ export function PaidWorkspaceFrame({ children, chat, chatOpen, onClose }: {
   chatOpen: boolean;
   onClose: () => void;
 }) {
-  const frameRef = useRef<HTMLDivElement>(null);
-  const panelRef = useRef<HTMLElement>(null);
-  useEffect(() => {
-    if (!chatOpen) return;
-    const media = window.matchMedia("(max-width: 1279px)");
-    const previous = document.activeElement as HTMLElement | null;
-    const applyOverlay = () => {
-      if (frameRef.current) frameRef.current.inert = media.matches;
-      panelRef.current?.setAttribute("role", media.matches ? "dialog" : "complementary");
-      if (media.matches) {
-        panelRef.current?.setAttribute("aria-modal", "true");
-        panelRef.current?.focus();
-      } else panelRef.current?.removeAttribute("aria-modal");
-    };
-    const keydown = (event: KeyboardEvent) => {
-      const activeDialog = document.activeElement?.closest('[role="dialog"]');
-      if (event.defaultPrevented || (activeDialog && activeDialog !== panelRef.current)) return;
-      if (event.key === "Escape") { event.preventDefault(); onClose(); }
-      if (event.key !== "Tab" || !media.matches || !panelRef.current) return;
-      const controls = Array.from(panelRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], textarea:not([disabled]), select:not([disabled]), summary')).filter((node) => node.getClientRects().length > 0);
-      const first = controls[0];
-      const last = controls.at(-1);
-      if (event.shiftKey && (document.activeElement === first || document.activeElement === panelRef.current)) { event.preventDefault(); last?.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
-    };
-    applyOverlay();
-    media.addEventListener("change", applyOverlay);
-    window.addEventListener("keydown", keydown);
-    const frame = frameRef.current;
-    const panel = panelRef.current;
-    return () => {
-      if (frame) frame.inert = false;
-      media.removeEventListener("change", applyOverlay);
-      window.removeEventListener("keydown", keydown);
-      if (panel?.contains(document.activeElement) || document.activeElement === document.body) previous?.focus();
-    };
-  }, [chatOpen, onClose]);
-
-  return <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
-    <div ref={frameRef} className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
-    {chatOpen ? <>
-      <div className="absolute inset-0 z-30 bg-black/20 xl:hidden" aria-hidden onClick={onClose} />
-      <aside ref={panelRef} id="paid-chat-panel" tabIndex={-1} aria-labelledby="paid-chat-title" className="absolute inset-y-0 right-0 z-40 w-full max-w-[390px] shrink-0 border-l border-line-2 outline-none xl:static xl:z-auto xl:w-[360px] 2xl:w-[390px]">{chat}</aside>
-    </> : null}
+  return <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden xl:flex-row">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
+    {chatOpen ? <aside
+      id="paid-chat-panel"
+      aria-labelledby="paid-chat-title"
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || event.defaultPrevented || (event.target instanceof Element && event.target.closest('[role="dialog"]'))) return;
+        event.preventDefault();
+        onClose();
+      }}
+      className="h-[45%] max-h-[380px] min-h-[240px] w-full min-w-0 shrink-0 border-t border-line-2 xl:h-auto xl:max-h-none xl:min-h-0 xl:w-[360px] xl:border-l xl:border-t-0 2xl:w-[390px]"
+    >{chat}</aside> : null}
   </div>;
 }

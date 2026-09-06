@@ -662,7 +662,7 @@ export async function syncPaidConnection(input: {
         data: {
           status: failed?.errorCode === "authentication"
             ? "revoked"
-            : failed?.errorCode === "permission"
+            : failed?.errorCode === "permission" || failed?.errorCode === "configuration"
               ? "error"
               : "connected",
           currency: metadata.currency ?? undefined,

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type { IconType } from "react-icons";
 import { SiGoogleads, SiGoogleanalytics, SiMeta } from "react-icons/si";
-import { LuRefreshCw, LuUnplug, LuX } from "react-icons/lu";
+import { LuCheck, LuRefreshCw, LuUnplug, LuX } from "react-icons/lu";
 
 import type { Channel, ConnectionDisconnectResult } from "@/types/views";
 import type { ConnectorUiFeedback } from "@/lib/connectors/status-copy";
@@ -39,6 +39,7 @@ const SECTIONS = [
 ] as const;
 
 function connectionStatus(channel: Channel): string {
+  if (channel.status === "error" && channel.errorCode === "configuration") return "Marpin setup needs attention; reconnecting will not fix it";
   if (channel.status === "connected") return channel.displayName ? `Connected - ${channel.displayName}` : "Connected";
   if (channel.status === "error") return "Connection needs attention";
   if (channel.status === "revoked") return "Connection needs to be reconnected";
@@ -225,6 +226,7 @@ export function ConnectionsModal({
               <div className="grid grid-cols-1 gap-[9px] sm:grid-cols-2">
                 {group.map((channel) => {
                   const on = channel.status === "connected";
+                  const setupRequired = channel.status === "error" && channel.errorCode === "configuration";
                   const needsAttention = channel.status === "error" || channel.status === "revoked";
                   const planned = channel.connectionAvailability === "planned";
                   const existingConnection = Boolean(channel.connectionId);
@@ -278,17 +280,19 @@ export function ConnectionsModal({
                           <button
                             type="button"
                             onClick={() => onConnect(channel)}
-                            disabled={!canConnect || busy}
-                            className="min-w-[72px] flex-none cursor-pointer rounded-[8px] px-[9px] py-[6px] font-sans text-[11.5px] font-semibold disabled:cursor-not-allowed disabled:opacity-55"
+                            disabled={on || setupRequired || !canConnect || busy}
+                            className="flex min-w-[72px] flex-none items-center justify-center gap-1 rounded-[8px] px-[9px] py-[6px] font-sans text-[11.5px] font-semibold disabled:cursor-default"
                             style={
-                              reconnectable
+                              on
+                                ? { border: "1px solid #DDDBD2", background: "transparent", color: "#5E7B52" }
+                                : reconnectable
                                 ? { border: "1px solid #DDDBD2", background: "transparent", color: "#746B5F" }
                                 : canConnect
                                   ? { border: "none", background: "#9A3D63", color: "#fff" }
                                   : { border: "1px solid #E2DED5", background: "#F4F2ED", color: "#9A9185" }
                             }
                           >
-                            {!canManage
+                            {on ? <><LuCheck aria-hidden />Connected</> : setupRequired ? "Setup needed" : !canManage
                               ? "Read only"
                               : reconnectable
                               ? "Reconnect"
@@ -300,6 +304,18 @@ export function ConnectionsModal({
                                     ? "Connect"
                                     : "Setup"}
                           </button>
+                          {canManage && on && !setupRequired ? (
+                            <button
+                              type="button"
+                              onClick={() => onConnect(channel)}
+                              disabled={!canConnect || busy}
+                              aria-label={`Update ${channel.name} access`}
+                              title="Update account access (optional)"
+                              className="flex h-[29px] w-[29px] flex-none items-center justify-center rounded-[7px] border border-line-2 bg-transparent text-ink-500 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <LuRefreshCw aria-hidden />
+                            </button>
+                          ) : null}
                           {canManage && existingConnection && channel.connectionId ? (
                             <button
                               type="button"

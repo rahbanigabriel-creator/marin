@@ -1,6 +1,7 @@
 import type { ConnectorPlatform } from "./types";
 
 export type PaidProviderErrorCode =
+  | "configuration"
   | "authentication"
   | "permission"
   | "rate_limit"
@@ -11,6 +12,7 @@ export type PaidProviderErrorCode =
   | "not_supported";
 
 const SAFE_MESSAGES: Record<PaidProviderErrorCode, string> = {
+  configuration: "Marpin's reporting setup needs attention. Reconnecting your account will not resolve this configuration issue.",
   authentication: "The connected account could not be authenticated.",
   permission: "The connected account does not grant the required reporting permission.",
   rate_limit: "The provider temporarily limited reporting requests.",

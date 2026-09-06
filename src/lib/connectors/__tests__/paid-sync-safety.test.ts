@@ -145,6 +145,21 @@ test("provider failures retain stored metadata and persistence errors remain vis
   assert.equal(db.connections[0].lastErrorCode, "persistence_unavailable");
 });
 
+test("app configuration failures preserve credentials and recover on a later sync", async (t) => {
+  const db = database(t);
+  const original = structuredClone(db.connections[0]);
+  const failure = async () => { throw new PaidProviderError("google_ads", "configuration", false); };
+  await syncPaidConnection({ connection: db.connections[0], range: RANGE, client: { platform: "google_ads", fetchMetricsSnapshot: failure, fetchCampaignsSnapshot: failure, fetchAdsSnapshot: failure } });
+  assert.equal(db.connections[0].status, "error");
+  assert.equal(db.connections[0].lastErrorCode, "configuration");
+  assert.equal(db.connections[0].encAccessToken, original.encAccessToken);
+  assert.equal(db.connections[0].encRefreshToken, original.encRefreshToken);
+  assert.equal(db.connections[0].lastSuccessfulSyncAt?.getTime(), DAY.getTime());
+  await syncPaidConnection({ connection: structuredClone(db.connections[0]), range: RANGE, client: client() });
+  assert.equal(db.connections[0].status, "connected");
+  assert.equal(db.connections[0].lastErrorCode, null);
+});
+
 test("busy background accounts defer without skipping later accounts; manual contention still throws", async (t) => {
   const db = database(t); db.connections.push(connection("second"));
   db.attempts.push({ id: "busy", workspaceId: "workspace", connectionId: "account", status: "running", startedAt: new Date() });

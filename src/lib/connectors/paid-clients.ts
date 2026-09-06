@@ -292,7 +292,7 @@ class GooglePaidClient implements PaidReadClient {
 
   private headers(token: string): Record<string, string> {
     const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
-    if (!developerToken) throw new PaidProviderError(this.platform, "authentication", false);
+    if (!developerToken) throw new PaidProviderError(this.platform, "configuration", false);
     const headers: Record<string, string> = {
       Authorization: `Bearer ${token}`,
       "developer-token": developerToken,
@@ -304,7 +304,7 @@ class GooglePaidClient implements PaidReadClient {
   private async query<T>(connection: Connection, query: string): Promise<T[]> {
     const token = await this.tokenProvider(connection, this.platform);
     const customerId = connection.externalAccountId.replace(/-/g, "");
-    if (!customerId) throw new PaidProviderError(this.platform, "authentication", false);
+    if (!customerId) throw new PaidProviderError(this.platform, "configuration", false);
     const url = `https://googleads.googleapis.com/${this.apiVersion}/customers/${customerId}/googleAds:searchStream`;
     let response: Response;
     try {

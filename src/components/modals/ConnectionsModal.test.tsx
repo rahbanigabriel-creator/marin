@@ -43,7 +43,7 @@ test("a revoked persisted account can be reconnected or removed at the plan limi
   assert.doesNotMatch(html, />Limit reached</);
 });
 
-test("a connected provider can reconnect while its local account id is still loading", () => {
+test("a healthy provider shows Connected with an optional access update, not a reconnect warning", () => {
   const channel: Channel = {
     name: "Google Ads",
     status: "connected",
@@ -69,7 +69,20 @@ test("a connected provider can reconnect while its local account id is still loa
     />,
   );
 
-  assert.match(html, />Reconnect</);
+  assert.match(html, /Connected<\/button>/);
+  assert.doesNotMatch(html, />Reconnect</);
+  assert.match(html, /aria-label="Update Google Ads access"/);
   assert.doesNotMatch(html, />Limit reached</);
   assert.doesNotMatch(html, /aria-label="Disconnect/);
+});
+
+test("Marpin configuration failures do not instruct the user to reconnect", () => {
+  const html = renderToStaticMarkup(<ConnectionsModal
+    channels={[{ name: "Google Ads", platform: "google_ads", connectorPlatform: "google_ads", category: "paid", configured: true, status: "error", connectionId: "existing", errorCode: "configuration" }]}
+    connectedCount={1} maxConnections={1} onClose={() => {}} onConnect={() => {}}
+    onDisconnect={async () => { throw new Error("Not used"); }}
+  />);
+  assert.match(html, /Marpin setup needs attention/);
+  assert.match(html, />Setup needed</);
+  assert.doesNotMatch(html, />Reconnect</);
 });

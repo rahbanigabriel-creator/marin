@@ -87,6 +87,21 @@ test("Google direct-account reporting never applies a process-global manager acc
   }
 });
 
+test("missing Google developer configuration is not a revoked user credential", async () => {
+  const previous = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
+  delete process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
+  let requests = 0;
+  try {
+    const client = createPaidReadClient("google_ads", (async () => { requests++; throw new Error("Unexpected request"); }) as typeof fetch, tokenProvider);
+    await assert.rejects(client.fetchMetricsSnapshot(connection("google_ads"), RANGE),
+      (error: unknown) => error instanceof PaidProviderError && error.code === "configuration" && !error.retryable);
+    assert.equal(requests, 0);
+  } finally {
+    if (previous === undefined) delete process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
+    else process.env.GOOGLE_ADS_DEVELOPER_TOKEN = previous;
+  }
+});
+
 test("Meta metrics follows every page without putting the token in the URL", async () => {
   const urls: string[] = [];
   const fetchMock = (async (request: string | URL | Request) => {
