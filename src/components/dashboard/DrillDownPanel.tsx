@@ -1,7 +1,12 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
+import { LuX } from "react-icons/lu";
 import { MetricTrendChart } from "./MetricTrendChart";
+import { PaidCreativeInspection } from "./PaidCreativeInspection";
+import { PaidCreativeMedia } from "./PaidCreativeMedia";
+import { PaidInspectionDialog } from "./PaidInspectionDialog";
+import { selectPaidCreative } from "./paid-media";
 import {
   campaignValue,
   COLUMN_ORDER,
@@ -22,19 +27,11 @@ import {
 
 export interface DrillDownPanelProps {
   campaign: PaidCampaign | null;
+  initialAdId?: string | null;
   onClose: () => void;
 }
 
 const DRILL_METRICS: MetricKey[] = ["spend", "revenue", "roas", "conversions", "clicks", "cpa"];
-const FOCUSABLE = [
-  "button:not([disabled])",
-  "a[href]",
-  "input:not([disabled])",
-  "select:not([disabled])",
-  "textarea:not([disabled])",
-  "summary",
-  "[tabindex]:not([tabindex='-1'])",
-].join(",");
 
 function statusStyle(status: string): React.CSSProperties {
   const value = status.toLowerCase();
@@ -43,71 +40,20 @@ function statusStyle(status: string): React.CSSProperties {
   return { background: "#EFEEE7", color: "#6B6359" };
 }
 
-export function DrillDownPanel({ campaign, onClose }: DrillDownPanelProps): React.JSX.Element | null {
+export function DrillDownPanel({ campaign, initialAdId, onClose }: DrillDownPanelProps): React.JSX.Element | null {
+  return campaign ? <CampaignInspection key={campaign.identity} campaign={campaign} initialAdId={initialAdId} onClose={onClose} /> : null;
+}
+
+function CampaignInspection({ campaign, initialAdId, onClose }: DrillDownPanelProps & { campaign: PaidCampaign }): React.JSX.Element {
   const [metric, setMetric] = useState<MetricKey>("spend");
-  const panelRef = useRef<HTMLDivElement | null>(null);
-  const closeRef = useRef<HTMLButtonElement | null>(null);
-  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const [selection, setSelection] = useState({ initialAdId, adId: initialAdId });
+  const selectedAd = selectPaidCreative(campaign.ads, selection.initialAdId === initialAdId ? selection.adId : initialAdId);
+  const inspectionRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
-  const campaignIdentity = campaign?.identity ?? null;
-
-  useEffect(() => {
-    if (!campaignIdentity) return;
-    returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    const frame = window.requestAnimationFrame(() => closeRef.current?.focus());
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const focusable = [...(panelRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])]
-        .filter((element) => element.getAttribute("aria-hidden") !== "true" && element.offsetParent !== null);
-      if (focusable.length === 0) {
-        event.preventDefault();
-        panelRef.current?.focus();
-        return;
-      }
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      document.removeEventListener("keydown", onKeyDown);
-      document.body.style.overflow = previousOverflow;
-      const target = returnFocusRef.current;
-      window.requestAnimationFrame(() => target?.isConnected && target.focus());
-    };
-  }, [campaignIdentity, onClose]);
-
-  useEffect(() => setMetric("spend"), [campaignIdentity]);
-
-  if (!campaign) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-black/20" onMouseDown={onClose} aria-hidden="true" />
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        tabIndex={-1}
-        className="relative h-full w-[min(560px,100vw)] animate-riseIn overflow-y-auto bg-surface-page shadow-modal outline-none sm:w-[min(560px,92vw)]"
-      >
-        <header className="flex items-start justify-between gap-[12px] border-b border-line-3 bg-surface-card p-[18px_18px] sm:p-[20px_22px]">
+    <PaidInspectionDialog titleId={titleId} onClose={onClose}>
+        <header className="sticky top-0 z-10 flex items-start justify-between gap-[12px] border-b border-line-3 bg-surface-card p-[18px_18px] sm:p-[20px_22px]">
           <div className="min-w-0">
             <div id={titleId} className="break-words font-serif text-[20px] font-medium text-ink-900">{campaign.campaign}</div>
             <div className="mt-[3px] flex flex-wrap items-center gap-x-[8px] gap-y-[4px]">
@@ -137,17 +83,20 @@ export function DrillDownPanel({ campaign, onClose }: DrillDownPanelProps): Reac
             </div>
           </div>
           <button
-            ref={closeRef}
+            data-inspection-close
             type="button"
             onClick={onClose}
             aria-label="Close campaign details"
             className="flex h-[34px] w-[34px] flex-shrink-0 cursor-pointer items-center justify-center rounded-[8px] border border-line-3 bg-white font-sans text-[20px] leading-none text-ink-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-plum"
           >
-            <span aria-hidden>×</span>
+            <LuX size={18} aria-hidden />
           </button>
         </header>
 
         <div className="flex flex-col gap-[18px] p-[16px_14px] sm:p-[20px_22px]">
+          <div ref={inspectionRef} tabIndex={-1} aria-label="Selected creative inspection" className="scroll-mt-40 outline-none">
+            <PaidCreativeInspection campaign={campaign} ad={selectedAd} onSelect={(ad) => setSelection({ initialAdId, adId: ad.externalId })} />
+          </div>
           <MetricTrendChart
             series={campaign.series}
             metric={metric}
@@ -196,7 +145,11 @@ export function DrillDownPanel({ campaign, onClose }: DrillDownPanelProps): Reac
             {campaign.ads.length > 0 ? (
               <div className="flex flex-col gap-[10px]">
                 {campaign.ads.map((ad, index) => (
-                  <CreativeCard key={`${ad.externalId}:${index}`} ad={ad} resultNoun={resultLabel(campaign.objective)} />
+                  <CreativeCard key={`${ad.externalId}:${index}`} ad={ad} selected={ad.externalId === selectedAd?.externalId} onSelect={() => {
+                    setSelection({ initialAdId, adId: ad.externalId });
+                    inspectionRef.current?.scrollIntoView({ block: "start" });
+                    inspectionRef.current?.focus({ preventScroll: true });
+                  }} resultNoun={resultLabel(campaign.objective)} />
                 ))}
               </div>
             ) : (
@@ -206,33 +159,17 @@ export function DrillDownPanel({ campaign, onClose }: DrillDownPanelProps): Reac
             )}
           </section>
         </div>
-      </div>
-    </div>
+    </PaidInspectionDialog>
   );
 }
 
-function CreativeCard({ ad, resultNoun }: { ad: PaidAd; resultNoun: string }): React.JSX.Element {
-  const [imageAvailable, setImageAvailable] = useState(true);
-  const showImage = !!ad.thumbnailUrl && imageAvailable;
+function CreativeCard({ ad, resultNoun, selected, onSelect }: { ad: PaidAd; resultNoun: string; selected: boolean; onSelect: () => void }): React.JSX.Element {
   const spendUnavailable = metricIsUnavailable("spend", ad.spend, ad.currency);
   return (
     <article className="flex min-w-0 gap-[10px] rounded-card border border-line-3 bg-surface-card p-[10px] sm:gap-[12px] sm:p-[12px]">
-      <div className="relative flex h-[56px] w-[56px] flex-shrink-0 items-center justify-center overflow-hidden rounded-[8px] bg-[#F1EFE9] sm:h-[64px] sm:w-[64px]">
-        {showImage ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={ad.thumbnailUrl as string}
-            alt=""
-            referrerPolicy="no-referrer"
-            onError={() => setImageAvailable(false)}
-            className="h-full w-full object-cover"
-          />
-        ) : (
-          <span className="font-mono text-[9px] uppercase tracking-wide text-ink-300">
-            {ad.creativeType === "video" ? "Video" : "Image"}
-          </span>
-        )}
-      </div>
+      <button type="button" onClick={onSelect} aria-label={`Inspect creative ${ad.name}`} aria-pressed={selected} className="relative flex h-[88px] w-[88px] flex-shrink-0 items-center justify-center overflow-hidden rounded-[8px] border border-line-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-plum">
+        <PaidCreativeMedia src={ad.thumbnailUrl} alt="" />
+      </button>
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-[7px]">
           <span className="min-w-0 truncate font-sans text-[13px] font-medium text-ink-900">{ad.name}</span>

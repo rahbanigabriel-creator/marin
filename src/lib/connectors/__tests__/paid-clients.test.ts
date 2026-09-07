@@ -386,18 +386,32 @@ test("Meta rejects data containing a malformed inner row", async () => {
 });
 
 test("Meta prefers the source image over its small thumbnail and retains thumbnail fallback", async () => {
-  const fetchMock = (async (request: string | URL | Request) => {
+  const requests: URL[] = [];
+  const signedThumbnail = "https://example.test/video.jpg?size=1080&signature=opaque%2Bsignature";
+  const fetchMock = (async (request: string | URL | Request, init?: RequestInit) => {
     const url = new URL(typeof request === "string" ? request : request instanceof URL ? request.toString() : request.url);
+    requests.push(url);
+    assert.equal(init?.method ?? "GET", "GET");
     if (url.pathname.endsWith("/act_123")) return json({ currency: "EUR", timezone_name: "Europe/Madrid" });
     if (url.pathname.endsWith("/insights")) return json({ data: [] });
     return json({ data: [
       { id: "image", name: "Image ad", creative: { image_url: "https://example.test/full.jpg", thumbnail_url: "https://example.test/small.jpg" } },
-      { id: "video", name: "Video ad", creative: { thumbnail_url: "https://example.test/video.jpg" } },
+      { id: "video", name: "Video ad", creative: { thumbnail_url: signedThumbnail, object_type: "VIDEO" } },
+      { id: "blank", name: "Blank source image", creative: { image_url: "  ", thumbnail_url: signedThumbnail } },
+      { id: "missing", name: "No source image", creative: { image_url: "", thumbnail_url: "  " } },
     ] });
   }) as typeof fetch;
   const result = await createPaidReadClient("meta_ads", fetchMock, tokenProvider).fetchAdsSnapshot(connection("meta_ads"), RANGE);
   assert.equal(result.items[0].thumbnailUrl, "https://example.test/full.jpg");
-  assert.equal(result.items[1].thumbnailUrl, "https://example.test/video.jpg");
+  assert.equal(result.items[1].thumbnailUrl, signedThumbnail);
+  assert.equal(result.items[1].creativeType, "video");
+  assert.equal(result.items[2].thumbnailUrl, signedThumbnail);
+  assert.equal(result.items[3].thumbnailUrl, null);
+  assert.equal(result.items[3].creativeType, null);
+  assert.equal(requests.length, 3, "larger previews must not add per-ad requests");
+  const fields = requests.find((url) => url.pathname.endsWith("/ads"))?.searchParams.get("fields");
+  assert.match(fields ?? "", /creative\.thumbnail_width\(1080\)\.thumbnail_height\(1080\)\{thumbnail_url,image_url,/);
+  assert.match(fields ?? "", /campaign\{name,objective\}/);
 });
 
 test("Meta rejects malformed nested creative fields before reconciliation", async () => {
@@ -406,6 +420,7 @@ test("Meta rejects malformed nested creative fields before reconciliation", asyn
     { object_story_spec: { video_data: { call_to_action: [] } } },
     { object_story_spec: { link_data: { message: 42 } } },
     { thumbnail_url: { href: "https://example.test/image.png" } },
+    { image_url: { href: "https://example.test/image.png" } },
   ];
 
   for (const creative of malformedCreatives) {

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { ConnectionCredentialsChangedError, connectionCredentialWhere, getConnectionAccessToken } from "./clients";
 import { withAbortSignal } from "./oauth";
 import { PaidProviderError, sanitizePaidProviderError } from "./paid-errors";
+import { PAID_AUTO_SYNC_INTERVAL_MS, paidAutoSyncSkipReason } from "./paid-sync-freshness";
 import {
   createPaidReadClient,
   isPaidSyncPlatform,
@@ -56,6 +57,13 @@ export interface PaidWorkspaceSyncResult {
   requestedTo: string;
   results: PaidAccountSyncOutcome[];
   deferredConnectionIds?: string[];
+  freshConnectionIds?: string[];
+}
+
+class PaidSyncNotDueError extends Error {
+  constructor(readonly reason: "fresh" | "cooldown") {
+    super("Automatic reporting refresh is not due yet.");
+  }
 }
 
 export class PaidSyncPersistenceError extends Error {
@@ -114,6 +122,7 @@ export interface PaidSyncOptions {
   guard?: (db?: Prisma.TransactionClient) => Promise<void>;
   limits?: Partial<PaidReadLimits>;
   metricsOnly?: boolean;
+  automatic?: boolean;
 }
 
 async function lockSyncWorkspace(tx: Prisma.TransactionClient, workspaceId: string): Promise<void> {
@@ -518,6 +527,7 @@ async function claimSyncAttempt(input: {
   connection: Connection;
   range: MetricRange;
   trigger: string;
+  automatic?: boolean;
   guard: (db?: Prisma.TransactionClient) => Promise<void>;
 }): Promise<Pick<SyncAttempt, "id" | "startedAt">> {
   return prisma.$transaction(async (tx) => {
@@ -533,6 +543,22 @@ async function claimSyncAttempt(input: {
       select: { id: true },
     });
     if (running) throw new PaidSyncInProgressError();
+
+    if (input.automatic) {
+      const recent = await tx.syncAttempt.findMany({
+        where: {
+          connectionId: input.connection.id,
+          OR: [
+            { completedAt: { gt: new Date(now.getTime() - PAID_AUTO_SYNC_INTERVAL_MS) } },
+            { startedAt: { gt: new Date(now.getTime() - PAID_AUTO_SYNC_INTERVAL_MS) } },
+          ],
+        },
+        orderBy: { startedAt: "desc" },
+        take: 20,
+      });
+      const reason = paidAutoSyncSkipReason(recent, input.range, now);
+      if (reason) throw new PaidSyncNotDueError(reason);
+    }
 
     const attempt = await tx.syncAttempt.create({
       data: {
@@ -589,6 +615,7 @@ export async function syncPaidConnection(input: {
       connection: input.connection,
       range: input.range,
       trigger,
+      automatic: input.automatic,
       guard,
     });
     startedAttempt = attempt;
@@ -689,7 +716,7 @@ export async function syncPaidConnection(input: {
       phases,
     };
   } catch (error) {
-    if (error instanceof PaidSyncInProgressError) throw error;
+    if (error instanceof PaidSyncInProgressError || error instanceof PaidSyncNotDueError) throw error;
     let failure = error;
     // Check the generation even after an old token's provider error or a failed
     // transaction. That error is never evidence about the replacement token.
@@ -734,6 +761,8 @@ export async function syncPaidWorkspace(input: {
   clientFactory?: PaidClientFactory;
   /** Background batches defer busy accounts; explicit/manual requests still fail. */
   skipBusy?: boolean;
+  automatic?: boolean;
+  signal?: AbortSignal;
 }): Promise<PaidWorkspaceSyncResult> {
   const platforms = input.platforms ?? [...PAID_SYNC_PLATFORMS];
   let connections: Connection[];
@@ -753,6 +782,7 @@ export async function syncPaidWorkspace(input: {
 
   const results: PaidAccountSyncOutcome[] = [];
   const deferredConnectionIds: string[] = [];
+  const freshConnectionIds: string[] = [];
   for (const connection of connections) {
     if (!isPaidSyncPlatform(connection.platform)) continue;
     try {
@@ -760,9 +790,15 @@ export async function syncPaidWorkspace(input: {
         connection,
         range: input.range,
         trigger: input.trigger,
+        automatic: input.automatic,
+        signal: input.signal,
         client: input.clientFactory?.(connection.platform),
       }));
     } catch (error) {
+      if (error instanceof PaidSyncNotDueError) {
+        (error.reason === "fresh" ? freshConnectionIds : deferredConnectionIds).push(connection.id);
+        continue;
+      }
       if (!input.skipBusy || !(error instanceof PaidSyncInProgressError || error instanceof PaidSyncStoppedError)) throw error;
       deferredConnectionIds.push(connection.id);
     }
@@ -771,7 +807,7 @@ export async function syncPaidWorkspace(input: {
   const successful = results.filter((result) => result.state === "succeeded").length;
   const failed = results.filter((result) => result.state === "failed").length;
   const state: PaidWorkspaceSyncResult["state"] = deferredConnectionIds.length ? "partial" : results.length === 0
-    ? "unavailable"
+    ? freshConnectionIds.length ? "succeeded" : "unavailable"
     : failed === results.length
       ? "failed"
       : successful === results.length
@@ -783,5 +819,6 @@ export async function syncPaidWorkspace(input: {
     requestedTo: input.range.to.toISOString(),
     results,
     ...(deferredConnectionIds.length ? { deferredConnectionIds } : {}),
+    ...(freshConnectionIds.length ? { freshConnectionIds } : {}),
   };
 }

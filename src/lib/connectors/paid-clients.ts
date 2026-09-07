@@ -703,7 +703,9 @@ class MetaPaidClient implements PaidReadClient {
     insightsUrl.searchParams.set("limit", "500");
     insightsUrl.searchParams.set("time_range", JSON.stringify({ since: isoDay(range.from), until: isoDay(range.to) }));
     const adsUrl = new URL(`https://graph.facebook.com/${META_GRAPH_VERSION}/${this.accountId(connection)}/ads`);
-    adsUrl.searchParams.set("fields", "id,name,status,effective_status,campaign_id,campaign{name,objective},adset{name},creative{thumbnail_url,image_url,title,body,object_type,call_to_action_type,object_story_spec{link_data{message,name,link,call_to_action{type}},video_data{message,title,call_to_action{type}}}}");
+    // AdCreative GET supports thumbnail_width/height (Meta's official Business SDK).
+    // Apply them to the expanded creative, never rewrite its signed CDN URL.
+    adsUrl.searchParams.set("fields", "id,name,status,effective_status,campaign_id,campaign{name,objective},adset{name},creative.thumbnail_width(1080).thumbnail_height(1080){thumbnail_url,image_url,title,body,object_type,call_to_action_type,object_story_spec{link_data{message,name,link,call_to_action{type}},video_data{message,title,call_to_action{type}}}}");
     adsUrl.searchParams.set("limit", "500");
     const [meta, performance, rawAds] = await Promise.all([
       this.accountMeta(connection, token),
@@ -819,7 +821,7 @@ function metaCreative(creative: ProviderRecord | undefined): Pick<AdCreative, "c
   const videoCallToAction = optionalRecord(platform, video?.call_to_action);
   const thumbnail = optionalText(platform, creative?.thumbnail_url);
   const image = optionalText(platform, creative?.image_url);
-  const thumbnailUrl = image ?? thumbnail;
+  const thumbnailUrl = image?.trim() ? image : thumbnail?.trim() ? thumbnail : null;
   const objectType = optionalText(platform, creative?.object_type);
   return {
     creativeType: video || objectType?.toUpperCase().includes("VIDEO")

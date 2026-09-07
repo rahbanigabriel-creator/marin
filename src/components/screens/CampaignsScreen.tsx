@@ -9,6 +9,7 @@ import { DrillDownPanel } from "@/components/dashboard/DrillDownPanel";
 import { PaidOverview, PlatformMark, campaignStatus, type CampaignStatusFilter } from "@/components/dashboard/PaidOverview";
 import { PaidCreativeGallery } from "@/components/dashboard/PaidCreativeGallery";
 import { PaidDraftWorkspace } from "@/components/paid/PaidDraftWorkspace";
+import { PAID_AUTO_SYNC_CHECK_MS, PAID_AUTO_SYNC_INTERVAL_MS } from "@/lib/connectors/paid-sync-freshness";
 import {
   DEFAULT_COLUMNS,
   coverageLabel,
@@ -20,6 +21,7 @@ import {
   type MetricKey,
   type MetricRecord,
   type PaidCampaign,
+  type PaidAd,
   type PaidDailyPoint,
   type PaidDashboardData,
   type PaidPlatform,
@@ -345,7 +347,11 @@ export function CampaignsScreen({
   const [accountFilter, setAccountFilter] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [selectedAdId, setSelectedAdId] = useState<string | null>(null);
   const loadSequence = useRef(0);
+  const syncInFlight = useRef(false);
+  const activeRange = useRef(range);
+  const nextAutomaticAttempt = useRef(0);
 
   const load = useCallback(async (from: string, to: string, initial = false) => {
     const sequence = ++loadSequence.current;
@@ -362,7 +368,7 @@ export function CampaignsScreen({
       setMode(screenMode(payload.mode));
     } catch (error) {
       if (sequence !== loadSequence.current) return;
-      setMode("failed");
+      if (initial) setMode("failed");
       setLoadError(error instanceof Error ? error.message : "Campaign data could not be loaded.");
     } finally {
       if (sequence === loadSequence.current) setLoading(false);
@@ -370,8 +376,10 @@ export function CampaignsScreen({
   }, []);
 
   useEffect(() => {
+    activeRange.current = range;
+    nextAutomaticAttempt.current = 0;
     void load(range.from, range.to, true);
-  }, [load, range.from, range.to]);
+  }, [load, range]);
 
   useEffect(() => {
     const restoreView = () => setWorkspaceView(new URL(window.location.href).searchParams.get("paidView") === "drafts" ? "drafts" : "performance");
@@ -380,27 +388,65 @@ export function CampaignsScreen({
     return () => window.removeEventListener("popstate", restoreView);
   }, []);
 
-  const sync = useCallback(async () => {
+  const sync = useCallback(async (syncMode: "manual" | "automatic" = "manual") => {
+    if (syncInFlight.current || !canManage || accessLoading) return;
+    syncInFlight.current = true;
+    const current = () => activeRange.current.from === range.from && activeRange.current.to === range.to;
     setSyncing(true);
-    setNotice(null);
+    if (syncMode === "manual") setNotice(null);
     try {
       const response = await fetch("/api/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ from: range.from, to: range.to }),
+        body: JSON.stringify({ from: range.from, to: range.to, ...(syncMode === "automatic" ? { mode: syncMode } : {}) }),
       });
       const payload = await response.json() as unknown;
+      if (!current()) return;
       const nextNotice = syncNotice(payload, response.ok);
-      setNotice(nextNotice);
-      if (nextNotice.tone !== "error" || syncResultList(payload as Record<string, unknown>).length > 0) {
+      const results = payload && typeof payload === "object" ? syncResultList(payload as Record<string, unknown>) : [];
+      nextAutomaticAttempt.current = Date.now() + (response.ok ? PAID_AUTO_SYNC_CHECK_MS : PAID_AUTO_SYNC_INTERVAL_MS);
+      // Automatic freshness checks can reuse a saved snapshot or defer to a
+      // running job. Neither is a new successful provider pull.
+      if (syncMode === "manual" || !response.ok || results.length > 0) {
+        setNotice(syncMode === "automatic" && nextNotice.tone === "success" ? null : nextNotice);
+      }
+      if (response.ok || results.length > 0 || response.status === 409) {
         await load(range.from, range.to);
       }
     } catch {
-      setNotice({ tone: "error", text: "Sync failed before account results were returned. Please try again." });
+      if (current()) {
+        nextAutomaticAttempt.current = Date.now() + PAID_AUTO_SYNC_INTERVAL_MS;
+        setNotice({ tone: "error", text: syncMode === "automatic"
+          ? "Automatic refresh could not finish. Saved data is still available; another attempt will run shortly."
+          : "Sync failed before account results were returned. Please try again." });
+      }
     } finally {
+      syncInFlight.current = false;
       setSyncing(false);
     }
-  }, [load, range.from, range.to]);
+  }, [load, range.from, range.to, canManage, accessLoading]);
+
+  const automaticSyncEnabled = canManage && !accessLoading && workspaceView === "performance"
+    && (mode === "live" || mode === "empty")
+    && data.sources.some((source) => source.state !== "revoked" && ["google_ads", "meta_ads"].includes(source.platform));
+  useEffect(() => {
+    if (!automaticSyncEnabled) return;
+    const refresh = () => {
+      if (document.visibilityState !== "visible" || !navigator.onLine || Date.now() < nextAutomaticAttempt.current) return;
+      void sync("automatic");
+    };
+    refresh();
+    const timer = window.setInterval(refresh, PAID_AUTO_SYNC_CHECK_MS);
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    window.addEventListener("online", refresh);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("online", refresh);
+    };
+  }, [automaticSyncEnabled, sync]);
 
   const toggleSetValue = (setter: React.Dispatch<React.SetStateAction<Set<string>>>, value: string) => {
     setter((previous) => {
@@ -486,7 +532,10 @@ export function CampaignsScreen({
     const rowScope = cachedViewCampaigns.length > 0
       ? `${cachedViewCampaigns.length} campaign${cachedViewCampaigns.length === 1 ? "" : "s"}${accountScope}`
       : `saved account observations${accountScope}`;
-    return `${rowScope} use cached metrics because the source state is ${states.join(" / ").toLowerCase()}. Observation coverage: ${coverageLabel(observedFrom, observedTo, timezone)}. Keep them for context, but do not treat them as current until an owner or admin reconnects and syncs the source.`;
+    const recovery = cachedViewSources.some((source) => source.state === "revoked")
+      ? "An owner or admin needs to reconnect revoked sources."
+      : "Connected sources refresh automatically when an owner or admin opens this view.";
+    return `${rowScope} use cached metrics because the source state is ${states.join(" / ").toLowerCase()}. Observation coverage: ${coverageLabel(observedFrom, observedTo, timezone)}. ${recovery}`;
   }, [cachedViewCampaigns, cachedViewSources, hasCachedPerformance, viewData.state]);
 
   const selected = useMemo(
@@ -497,7 +546,11 @@ export function CampaignsScreen({
     },
     [selectedKey, data.campaigns, data.sources, data.state],
   );
-  const closeDrillDown = useCallback(() => setSelectedKey(null), []);
+  const closeDrillDown = useCallback(() => { setSelectedKey(null); setSelectedAdId(null); }, []);
+  const openDrillDown = useCallback((campaign: PaidCampaign, ad?: PaidAd) => {
+    setSelectedKey(campaign.identity);
+    setSelectedAdId(ad?.externalId ?? null);
+  }, []);
   const showWorkspaceView = useCallback((next: "performance" | "drafts") => {
     setWorkspaceView(next);
     const url = new URL(window.location.href);
@@ -533,10 +586,11 @@ export function CampaignsScreen({
         <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-3"><h1 className="font-serif text-[28px] font-medium leading-tight text-ink-900 sm:text-[30px]">Paid command center</h1><StatusBadge mode={mode} state={data.state} /></div>
+            {automaticSyncEnabled ? <p className="mt-1 flex items-center gap-1.5 text-[11px] text-ink-400" aria-live="polite"><LuRefreshCw aria-hidden className={syncing ? "animate-spin" : ""} />{syncing ? "Refreshing accounts..." : "Auto-sync on"}<span aria-hidden> · </span><span>5-minute refresh</span></p> : null}
             {!canManage && !accessLoading ? <p className="mt-1 text-[11px] text-ink-400">Read-only access. Only owners and admins can sync accounts.</p> : null}
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <PaidSyncButton canManage={canManage} accessLoading={accessLoading} syncing={syncing} loading={loading} onSync={sync}
+            <PaidSyncButton canManage={canManage} accessLoading={accessLoading} syncing={syncing} loading={loading} onSync={() => void sync()}
               className="inline-flex items-center gap-2 rounded-[6px] border border-line-3 bg-white px-3 py-2 text-[12px] font-medium text-ink-600 disabled:cursor-not-allowed disabled:opacity-60" />
             <button type="button" onClick={() => showWorkspaceView("drafts")} className="inline-flex items-center gap-2 rounded-[6px] border border-plum bg-plum px-3 py-2 text-[12px] font-semibold text-white hover:bg-plum-deep focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-plum"><LuFileText aria-hidden /> Campaign drafts</button>
           </div>
@@ -612,7 +666,7 @@ export function CampaignsScreen({
               <PaidSyncButton
                 canManage={canManage}
                 syncing={syncing}
-                onSync={sync}
+                onSync={() => void sync()}
                 className="inline-flex cursor-pointer items-center gap-[6px] rounded-[8px] border border-line-3 bg-white px-[14px] py-[9px] font-sans text-[13px] font-semibold text-ink-600 disabled:cursor-not-allowed disabled:opacity-60"
               />
               <button type="button" onClick={onOpenConnections} className="inline-flex cursor-pointer items-center gap-[6px] rounded-[8px] border-0 bg-plum px-[14px] py-[9px] font-sans text-[13px] font-semibold text-white">
@@ -632,7 +686,7 @@ export function CampaignsScreen({
             ) : null}
 
             <div role="group" aria-label={hasCachedPerformance ? "Cached paid performance summary" : "Paid performance summary"} aria-describedby={hasCachedPerformance ? "paid-cached-performance-notice" : undefined}>
-              <PaidOverview data={viewData} campaigns={overviewCampaigns} statusFilter={statusFilter} onStatusFilter={setStatusFilter} onOpenDrafts={() => showWorkspaceView("drafts")} onSelectCampaign={(campaign) => setSelectedKey(campaign.identity)} />
+              <PaidOverview data={viewData} campaigns={overviewCampaigns} statusFilter={statusFilter} onStatusFilter={setStatusFilter} onOpenDrafts={() => showWorkspaceView("drafts")} onSelectCampaign={openDrillDown} />
             </div>
 
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -654,13 +708,13 @@ export function CampaignsScreen({
               aria-label={cachedViewCampaigns.length > 0 ? "Campaign performance with cached rows" : "Campaign performance"}
               aria-describedby={hasCachedPerformance ? "paid-cached-performance-notice" : undefined}
             >
-              {campaignView === "table" ? <CampaignsTable campaigns={tableCampaigns} columns={columns} onRowClick={(campaign) => setSelectedKey(campaign.identity)} /> : <PaidCreativeGallery campaigns={tableCampaigns} onSelect={(campaign) => setSelectedKey(campaign.identity)} />}
+              {campaignView === "table" ? <CampaignsTable campaigns={tableCampaigns} columns={columns} onRowClick={openDrillDown} /> : <PaidCreativeGallery campaigns={tableCampaigns} onSelect={openDrillDown} />}
             </div>
           </>
         )}
       </div>
 
-      <DrillDownPanel campaign={selected} onClose={closeDrillDown} />
+      <DrillDownPanel campaign={selected} initialAdId={selectedAdId} onClose={closeDrillDown} />
     </section>
   );
 }

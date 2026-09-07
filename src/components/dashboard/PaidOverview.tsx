@@ -4,6 +4,8 @@ import { useState } from "react";
 import { LuArrowUpRight, LuCircleDollarSign, LuEye, LuMousePointer2, LuPercent, LuTarget, LuTrendingUp } from "react-icons/lu";
 import { SiGoogleads, SiMeta } from "react-icons/si";
 import { MetricTrendChart } from "./MetricTrendChart";
+import { PaidCreativeMedia } from "./PaidCreativeMedia";
+import { paidMediaUrl } from "./paid-media";
 import { COLUMNS, MONEY_METRICS, compact, dailyValue, dayLabel, deltaFor, metricIsUnavailable, money2, type MetricKey, type PaidCampaign, type PaidDashboardData } from "./format";
 
 const METRICS = [
@@ -40,9 +42,8 @@ export function PaidOverview({ data, campaigns, statusFilter, onStatusFilter, on
   onSelectCampaign: (campaign: PaidCampaign) => void;
 }): React.JSX.Element {
   const [metric, setMetric] = useState<MetricKey>("spend");
-  const [failedPreviews, setFailedPreviews] = useState<Set<string>>(() => new Set());
-  const featured = campaigns.find((campaign) => campaign.ads.some((ad) => !!ad.thumbnailUrl && !failedPreviews.has(ad.thumbnailUrl)));
-  const featuredAd = featured?.ads.find((ad) => !!ad.thumbnailUrl && !failedPreviews.has(ad.thumbnailUrl));
+  const featured = campaigns.find((campaign) => campaign.ads.some((ad) => paidMediaUrl(ad.thumbnailUrl)));
+  const featuredAd = featured?.ads.find((ad) => paidMediaUrl(ad.thumbnailUrl));
   const [chartScope, setChartScope] = useState<"requested" | "observed">("requested");
   const missing = unavailable(data, metric);
   const knownDays = data.series.filter((point) => dailyValue(point, metric) != null);
@@ -97,8 +98,7 @@ export function PaidOverview({ data, campaigns, statusFilter, onStatusFilter, on
         <aside className="flex min-w-0 flex-col overflow-hidden rounded-[8px] bg-[#412333] p-5 text-white" aria-label="Campaign activity">
           <div className="flex items-center justify-between"><h2 className="text-[14px] font-semibold">Campaign activity</h2><span className="text-[10px] text-[#D9C7D1]">Source status</span></div>
           {featured && featuredAd?.thumbnailUrl ? <button type="button" onClick={() => onSelectCampaign(featured)} aria-label={`Open featured creative for ${featured.campaign}`} className="relative mt-3 block h-[125px] w-full overflow-hidden rounded-[5px] bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-white">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={featuredAd.thumbnailUrl} alt={featuredAd.title ?? featuredAd.name} referrerPolicy="no-referrer" onError={() => setFailedPreviews((previous) => new Set([...previous, featuredAd.thumbnailUrl as string]))} className="h-full w-full object-contain" />
+            <PaidCreativeMedia src={featuredAd.thumbnailUrl} alt={featuredAd.title ?? featuredAd.name} />
             <span className="absolute bottom-0 left-0 right-0 flex items-center justify-between gap-2 bg-[#412333]/90 px-2 py-1 text-[10px] text-white"><span className="truncate">{featured.campaign}</span><LuArrowUpRight size={12} aria-hidden /></span>
           </button> : null}
           <div className={featuredAd ? "mt-2 flex items-center" : ""}>

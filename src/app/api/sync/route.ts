@@ -11,10 +11,11 @@ import { paidSyncAuthFailure } from "@/lib/connectors/paid-http";
 import { isDatabaseConfigured } from "@/lib/db";
 import { enforceEndpointRateLimit } from "@/lib/security/rate-limit";
 import { requestBodyErrorResponse } from "@/lib/security/request-body";
-import { readSyncRange } from "./_lib/request";
+import { readSyncRequest } from "./_lib/request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 export async function POST(request: Request): Promise<Response> {
   let access;
@@ -31,15 +32,15 @@ export async function POST(request: Request): Promise<Response> {
   }
   const rateLimited = await enforceEndpointRateLimit(request, "sync");
   if (rateLimited) return rateLimited;
-  let range;
+  let input;
   try {
-    range = await readSyncRange(request);
+    input = await readSyncRequest(request);
   } catch (error) {
     const bodyFailure = requestBodyErrorResponse(error);
     if (bodyFailure) return bodyFailure;
     throw error;
   }
-  if (!range) {
+  if (!input) {
     return NextResponse.json({ ok: false, error: "invalid_sync_request" }, { status: 400 });
   }
   if (!isDatabaseConfigured()) {
@@ -49,8 +50,11 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const result = await syncPaidWorkspace({
       workspaceId: access.workspace.id,
-      range,
-      trigger: "manual",
+      range: input.range,
+      trigger: input.automatic ? "automatic" : "manual",
+      automatic: input.automatic,
+      skipBusy: input.automatic,
+      signal: AbortSignal.timeout(240_000),
     });
     if (result.state === "failed") {
       return NextResponse.json({ ok: false, ...result }, { status: 502 });

@@ -2,7 +2,23 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { RequestBodyError } from "@/lib/security/request-body";
-import { readSyncRange } from "./_lib/request";
+import { readSyncRange, readSyncRequest } from "./_lib/request";
+
+test("sync mode accepts automatic requests but rejects unknown modes and extra input", async () => {
+  for (const mode of [undefined, "manual", "automatic", "anything", false]) {
+    const request = new Request("https://www.marpin.ai/api/sync", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ from: "2026-09-01", to: "2026-09-07", mode }),
+    });
+    const parsed = await readSyncRequest(request);
+    if (mode === "anything" || mode === false) assert.equal(parsed, null);
+    else assert.equal(parsed?.automatic, mode === "automatic");
+  }
+  assert.equal(await readSyncRequest(new Request("https://www.marpin.ai/api/sync", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ from: "2026-09-01", to: "2026-09-07", mode: "automatic", workspaceId: "someone-else" }),
+  })), null);
+});
 
 function chunkedRequest(chunks: string[], contentType: string): Request {
   const encoder = new TextEncoder();

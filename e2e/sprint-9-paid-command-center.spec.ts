@@ -233,6 +233,10 @@ async function mockApp(page: Page, dashboard: unknown = dashboardPayload()): Pro
   await page.route(/\/api\/dashboard(?:\?.*)?$/, (route) => json(route, dashboard));
   await page.route(/\/api\/sync(?:\?.*)?$/, async (route) => {
     const request = route.request();
+    if (request.postDataJSON()?.mode === "automatic") {
+      await json(route, { ok: true, state: "succeeded", results: [], freshConnectionIds: ["source_us"] });
+      return;
+    }
     syncRequests.push({ body: request.postDataJSON(), contentType: request.headers()["content-type"] });
     await json(route, {
       ok: true,
@@ -275,6 +279,135 @@ async function expectContainedLayout(page: Page): Promise<void> {
   }
   expect(kpiBounds.some((value) => value.text?.trim() === "Unavailable")).toBe(true);
 }
+
+test("paid reporting auto-refreshes on entry and cadence without overlapping requests", async ({ page }) => {
+  await mockApp(page);
+  await page.clock.install();
+  const requests: Record<string, string>[] = [];
+  let release: (() => void) | undefined;
+  await page.route(/\/api\/sync(?:\?.*)?$/, async (route) => {
+    requests.push(route.request().postDataJSON());
+    if (requests.length === 1) await new Promise<void>((resolve) => { release = resolve; });
+    await json(route, { ok: true, state: "succeeded", results: [], freshConnectionIds: ["source_us"] });
+  });
+  await page.goto("/app?mode=paid&view=campaigns");
+  await expect.poll(() => requests.length).toBe(1);
+  expect(requests[0].mode).toBe("automatic");
+  await expect(page.getByRole("button", { name: "Syncing", exact: true })).toBeDisabled();
+  await page.clock.fastForward(61_000);
+  expect(requests).toHaveLength(1);
+  release?.();
+  await expect(page.getByText("Auto-sync on", { exact: false })).toBeVisible();
+  await page.clock.fastForward(61_000);
+  await expect.poll(() => requests.length).toBe(2);
+  await expect(page.getByRole("button", { name: "Sync now", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Sync now", exact: true }).click();
+  await expect.poll(() => requests.length).toBe(3);
+  expect(requests[2].mode).toBeUndefined();
+});
+
+test("automatic refresh backs off errors and never runs for read-only members", async ({ page }) => {
+  await mockApp(page);
+  await page.clock.install();
+  let requests = 0;
+  await page.route(/\/api\/sync(?:\?.*)?$/, async (route) => {
+    requests += 1;
+    await json(route, { ok: false, error: "provider_sync_failed" }, 502);
+  });
+  await page.goto("/app?mode=paid&view=campaigns");
+  await expect.poll(() => requests).toBe(1);
+  await expect(page.getByRole("alert").filter({ hasText: "Sync finished with issues" })).toBeVisible();
+  await page.clock.fastForward(120_000);
+  expect(requests).toBe(1);
+  await page.clock.fastForward(180_000);
+  await expect.poll(() => requests).toBe(2);
+  await page.route(/\/api\/billing(?:\?.*)?$/, (route) => json(route, { billing: { canManage: false, entitlements: {}, resources: { connections: 2 } } }));
+  await page.reload();
+  await expect(page.getByText(/Read-only access/)).toBeVisible();
+  await page.clock.fastForward(360_000);
+  expect(requests).toBe(2);
+});
+
+test("creative inspection opens the selected asset above analytics and keeps provider editing explicit", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1050 });
+  const base = dashboardPayload();
+  const campaign = {
+    ...base.data.campaigns[0], accountId: "act_123456", externalId: "456789", platform: "meta_ads", label: "Meta Ads",
+    ads: [
+      { ...base.data.campaigns[0].ads[0], externalId: "789001", name: "First creative", title: "First preview", thumbnailUrl: "/marpin-logo.png" },
+      { ...base.data.campaigns[0].ads[0], externalId: "789002", name: "Second creative", title: "Second preview", thumbnailUrl: "/marpin-logo.png" },
+    ],
+  };
+  await mockApp(page, { ...base, data: { ...base.data, campaigns: [campaign] } });
+  await page.goto("/app?mode=paid&view=campaigns");
+  await page.getByRole("combobox", { name: "Preview creative for Always On in US Store" }).selectOption("789002");
+  const opener = page.getByRole("button", { name: "Open creative details for Always On in US Store", exact: true });
+  await opener.click();
+  const dialog = page.getByRole("dialog", { name: "Always On", exact: true });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Close campaign details" })).toBeFocused();
+  await expect(dialog.getByRole("combobox", { name: "Selected creative" })).toHaveValue("789002");
+  const preview = dialog.getByRole("region", { name: "Creative inspection" }).getByRole("img", { name: "Second preview" });
+  await expect.poll(() => preview.evaluate((node) => (node as HTMLImageElement).naturalWidth)).toBeGreaterThan(500);
+  await expect(preview).toBeInViewport();
+  const edit = dialog.getByRole("link", { name: "Edit in Meta Ads Manager", exact: true });
+  await expect(edit).toHaveAttribute("href", "https://adsmanager.facebook.com/adsmanager/manage/ads?act=123456&selected_campaign_ids=456789&selected_ad_ids=789002");
+  await expect(dialog).toContainText("Changes are made there");
+  await expect(dialog.getByRole("button", { name: /Save|Publish|Activate/ })).toHaveCount(0);
+  expect(await dialog.evaluate((node) => node.parentElement === document.body && (node as HTMLDialogElement).open)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("creative-inspection-desktop.png") });
+  await dialog.getByRole("button", { name: "Previous creative" }).click();
+  await expect(dialog.getByRole("combobox", { name: "Selected creative" })).toHaveValue("789001");
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await dialog.evaluate((node) => {
+    const bounds = node.getBoundingClientRect();
+    return bounds.left >= 0 && bounds.right <= window.innerWidth && node.scrollWidth <= node.clientWidth;
+  })).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("creative-inspection-mobile.png") });
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(opener).toBeFocused();
+  await expect(page.getByRole("complementary", { name: "Campaign chat", exact: true })).toBeVisible();
+});
+
+test("auto-refresh pauses offline and ignores results from an old reporting range", async ({ page }) => {
+  await mockApp(page);
+  await page.clock.install();
+  const requests: Record<string, string>[] = [];
+  let release: (() => void) | undefined;
+  await page.route(/\/api\/sync(?:\?.*)?$/, async (route) => {
+    requests.push(route.request().postDataJSON());
+    if (requests.length === 1) {
+      await new Promise<void>((resolve) => { release = resolve; });
+      await json(route, { ok: false, error: "old_range_failure" }, 502);
+    } else await json(route, { ok: true, state: "succeeded", results: [], freshConnectionIds: ["source_us"] });
+  });
+  await page.goto("/app?mode=paid&view=campaigns");
+  await expect.poll(() => requests.length).toBe(1);
+  await page.getByRole("button", { name: "7D", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Chart Ad spend" })).toBeVisible();
+  release?.();
+  await expect(page.getByRole("button", { name: "Sync now", exact: true })).toBeEnabled();
+  await expect(page.getByText(/old_range_failure/)).toHaveCount(0);
+  await page.context().setOffline(true);
+  await page.clock.fastForward(120_000);
+  expect(requests).toHaveLength(1);
+  await page.context().setOffline(false);
+  await expect.poll(() => requests.length).toBe(2);
+  expect(requests[1].from).not.toEqual(requests[0].from);
+  await expect(page.getByRole("button", { name: "Sync now", exact: true })).toBeEnabled();
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.clock.fastForward(120_000);
+  expect(requests).toHaveLength(2);
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await expect.poll(() => requests.length).toBe(3);
+});
 
 test("keeps duplicate campaign names distinct and reports paid data truthfully", async ({ page }) => {
   const mock = await mockApp(page);

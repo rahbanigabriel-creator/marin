@@ -166,6 +166,59 @@ test("paid sync ranges accept exactly two valid calendar days within 366 inclusi
   assert.deepEqual(parsePaidSyncRangeInput(null), null);
 });
 
+integrationTest("automatic refresh deduplicates under the account lock, backs off failure, and preserves manual retry", async () => {
+  const workspace = await prisma.workspace.create({ data: { name: "Auto sync test", slug: `auto-sync-${crypto.randomUUID()}` } });
+  const range = { from: DAY, to: DAY };
+  const fake = new FakePaidClient();
+  const connection = await prisma.connection.create({ data: {
+    workspaceId: workspace.id, platform: "google_ads", externalAccountId: "auto-account-eur",
+    encAccessToken: "encrypted-test", status: "connected",
+  } });
+  const input = { workspaceId: workspace.id, range, automatic: true, skipBusy: true, trigger: "automatic", clientFactory: () => fake };
+  try {
+    const blocker = new BlockingPaidClient();
+    const first = syncPaidWorkspace({ ...input, clientFactory: () => blocker });
+    await blocker.entered;
+    try {
+      const overlapping = await syncPaidWorkspace(input);
+      assert.deepEqual(overlapping.deferredConnectionIds, [connection.id]);
+      assert.equal(overlapping.results.length, 0);
+    } finally { blocker.unblock(); }
+    await first;
+    const fresh = await syncPaidWorkspace(input);
+    assert.deepEqual(fresh.freshConnectionIds, [connection.id]);
+    assert.equal(fresh.state, "succeeded");
+    assert.equal(await prisma.syncAttempt.count({ where: { workspaceId: workspace.id } }), 1);
+
+    const wider = { from: new Date("2026-06-01"), to: DAY };
+    assert.deepEqual((await syncPaidWorkspace({ ...input, range: wider })).deferredConnectionIds, [connection.id]);
+    await prisma.syncAttempt.updateMany({ where: { workspaceId: workspace.id }, data: {
+      startedAt: new Date(Date.now() - 60_000), completedAt: new Date(Date.now() - 45_000),
+    } });
+    assert.equal((await syncPaidWorkspace({ ...input, range: wider })).results.length, 1);
+    fake.stage = "failed";
+    await syncPaidWorkspace({ ...input, automatic: false });
+    const count = await prisma.syncAttempt.count({ where: { workspaceId: workspace.id } });
+    assert.deepEqual((await syncPaidWorkspace(input)).deferredConnectionIds, [connection.id]);
+    assert.equal(await prisma.syncAttempt.count({ where: { workspaceId: workspace.id } }), count);
+    fake.stage = "refresh";
+    assert.equal((await syncPaidWorkspace({ ...input, automatic: false })).state, "succeeded");
+    await prisma.syncAttempt.updateMany({ where: { workspaceId: workspace.id }, data: {
+      startedAt: new Date(Date.now() - 15 * 60_000), completedAt: new Date(Date.now() - 14 * 60_000),
+    } });
+    const abandoned = await prisma.syncAttempt.create({ data: {
+      workspaceId: workspace.id, connectionId: connection.id, requestedFrom: DAY, requestedTo: DAY,
+      startedAt: new Date(Date.now() - 11 * 60_000),
+    } });
+    assert.equal((await syncPaidWorkspace(input)).results.length, 1);
+    assert.equal((await prisma.syncAttempt.findUniqueOrThrow({ where: { id: abandoned.id } })).errorCode, "sync_abandoned");
+    await prisma.connection.update({ where: { id: connection.id }, data: { status: "revoked" } });
+    assert.equal((await syncPaidWorkspace(input)).state, "unavailable");
+  } finally {
+    await prisma.workspace.delete({ where: { id: workspace.id } });
+  }
+});
+
 integrationTest("paid sync is tenant-safe, account-aware, idempotent, stale-safe, and truthful", async () => {
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const workspace = await prisma.workspace.create({ data: { name: "Paid", slug: `paid-${suffix}` } });
