@@ -69,6 +69,21 @@ autonomous paid-campaign management product.
 - The updated Meta creative query returned a complete 14-ad response from the
   owner's existing connection in a read-only live check, without reauthorization.
 
+## Production verification
+
+- Commit `594e225` deployed READY as `dpl_Fssuz6YAVQf42de9wStfdf7hom8M`,
+  aliased to `https://www.marpin.ai`.
+- A normal signed-in reload automatically refreshed Meta. No Sync button was
+  clicked. The recorded automatic attempt completed at 08:57:08 UTC on
+  September 7 with metrics, campaigns and ads all succeeded; the connection
+  remained connected with no stored error.
+- Inspected loaded gallery previews were 720 x 720 or 1080 x 1080 pixels,
+  replacing the old 64 x 64 images. A real creative opened in the new inspector
+  at 1080 x 1080 with full copy, metrics and the correctly scoped Meta edit link.
+- The page showed Auto-sync on and the default-open campaign chat. Production
+  readiness reported database up. No campaign was created, edited, activated,
+  paused or deleted and no subscription/permission was changed.
+
 ## Reference
 
 - [Meta's maintained AdCreative API parameter definitions](https://github.com/facebook/facebook-python-business-sdk/blob/main/facebook_business/adobjects/adcreative.py)
