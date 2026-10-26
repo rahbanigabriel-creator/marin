@@ -10,6 +10,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
+    "test": "node scripts/test.mjs",
     "rag:demo": "node --conditions=react-server --import tsx src/lib/rag/__demo__/retrieve-demo.mts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
