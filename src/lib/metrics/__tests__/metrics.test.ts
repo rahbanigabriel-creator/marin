@@ -21,7 +21,7 @@ import type { CanonicalMetric } from "../../connectors/types";
  * Isolated metrics-layer tests. No live database: the prisma read/write seams
  * are stubbed (MetricFactQuery / MetricUpsert / count override), so the
  * aggregation, serialization, and idempotent-upsert logic is exercised in
- * pure-function form. Run: `npx tsx --test src/lib/metrics/__tests__/metrics.test.ts`.
+ * pure-function form. Run with the other regression tests: `npm test`.
  *
  * DATABASE_URL is forced-set here ONLY to exercise the gated count/ingest paths;
  * no connection is ever opened because the prisma calls are stubbed out.

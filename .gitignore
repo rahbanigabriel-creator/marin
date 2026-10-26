@@ -38,3 +38,7 @@ next-env.d.ts
 
 # vercel / render
 .vercel
+
+# generated test evidence
+/test-results/
+/coverage/
